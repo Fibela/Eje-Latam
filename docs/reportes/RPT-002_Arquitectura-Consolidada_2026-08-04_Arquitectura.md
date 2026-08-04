@@ -445,8 +445,9 @@ Todo reporte incluye tabla de metadatos, sección de trazabilidad indicando qué
 | PA-08 | Presupuesto de ancho de banda del relevo DERP | 🟡 Abierto — `RED-02` |
 | PA-09 | Banco de pruebas de switch para contención | 🟡 Abierto — pruebas de `AGT-01` |
 | PA-10 | Fabricantes de switch para conectores de Fase 1 | 🟡 Abierto — alcance comercial |
-| PA-11 | Mecanismo único del guardián de inconclusos | 🟡 Abierto — RPT-003 §9.5 |
-| PA-12 | Gestor de paquetes y empaquetador de `eje-vision` | 🟡 Abierto — RPT-004 §10 |
+| ~~PA-11~~ | ~~Mecanismo único del guardián de inconclusos~~ | ✅ Cerrado 4-ago-2026 — `cargo xtask verificar`, RPT-003 §9.5 |
+| PA-12 | Empaquetador de `eje-vision` | 🟡 Abierto — RPT-004 §10 |
+| PA-15 | `CON-SIM` deshabilitado durante incidente activo | 🟡 Abierto — RPT-004 §10 |
 | PA-13 | Biblioteca de componentes de la capa base y su licencia | 🟡 Abierto — RPT-004 §10 |
 | PA-14 | Cadena de firma del paquete empresarial | 🟡 Abierto — RPT-004 §10 |
 

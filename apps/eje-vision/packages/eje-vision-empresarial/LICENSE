@@ -1,0 +1,82 @@
+LICENCIA PROPIETARIA PREMOSCORP
+Eje-Vision — Capa Empresarial
+Version 1.0 — 4 de agosto de 2026
+
+Copyright (c) 2026 PremosCorp. Todos los derechos reservados.
+
+------------------------------------------------------------------------------
+1. AMBITO
+------------------------------------------------------------------------------
+
+Esta licencia cubre el paquete "@eje/vision-empresarial" y su contenido:
+VIS-02 (Tablero Directivo), VIS-05 (Mapa de Calor Regional) y CON-SIM (Consola
+de Simulacion).
+
+NO cubre los componentes del mecanismo de Eje-Latam, que se distribuyen bajo
+Apache License 2.0 conforme a la frontera ratificada en RPT-003 §2.7:
+eje-agente, guardian-cc, motor-pqc, eje-almacen, boveda, eje-red y
+@eje/vision-base.
+
+------------------------------------------------------------------------------
+2. CONCESION
+------------------------------------------------------------------------------
+
+Sujeto a una suscripcion vigente, PremosCorp concede al Licenciatario un derecho
+no exclusivo, intransferible y revocable a instalar y ejecutar este paquete en
+los nodos cubiertos por dicha suscripcion.
+
+------------------------------------------------------------------------------
+3. RESTRICCIONES
+------------------------------------------------------------------------------
+
+Sin autorizacion previa y por escrito de PremosCorp, el Licenciatario no podra:
+
+  a) Redistribuir, sublicenciar, vender ni ceder este paquete a terceros.
+  b) Incorporar este codigo, total o parcialmente, en obras derivadas
+     distribuidas fuera de su organizacion.
+  c) Retirar o alterar los avisos de titularidad.
+  d) Alterar o eludir la verificacion de firma del paquete.
+
+------------------------------------------------------------------------------
+4. AUSENCIA DE OFUSCACION — DECLARACION EXPRESA
+------------------------------------------------------------------------------
+
+PremosCorp declara expresamente que este paquete se distribuye como codigo
+JavaScript legible dentro de una aplicacion Electron. El formato de empaquetado
+asar no constituye cifrado.
+
+En consecuencia, la proteccion de este paquete es JURIDICA, no tecnica. El
+Licenciatario puede inspeccionar el codigo; lo que esta licencia restringe es su
+redistribucion y su uso fuera del alcance concedido.
+
+Esta declaracion es deliberada (RPT-004 §4). Su proposito es que ningun equipo
+asuma que este paquete oculta informacion, y que en consecuencia no se coloquen
+aqui secretos, credenciales, umbrales de deteccion ni logica cuya divulgacion
+resulte perjudicial.
+
+------------------------------------------------------------------------------
+5. FUNCIONES DE SEGURIDAD
+------------------------------------------------------------------------------
+
+Conforme al principio establecido en RPT-003 §3.1, ninguna condicion comercial
+derivada de esta licencia degrada funcion de seguridad alguna.
+
+La expiracion de la suscripcion no desactiva deteccion ni contencion, y no
+impide la carga de este modulo si fue licenciado con anterioridad. Durante un
+incidente activo, VIS-02 opera sin restriccion con independencia del estado de
+la suscripcion.
+
+------------------------------------------------------------------------------
+6. GARANTIA Y RESPONSABILIDAD
+------------------------------------------------------------------------------
+
+Este paquete se proporciona "TAL CUAL", sin garantias de ningun tipo, expresas
+o implicitas. En la maxima medida permitida por la ley aplicable, PremosCorp no
+respondera por danos indirectos, incidentales o consecuentes derivados del uso
+de este paquete.
+
+------------------------------------------------------------------------------
+7. CONTACTO
+------------------------------------------------------------------------------
+
+PremosCorp — https://premoscorp.com

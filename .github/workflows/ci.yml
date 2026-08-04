@@ -59,10 +59,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # El guardian vive en el crate `xtask`, no en un script de shell: corre
+      # identico en Windows, Linux y CI, y se prueba con `cargo test`.
+      # Sus propias pruebas se ejecutan en el job `pruebas` del workspace.
       - name: Bloquear todo!, mocks y endpoints sin implementar
+        run: cargo xtask verificar crates
+
+      # Un guardian que nunca falla no sirve. Se comprueba que detecta una
+      # violacion deliberada antes de confiar en su veredicto.
+      - name: El guardian detecta violaciones reales
         run: |
-          chmod +x scripts/verificar-inconclusos.sh
-          ./scripts/verificar-inconclusos.sh crates
+          mkdir -p /tmp/comprobacion/falso/src
+          printf 'pub fn f() { todo!() }\n' > /tmp/comprobacion/falso/src/lib.rs
+          if cargo xtask verificar /tmp/comprobacion; then
+            echo "::error::El guardian NO detecto un todo!() deliberado. No protege nada."
+            exit 1
+          fi
+          echo "El guardian detecta la violacion deliberada."
 
   secretos:
     name: Secretos expuestos

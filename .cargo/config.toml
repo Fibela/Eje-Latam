@@ -1,0 +1,7 @@
+# Alias del patron xtask.
+#
+# Permite `cargo xtask verificar` desde cualquier sistema operativo, sin
+# depender de bash ni de PowerShell (RPT-003 §9.5, PA-11).
+
+[alias]
+xtask = "run --quiet --package xtask --"

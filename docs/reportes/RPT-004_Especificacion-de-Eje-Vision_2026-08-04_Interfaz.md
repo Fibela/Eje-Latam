@@ -237,7 +237,8 @@ La alerta de Bóveda en `VIS-04` no figuraba en la propuesta y es un requisito y
 | ID | Punto | Bloquea |
 |---|---|---|
 | **PA-11** | Mecanismo único del guardián de inconclusos. El `.ps1` propuesto tiene falso negativo silencioso; ver RPT-003 §9.5 | Adopción del guardián en local |
-| **PA-12** | Gestor de paquetes y empaquetador: pnpm + Vite, o alternativa | Primer commit de `eje-vision` |
+| **PA-12** | Empaquetador de la interfaz (Vite u otro). El andamiaje usa **npm workspaces**, que no requiere herramienta adicional; migrar a pnpm es un cambio de un fichero | Empaquetado de la interfaz |
+| **PA-15** | `CON-SIM` deshabilitado durante incidente activo. Un simulacro durante un incidente real es peligroso con independencia de la licencia. **Propuesta del andamiaje, requiere ratificación** | Matriz de `estado-licencia.ts` |
 | **PA-13** | Biblioteca de componentes de la capa base, y su licencia | Diseño de `componentes/` |
 | **PA-14** | Cadena de firma del paquete empresarial: ¿reutiliza la de licencias de RPT-003 §3 o es independiente? | Diseño de `cargador-firmado.ts` |
 

@@ -1,0 +1,8 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/eje-vision-base" },
+    { "path": "./packages/eje-vision-empresarial" },
+    { "path": "./proceso-principal" }
+  ]
+}

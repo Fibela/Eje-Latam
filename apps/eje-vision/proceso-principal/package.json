@@ -1,0 +1,13 @@
+{
+  "name": "@eje/vision-proceso-principal",
+  "version": "0.1.0",
+  "description": "Proceso principal de Electron. Guardian del puente IPC y cargador firmado de modulos.",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/indice.js",
+  "types": "./dist/indice.d.ts",
+  "scripts": {
+    "compilar": "tsc --build"
+  }
+}

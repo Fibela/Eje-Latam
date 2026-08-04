@@ -35,8 +35,11 @@ Eje-Latam/
 │   └── eje-red/        Capa A (LAN) y Capa B (P2P / NAT)
 ├── apps/
 │   └── eje-vision/     Interfaz TypeScript · React · Electron
-├── docs/reportes/      Documentación canónica del proyecto
-└── scripts/            Verificaciones de calidad
+│       ├── packages/eje-vision-base/          Apache-2.0 · VIS-01, VIS-03, VIS-04
+│       ├── packages/eje-vision-empresarial/   Propietario · VIS-02, VIS-05, CON-SIM
+│       └── proceso-principal/                 Apache-2.0 · puente IPC y carga firmada
+├── xtask/              Herramientas de desarrollo (guardián de inconclusos)
+└── docs/reportes/      Documentación canónica del proyecto
 ```
 
 ## Licenciamiento — Open-Core
@@ -83,12 +86,25 @@ cargo fmt --all --check                      # Formato
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-features        # Pruebas
 cargo deny check                             # Licencias, avisos, fuentes
+cargo xtask verificar crates                 # todo!, mocks, endpoints inconclusos
 gitleaks detect --config .gitleaks.toml      # Secretos en código e historia
-./scripts/verificar-inconclusos.sh crates    # todo!, mocks, endpoints inconclusos
 ```
 
 `cargo deny check licenses` es el control que sostiene la frontera open-core:
 impide que una dependencia copyleft contamine un crate Apache-2.0.
+
+`cargo xtask` corre idéntico en Windows, Linux y CI, sin bash ni PowerShell. El
+guardián vive en el crate `xtask` y **se prueba con `cargo test`** — un script
+suelto no puede probarse, y dos guardianes de este proyecto ya pasaron en verde
+con la violación presente antes de que una prueba negativa los delatara.
+
+### Eje-Visión
+
+```bash
+cd apps/eje-vision
+npm ci
+npm run verificar    # tipos, frontera, prueba negativa de la frontera y pruebas
+```
 
 ## Restricciones que no son negociables
 

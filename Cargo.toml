@@ -7,6 +7,7 @@ members = [
     "crates/eje-almacen",
     "crates/boveda",
     "crates/eje-red",
+    "xtask",
 ]
 
 # Frontera open-core ratificada en RPT-003 §2.7.

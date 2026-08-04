@@ -1,0 +1,28 @@
+{
+  "name": "eje-vision",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Eje-Vision. Interfaz multiplataforma de Eje-Latam.",
+  "license": "SEE LICENSE IN packages/*/LICENSE",
+  "repository": "https://github.com/Fibela/Eje-Latam",
+  "workspaces": [
+    "packages/eje-vision-base",
+    "packages/eje-vision-empresarial",
+    "proceso-principal"
+  ],
+  "scripts": {
+    "compilar": "tsc --build",
+    "limpiar": "tsc --build --clean",
+    "verificar:tipos": "tsc --build",
+    "verificar:frontera": "depcruise packages/eje-vision-base/src packages/eje-vision-empresarial/src proceso-principal/src --config .dependency-cruiser.cjs",
+    "verificar:frontera:negativa": "node scripts/probar-frontera.mjs",
+    "verificar:licencias": "license-checker --production --onlyAllow \"Apache-2.0;MIT;BSD-2-Clause;BSD-3-Clause;ISC;0BSD;CC0-1.0;Unlicense\" --start packages/eje-vision-base",
+    "probar": "npm run compilar && node --test \"proceso-principal/dist/pruebas/**/*.js\"",
+    "verificar": "npm run verificar:tipos && npm run verificar:frontera && npm run verificar:frontera:negativa && npm run probar"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "dependency-cruiser": "^16.0.0",
+    "typescript": "^5.7.0"
+  }
+}

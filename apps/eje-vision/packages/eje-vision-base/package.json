@@ -1,0 +1,14 @@
+{
+  "name": "@eje/vision-base",
+  "version": "0.1.0",
+  "description": "Eje-Vision, capa base. VIS-01, VIS-03 y VIS-04.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/indice.js",
+  "types": "./dist/indice.d.ts",
+  "files": ["dist", "LICENSE"],
+  "scripts": {
+    "compilar": "tsc --build"
+  },
+  "comentarioFrontera": "Este paquete es Apache-2.0 y NO puede depender de @eje/vision-empresarial ni de builtins de Node. Verificado por dependency-cruiser en CI (RPT-004 §7)."
+}

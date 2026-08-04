@@ -1,0 +1,88 @@
+name: CI Eje-Vision
+
+# Verificaciones de la interfaz. RPT-004 §7.
+
+on:
+  push:
+    branches: [Principal]
+    paths: ["apps/eje-vision/**", ".github/workflows/ci-vision.yml"]
+  pull_request:
+    branches: [Principal]
+    paths: ["apps/eje-vision/**", ".github/workflows/ci-vision.yml"]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: apps/eje-vision
+
+jobs:
+  tipos-y-pruebas:
+    name: Tipos y pruebas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/eje-vision/package-lock.json
+      - run: npm ci
+      - name: Comprobacion de tipos
+        run: npm run verificar:tipos
+      - name: Pruebas
+        run: npm run probar
+
+  frontera:
+    name: Frontera open-core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/eje-vision/package-lock.json
+      - run: npm ci
+      - run: npm run compilar
+
+      - name: La capa base no importa codigo propietario
+        run: npm run verificar:frontera
+
+      # Un guardian que nunca falla no sirve. Esta prueba introduce violaciones
+      # deliberadas y exige que sean detectadas. Una version anterior de
+      # .dependency-cruiser.cjs excluia `dist` del grafo y la regla critica
+      # quedaba inerte: pasaba en verde con la violacion presente.
+      - name: El guardian de frontera detecta violaciones reales
+        run: npm run verificar:frontera:negativa
+
+  licencias:
+    name: Licencias de dependencias
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/eje-vision/package-lock.json
+      - run: npm ci
+
+      # Equivalente npm de `cargo deny check licenses`. El ecosistema npm
+      # contiene paquetes GPL y AGPL; uno de ellos en la capa base contaminaria
+      # el paquete Apache-2.0 (RPT-004 §7).
+      - name: Sin dependencias copyleft en la capa base
+        run: npx license-checker-rseidelsohn --production --onlyAllow "Apache-2.0;MIT;BSD-2-Clause;BSD-3-Clause;ISC;0BSD;CC0-1.0;Unlicense;BlueOak-1.0.0;Python-2.0" --start packages/eje-vision-base
+
+  secretos:
+    name: Secretos expuestos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

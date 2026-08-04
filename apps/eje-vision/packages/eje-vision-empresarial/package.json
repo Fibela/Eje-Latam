@@ -1,0 +1,15 @@
+{
+  "name": "@eje/vision-empresarial",
+  "version": "0.1.0",
+  "description": "Eje-Vision, capa empresarial. VIS-02, VIS-05 y CON-SIM.",
+  "license": "SEE LICENSE IN LICENSE",
+  "private": true,
+  "type": "module",
+  "main": "./dist/indice.js",
+  "types": "./dist/indice.d.ts",
+  "files": ["dist", "LICENSE"],
+  "scripts": {
+    "compilar": "tsc --build"
+  },
+  "comentarioFrontera": "Licencia propietaria PremosCorp. Puede depender de @eje/vision-base; la dirección inversa esta prohibida y se verifica en CI. ADVERTENCIA: este codigo es JavaScript dentro de un Electron y es legible por cualquier cliente que lo instale (RPT-004 §4). Ningun secreto puede residir aqui."
+}

@@ -321,8 +321,9 @@ Ejecución obligatoria en cada *push* y *pull request*:
 | Licencias y dependencias prohibidas | `cargo deny` | **Crítico para la frontera open-core: impide que una dependencia copyleft contamine un crate Apache 2.0** |
 | Análisis estático | `cargo clippy -D warnings` | Antipatrones, `unwrap` en ruta de producción |
 | Código inseguro | `cargo geiger` + MIRI | Todo bloque `unsafe` requiere justificación escrita en comentario |
-| **Implementaciones inconclusas** | Verificación propia en CI | **`todo!()`, `unimplemented!()`, `panic!("TODO")` y endpoints sin implementar bloquean el build de release** |
-| Datos simulados en producción | Verificación propia en CI | Detecta *mocks*, datos de ejemplo y credenciales de prueba fuera de `#[cfg(test)]` |
+| **Implementaciones inconclusas** | `cargo xtask verificar` | **`todo!()`, `unimplemented!()`, `panic!("TODO")` y endpoints sin implementar bloquean el build de release** |
+| Datos simulados en producción | `cargo xtask verificar` | Detecta *mocks*, datos de ejemplo y credenciales de prueba fuera de `#[cfg(test)]` |
+| **El guardián sigue vivo** | Prueba negativa en CI | Presenta una violación deliberada y exige que el guardián falle. Ver §9.5 |
 | Formato | `cargo fmt --check` | Consistencia |
 | Inventario de componentes | `cyclonedx` | SBOM firmado por cada release |
 
@@ -368,7 +369,24 @@ if ($Linea -match "#\[cfg\(test\)\]") { break }
 
 Además omite la mitad de los patrones de §9.4: no detecta `mock`, `dummy`, `stub`, `fake`, `panic!("TODO")`, `127.0.0.1`, `example.com` ni `NotImplemented`. Dos guardianes con reglas distintas hacen que lo que pasa en local falle en CI, y el equipo termina desconfiando de la CI.
 
-**No se adopta el `.ps1` en su forma actual.** El mecanismo definitivo queda en **PA-11**. Recomendación técnica: implementación única como `cargo xtask verificar` — idéntica en Windows, Linux y CI, sin dependencia de intérprete de shell, y **verificable con `cargo test`**, requisito que un script suelto no puede cumplir y que ya demostró ser necesario.
+**No se adopta el `.ps1` en su forma actual.**
+
+#### Resolución de PA-11 — `cargo xtask verificar` *(cerrado 4-ago-2026)*
+
+Mecanismo único: el guardián reside en el crate **`xtask`** del propio workspace.
+
+| Propiedad | Consecuencia |
+|---|---|
+| Corre en Windows, Linux y CI con la misma invocación | No hay guardianes divergentes que hagan desconfiar de la CI |
+| No depende de bash ni de PowerShell | Se elimina la dependencia de Git Bash para desarrollar en Windows |
+| **Se prueba con `cargo test`** | Trece pruebas, entre ellas el caso exacto que rompía el `.ps1` |
+| Es un crate más del workspace | Sin herramientas ni toolchains adicionales; `publish = false` lo mantiene fuera del producto |
+
+**Exclusión de bloques de prueba consciente del léxico.** El guardián cuenta llaves y **reanuda** el análisis al cerrar el bloque, ignorando las llaves que aparecen dentro de cadenas, cadenas crudas, literales de carácter y comentarios. Un contador ingenuo se equivoca ante `let s = "}";` dentro de un módulo de pruebas, y ese error reabre la exclusión antes de tiempo o la cierra tarde — en ambos casos en silencio.
+
+**Prueba negativa obligatoria en CI.** Antes de aceptar el veredicto del guardián, la CI le presenta un `todo!()` deliberado y exige que falle. Esta política nace de la experiencia directa: durante la construcción de esta plataforma **dos guardianes distintos pasaron en verde con la violación presente** — el `.ps1` por el `break`, y la configuración de dependency-cruiser de `eje-vision` por excluir `dist` del grafo. Ninguno se habría detectado sin provocarlos.
+
+`scripts/verificar-inconclusos.sh` queda retirado; se conserva como redirector para no fallar en silencio ante invocaciones antiguas.
 
 #### Integración en el flujo
 

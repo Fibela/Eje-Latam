@@ -1,0 +1,16 @@
+[package]
+name = "xtask"
+description = "Herramientas de desarrollo de Eje-Latam. No forma parte del producto distribuido."
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+regex = "1"
+
+[lints]
+workspace = true
