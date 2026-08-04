@@ -8,7 +8,9 @@
 | **Área designada** | Arquitectura |
 | **Entidad / Firma** | PremosCorp |
 | **Versión de arquitectura** | 2.0 (Soberanía Local — Opción 1A) |
-| **Estado** | Canónico |
+| **Estado** | Canónico — con enmiendas de RPT-003 |
+
+> **Enmiendas vigentes.** RPT-003 (Gobernanza, 4-ago-2026) modifica este documento en §5 (AGT-01, requisitos de firma en Windows), §7 (frontera open-core), §11 (áreas designadas) y §12 (puntos abiertos). Las secciones enmendadas lo señalan en su lugar.
 
 ## Trazabilidad
 
@@ -177,6 +179,7 @@ El esquema nuevo usa **prefijo por área**, lo que permite añadir módulos sin 
 | `VIS-03` | Lanzador GUI | `eje-vision` | 1.3 |
 | `VIS-04` | Panel Confianza Cero e Inventario Vivo | `eje-vision` | **M11 (rescatado)** |
 | `VIS-05` | Mapa de Calor Regional | `eje-vision` | **M10 / M12 (unificados)** |
+| `CON-SIM` | Consola de Simulación | `eje-vision` | **nuevo — RPT-004 §2.2**. Ordena y observa simulacros; el motor `SIM-01` permanece en `eje-agente` |
 | `NUC-01` | Correlación Regional Multiinquilino | `eje-nucleo` · F2 | M5 |
 | `NUC-02` | Simulador de Crisis Regional | `eje-nucleo` · F2 | M6 |
 | `NUC-03` | Hub de Transición Criptográfica | `eje-nucleo` · F2 | M7 |
@@ -192,13 +195,17 @@ El esquema nuevo usa **prefijo por área**, lo que permite añadir módulos sin 
 
 **Captura de tráfico.**
 
-| Plataforma | Mecanismo | Requisito |
+> ⚠️ **ENMENDADO por RPT-003 §5.** La versión original de esta tabla exigía atestación WHQL de Microsoft. **Era incorrecto:** WHQL solo aplica si se escribe un driver de kernel propio. Npcap se distribuye ya firmado por su fabricante, por lo que **WHQL queda fuera de la ruta crítica.**
+
+| Plataforma | Mecanismo de captura | Requisito real |
 |---|---|---|
-| Windows | Npcap OEM | Firma digital + atestación WHQL de Microsoft |
-| Linux | `CAP_NET_RAW` + sockets eBPF | Capacidad concedida, sin driver propio |
+| Windows | Npcap (ruta de referencia) | **Licencia Npcap OEM** para redistribuir + **certificado EV Code Signing** para el instalador propio. **Sin WHQL.** |
+| Linux | `AF_PACKET` + `PACKET_MMAP` (referencia)<br>eBPF/XDP (optimización) | `CAP_NET_RAW`; `CAP_BPF`/`CAP_PERFMON` solo para la ruta eBPF |
 | macOS | BPF (`/dev/bpf*`) | Perfil de permisos del sistema |
 
-> **Riesgo de cronograma:** la certificación WHQL y la licencia Npcap OEM son procesos con plazos externos no controlables. Deben iniciarse en paralelo al desarrollo, no al final.
+> **Kernels industriales antiguos (RPT-003 §5.3).** Los entornos OT operan con frecuencia sobre kernels 3.10–4.x donde eBPF/XDP no está disponible. `AF_PACKET` + `PACKET_MMAP` es la **ruta de captura de referencia** en Linux; eBPF es optimización cuando el kernel lo permita. Diseñar solo para eBPF excluye buena parte del parque industrial instalado.
+
+> **Riesgo de cronograma:** la licencia Npcap OEM (semanas) y el certificado EV Code Signing (1–3 semanas) tienen plazos externos. Deben iniciarse en paralelo al desarrollo.
 
 **Contención — política de aislamiento.**
 
@@ -322,12 +329,14 @@ Siendo un producto regional, el cumplimiento por jurisdicción es argumento come
 
 ## 7. Modelo de Negocio — Open-Core
 
-| Componente | Licencia |
-|---|---|
-| Núcleo de `eje-agente`, conectores de red básicos, motor de almacenamiento local, SDK de integración | **Apache 2.0** |
-| Simulador de crisis avanzado, módulos de guerra directiva, correlación regional, suscripción a firmas de Threat Intel | **Propietaria PremosCorp** |
+> ⚠️ **ENMENDADO por RPT-003 §2.** La frontera se **invirtió**: el criterio es *mecanismo vs. contenido*, no *núcleo vs. módulos*. `guardian-cc` y `motor-pqc` quedan **abiertos** — cerrarlos vaciaba el argumento de auditabilidad, y la criptografía de caja negra es descalificatoria en auditoría. El activo protegido pasa a ser la operación regional. Ver RPT-003 §2.5.
 
-> **Punto abierto (§9.4):** la frontera aún no es ejecutable. `guardian-cc` y `motor-pqc` viven dentro de `eje-agente`, declarado abierto; si ambos quedan bajo Apache 2.0, el diferenciador técnico completo es forkeable. Requiere decisión antes del primer *commit* de código.
+| Ámbito | Componentes | Licencia |
+|---|---|---|
+| **Mecanismo** | `eje-agente`, `guardian-cc`, `motor-pqc`, `eje-almacen` (incl. cadena Merkle), `boveda`, `eje-red`, SDK y esquemas | **Apache 2.0** |
+| **Contenido y operación** | Suscripción de Inteligencia Regional (firmas, IoC, reglas), `VIS-02`, `SIM-01`, `NUC-*`, conectores de contención certificados, soporte y cumplimiento por país | **Propietaria PremosCorp** |
+
+Fundamento: el código de inspección es una mercancía a tres años; las firmas regionales actualizadas cada semana no lo son. La **Suscripción de Inteligencia Regional** es la fuente principal de ingreso.
 
 ---
 
@@ -351,7 +360,7 @@ Siendo un producto regional, el cumplimiento por jurisdicción es argumento come
 | 14 | ML-KEM/ML-DSA atribuidos a cifrado en reposo | ✅ Corregido: AES-256-GCM + envoltura ML-KEM |
 | 15 | Base vectorial para hashes de IoC | ✅ Corregido: filtro de Bloom + tabla hash |
 | 16 | SQL manual destruía la cadena de custodia | ✅ Separado ALM-01 / ALM-02 |
-| 17 | Ausencia de driver de captura y privilegios | ✅ Especificado: Npcap/WHQL, CAP_NET_RAW, eBPF |
+| 17 | Ausencia de driver de captura y privilegios | ✅ Especificado: Npcap + EV Code Signing, `AF_PACKET`, eBPF. **WHQL descartado** (RPT-003 §5) |
 | 18 | Ausencia de modelo de amenaza del agente | ✅ Añadido AGT-07 |
 | 19 | "Telemetría anonimizada" | ✅ Corregido: seudonimización con sal por cliente |
 | 20 | Licencia y frontera comercial | 🟡 Modelo definido, frontera pendiente (§9.4) |
@@ -376,15 +385,15 @@ La Síntesis describe la Capa A como "autodescubrimiento P2P puro mediante mDNS 
 
 La Síntesis admite "IPC nativo / IPC de Electron **o WebSockets locales protegidos**". Un WebSocket local abre un puerto TCP en la máquina, accesible a cualquier proceso local y a cualquier página web que el usuario visite (ataques de *DNS rebinding* y de origen cruzado contra servicios en `localhost` son un vector conocido y explotado). Se **elimina** la opción WebSocket. Único transporte autorizado: socket de dominio Unix con ACL, o named pipe de Windows con descriptor de seguridad.
 
-### 9.4 · Frontera open-core no ejecutable — DECISIÓN PENDIENTE
+### 9.4 · Frontera open-core no ejecutable — ✅ RESUELTO EN RPT-003 §2
 
-Ver §7. `guardian-cc` y `motor-pqc` residen dentro de `eje-agente`, declarado Apache 2.0. Sin una separación explícita de repositorios o módulos, el diferenciador técnico central queda forkeable por cualquier competidor. **Bloquea el primer commit de código.**
+Resuelto invirtiendo la frontera. Se descartó además el mecanismo propuesto de "enlace dinámico de crates privados": **Rust carece de ABI estable**, y la alternativa vía FFI de C introduciría `unsafe` justo en la superficie que procesa tráfico hostil.
 
-### 9.5 · Validación de licencias fuera de línea — DECISIÓN PENDIENTE
+### 9.5 · Validación de licencias fuera de línea — ✅ RESUELTO EN RPT-003 §3
 
-`NUC-04` (Gestor de Claves y Licencias) reside en Fase 2, en la nube. Pero la premisa central del producto es operar **indefinidamente sin conectividad**. Ambas cosas no son compatibles sin un diseño explícito: se requieren tokens de licencia firmados fuera de línea, con vigencia y período de gracia definidos, y una política declarada de qué ocurre al expirar en un hospital aislado. La respuesta correcta casi con certeza es **degradar funcionalidades no críticas y nunca desactivar la detección**, pero debe decidirse formalmente.
+Token Ed25519 con caducidad. Principio elevado a regla de producto: **ninguna condición comercial degrada jamás una función de seguridad.** Durante un incidente activo, `VIS-02` opera completo aunque la licencia esté vencida.
 
-Además, "Zero-Knowledge" se usaba en el corpus anterior de forma imprecisa. Si no hay una prueba de conocimiento cero real, el término debe retirarse.
+"Zero-Knowledge" retirado (RPT-003 §4), con la advertencia de que *Zero-Trust* **no es su reemplazo** — son conceptos distintos.
 
 ### 9.6 · Dependencia no declarada de VIS-05 — SEÑALADO
 
@@ -412,22 +421,34 @@ El Mapa de Calor Regional compara la postura del cliente "contra el promedio del
 
 **Ubicación:** `docs/reportes/`
 
-**Áreas designadas:** `Arquitectura` · `Agente` · `Red` · `Almacenamiento` · `Interfaz` · `Seguridad` · `Cumplimiento` · `Producto`
+**Áreas designadas:** `Arquitectura` · `Agente` · `Red` · `Almacenamiento` · `Interfaz` · `Seguridad` · `Cumplimiento` · `Producto` · `Gobernanza` · `Calidad`
 
-Todo reporte incluye tabla de metadatos, sección de trazabilidad indicando qué documentos reemplaza, y estado (`Borrador` / `En revisión` / `Canónico` / `Obsoleto`).
+Todo reporte incluye tabla de metadatos, sección de trazabilidad indicando qué documentos reemplaza o enmienda, y estado (`Borrador` / `En revisión` / `Canónico` / `Obsoleto`).
+
+**Regla de mantenimiento (RPT-003 §9.1):** todo cambio funcional actualiza la documentación **en el mismo commit**. Un *pull request* que modifique comportamiento sin tocar `docs/` se rechaza.
 
 ---
 
 ## 12. Puntos Abiertos
 
-| ID | Punto | Bloquea |
+> ⚠️ **ENMENDADO.** PA-01 a PA-06 quedan cerrados en RPT-003 §10. Se conservan aquí con su estado para trazabilidad.
+
+| ID | Punto | Estado |
 |---|---|---|
-| PA-01 | Frontera open-core: ¿`guardian-cc` y `motor-pqc` abiertos o propietarios? | Primer commit de código |
-| PA-02 | Validación de licencias fuera de línea: vigencia, gracia, degradación | Diseño de `NUC-04` |
-| PA-03 | Retirar o justificar el término "Zero-Knowledge" | Material comercial |
-| PA-04 | Inicio de trámites Npcap OEM y atestación WHQL | Cronograma de `AGT-01` en Windows |
-| PA-05 | Modelo de credenciales delegadas de switch (SNMP/NETCONF/802.1X) | Diseño de contención |
-| PA-06 | Alojamiento del servidor STUN/DERP por defecto | Diseño de `RED-02` |
+| PA-01 | Frontera open-core | ✅ Resuelto y **ratificado en firme** — RPT-003 §2.7 |
+| PA-02 | Validación de licencias fuera de línea | ✅ Resuelto — RPT-003 §3 |
+| PA-03 | Término "Zero-Knowledge" | ✅ Resuelto — RPT-003 §4 |
+| PA-04 | Trámites de captura en Windows | ✅ Resuelto — RPT-003 §5. **WHQL fuera de ruta crítica** |
+| PA-05 | Credenciales delegadas de switch | ✅ Resuelto — RPT-003 §6. **No residen en ALM-01** |
+| PA-06 | Alojamiento del servidor STUN/DERP | ✅ Resuelto — RPT-003 §7 |
+| ~~PA-07~~ | ~~Ratificación de la frontera invertida~~ | ✅ Cerrado 4-ago-2026 — RPT-003 §2.7 |
+| PA-08 | Presupuesto de ancho de banda del relevo DERP | 🟡 Abierto — `RED-02` |
+| PA-09 | Banco de pruebas de switch para contención | 🟡 Abierto — pruebas de `AGT-01` |
+| PA-10 | Fabricantes de switch para conectores de Fase 1 | 🟡 Abierto — alcance comercial |
+| PA-11 | Mecanismo único del guardián de inconclusos | 🟡 Abierto — RPT-003 §9.5 |
+| PA-12 | Gestor de paquetes y empaquetador de `eje-vision` | 🟡 Abierto — RPT-004 §10 |
+| PA-13 | Biblioteca de componentes de la capa base y su licencia | 🟡 Abierto — RPT-004 §10 |
+| PA-14 | Cadena de firma del paquete empresarial | 🟡 Abierto — RPT-004 §10 |
 
 ---
 

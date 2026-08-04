@@ -1,0 +1,55 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/eje-agente",
+    "crates/guardian-cc",
+    "crates/motor-pqc",
+    "crates/eje-almacen",
+    "crates/boveda",
+    "crates/eje-red",
+]
+
+# Frontera open-core ratificada en RPT-003 §2.7.
+# Todos los crates de este workspace pertenecen al MECANISMO y son Apache-2.0.
+# El CONTENIDO y la OPERACION (Inteligencia Regional, VIS-02, SIM-01, NUC-*)
+# viven fuera de este workspace bajo licencia propietaria PremosCorp.
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/Fibela/Eje-Latam"
+authors = ["PremosCorp"]
+
+[workspace.dependencies]
+eje-almacen = { path = "crates/eje-almacen" }
+boveda = { path = "crates/boveda" }
+eje-red = { path = "crates/eje-red" }
+guardian-cc = { path = "crates/guardian-cc" }
+motor-pqc = { path = "crates/motor-pqc" }
+
+thiserror = "2"
+tracing = "0.1"
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+# RPT-003 §9.4: prohibido `unwrap` y `expect` en ruta de produccion.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+[profile.dev]
+opt-level = 0
+debug = true

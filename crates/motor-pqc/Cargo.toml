@@ -1,0 +1,15 @@
+[package]
+name = "motor-pqc"
+description = "Motor Poscuantico (AGT-02). Envoltorio hibrido ML-KEM / ML-DSA y cifrado AES-256-GCM en reposo."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true

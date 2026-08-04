@@ -1,0 +1,107 @@
+name: CI
+
+# Verificaciones obligatorias de RPT-003 §9.4.
+# Ninguna es opcional ni posponible.
+
+on:
+  push:
+    branches: [Principal]
+  pull_request:
+    branches: [Principal]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+permissions:
+  contents: read
+
+jobs:
+  formato:
+    name: Formato
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  analisis-estatico:
+    name: Analisis estatico
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy sin advertencias toleradas
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  pruebas:
+    name: Pruebas (${{ matrix.so }})
+    runs-on: ${{ matrix.so }}
+    strategy:
+      fail-fast: false
+      matrix:
+        so: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --all-features
+      - name: Compilacion de release
+        run: cargo build --workspace --release
+
+  inconclusos:
+    name: Implementaciones inconclusas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bloquear todo!, mocks y endpoints sin implementar
+        run: |
+          chmod +x scripts/verificar-inconclusos.sh
+          ./scripts/verificar-inconclusos.sh crates
+
+  secretos:
+    name: Secretos expuestos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Historia completa: un secreto borrado del arbol sigue en los commits.
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependencias:
+    name: Licencias y vulnerabilidades
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: cargo-deny — frontera open-core y avisos
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          # `licenses` es el control critico: impide que una dependencia copyleft
+          # contamine un crate Apache-2.0 (RPT-003 §2.7 y §9.4).
+          command: check advisories licenses bans sources
+
+  inventario:
+    name: SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Generar inventario de componentes
+        run: |
+          cargo install cargo-cyclonedx --locked
+          cargo cyclonedx --format json --all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: "**/*.cdx.json"
+          if-no-files-found: error

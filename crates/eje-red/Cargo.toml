@@ -1,0 +1,16 @@
+[package]
+name = "eje-red"
+description = "Eje-Red (RED-01/RED-02). Descubrimiento en LAN y conectividad P2P con atravesamiento de NAT."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+guardian-cc.workspace = true
+
+[lints]
+workspace = true

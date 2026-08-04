@@ -1,0 +1,16 @@
+[package]
+name = "guardian-cc"
+description = "Guardian de Confianza Cero (AGT-01). Inspeccion pasiva L2/L3 y contencion de nodos IoT/OT."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

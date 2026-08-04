@@ -1,0 +1,15 @@
+[package]
+name = "eje-almacen"
+description = "Eje-Almacen (ALM-01/ALM-02). Registro de evidencia solo-anexado con cadena Merkle y sandbox del analista."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true

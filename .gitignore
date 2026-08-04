@@ -1,0 +1,54 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# Node / eje-vision
+node_modules/
+dist/
+out/
+.vite/
+*.tsbuildinfo
+
+# Artefactos de empaquetado
+*.msi
+*.exe
+*.deb
+*.rpm
+*.pkg
+*.dmg
+*.AppImage
+
+# Secretos y material sensible — nunca deben llegar al repositorio.
+# La barrera real es gitleaks en pre-commit; esto es la segunda linea.
+*.pem
+*.key
+*.p12
+*.pfx
+.env
+.env.*
+!.env.ejemplo
+secretos.toml
+credenciales.toml
+
+# Bases de datos locales de desarrollo
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+/datos-locales/
+
+# Capturas de trafico: pueden contener datos personales de red (RPT-002 §6).
+*.pcap
+*.pcapng
+
+# SBOM generado
+**/*.cdx.json
+
+# Sistema operativo y editores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp

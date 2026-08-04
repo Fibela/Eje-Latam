@@ -1,0 +1,96 @@
+# cargo-deny — Frontera open-core de Eje-Latam
+#
+# Materializa la decision ratificada en RPT-003 §2.7 y la verificacion exigida en
+# RPT-003 §9.4: impedir que una dependencia copyleft contamine un crate Apache-2.0.
+#
+# Ejecutar:  cargo deny check
+
+[graph]
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "aarch64-unknown-linux-gnu" },
+    { triple = "x86_64-pc-windows-msvc" },
+    { triple = "x86_64-apple-darwin" },
+    { triple = "aarch64-apple-darwin" },
+]
+all-features = true
+
+# ---------------------------------------------------------------------------
+# Vulnerabilidades conocidas
+# ---------------------------------------------------------------------------
+[advisories]
+version = 2
+yanked = "deny"
+# Toda excepcion requiere justificacion escrita y fecha de revision.
+ignore = []
+
+# ---------------------------------------------------------------------------
+# Licencias — el control critico de la frontera open-core
+# ---------------------------------------------------------------------------
+#
+# Solo licencias permisivas compatibles con la redistribucion Apache-2.0.
+#
+# NO se permiten, y su aparicion debe romper el build:
+#   GPL-2.0, GPL-3.0, AGPL-3.0, LGPL-*  -> copyleft fuerte o de enlace
+#   SSPL-1.0, BUSL-1.1, Elastic-2.0     -> licencias fuente disponible, no libres
+#
+# MPL-2.0 queda deliberadamente FUERA de la lista permitida. Es copyleft de
+# ambito de fichero y en la practica suele ser aceptable, pero incorporarlo
+# exige una excepcion documentada en un reporte, no una decision silenciosa de
+# quien anade la dependencia.
+[licenses]
+version = 2
+confidence-threshold = 0.93
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "Unlicense",
+]
+
+# Excepciones por crate concreto. Deben citar el reporte que las autoriza.
+exceptions = []
+
+[[licenses.clarify]]
+crate = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+# ---------------------------------------------------------------------------
+# Dependencias prohibidas y duplicados
+# ---------------------------------------------------------------------------
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+
+# Crates prohibidos en la ruta de produccion.
+deny = [
+    # Generadores de aleatoriedad no criptograficos: prohibidos en un producto
+    # de seguridad, donde el uso accidental en material de clave es catastrofico.
+    { crate = "rand_core", wrappers = ["rand"], reason = "usar solo a traves de rand con backend criptografico" },
+]
+
+# `openssl-sys` obliga a enlazar OpenSSL del sistema y complica la reproducibilidad
+# del build y el SBOM. Se prefiere rustls.
+skip = []
+skip-tree = []
+
+# ---------------------------------------------------------------------------
+# Origen de las dependencias
+# ---------------------------------------------------------------------------
+#
+# Solo crates.io. Una dependencia git sin fijar constituye un riesgo de cadena de
+# suministro: su contenido puede cambiar bajo el mismo identificador.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

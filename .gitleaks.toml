@@ -1,0 +1,52 @@
+# gitleaks — Deteccion de secretos en codigo e historia
+#
+# RPT-003 §9.4. Se ejecuta en gancho de pre-commit y en CI sobre la historia
+# completa. Un secreto en la historia de Git es permanente aunque se borre del
+# arbol de trabajo.
+
+title = "Eje-Latam"
+
+[extend]
+useDefault = true
+
+# ---------------------------------------------------------------------------
+# Reglas propias del dominio
+# ---------------------------------------------------------------------------
+
+[[rules]]
+id = "eje-credencial-switch"
+description = "Credencial de switch en texto plano (RPT-003 §6: prohibido fuera del almacen de secretos del SO)"
+regex = '''(?i)(snmp[_-]?(v3)?[_-]?(pass|priv|auth)|netconf[_-]?(pass|key)|enable[_-]?secret)\s*[:=]\s*['"][^'"]{4,}['"]'''
+tags = ["credencial", "ot", "switch"]
+
+[[rules]]
+id = "eje-comunidad-snmp"
+description = "Cadena de comunidad SNMPv1/v2c: prohibida para contencion (RPT-003 §6.4)"
+regex = '''(?i)(community|comunidad)[_-]?(string|snmp)?\s*[:=]\s*['"][^'"]{3,}['"]'''
+tags = ["credencial", "snmp"]
+
+[[rules]]
+id = "eje-clave-privada-licencia"
+description = "Clave privada Ed25519 de firma de licencias (RPT-003 §3): nunca en el repositorio"
+regex = '''(?i)(licencia|license)[_-]?(priv|private|signing)[_-]?key\s*[:=]\s*['"][A-Za-z0-9+/=]{32,}['"]'''
+tags = ["clave", "licencia"]
+
+[[rules]]
+id = "eje-material-clave-pqc"
+description = "Material de clave poscuantica embebido en el codigo"
+regex = '''(?i)(ml[_-]?kem|ml[_-]?dsa|kyber|dilithium)[_-]?(secret|priv|private)[_-]?key\s*[:=]\s*['"][A-Za-z0-9+/=]{32,}['"]'''
+tags = ["clave", "pqc"]
+
+# ---------------------------------------------------------------------------
+# Exclusiones
+# ---------------------------------------------------------------------------
+#
+# Los vectores oficiales del NIST (ACVP) contienen material de clave por diseno y
+# son publicos. Se excluyen por ruta, nunca por desactivar la regla.
+
+[allowlist]
+description = "Vectores de prueba publicos y documentacion"
+paths = [
+    '''crates/motor-pqc/vectores-acvp/.*''',
+    '''docs/reportes/.*\.md''',
+]
