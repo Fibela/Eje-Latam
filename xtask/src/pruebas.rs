@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use crate::exclusion::lineas_de_prueba;
-use crate::guardian::{analizar, comprobaciones, Hallazgo};
+use crate::guardian::{Hallazgo, analizar, comprobaciones};
 
 fn etiquetas(fuente: &str) -> Vec<&'static str> {
     let comprobaciones = comprobaciones().unwrap_or_else(|_| Vec::new());

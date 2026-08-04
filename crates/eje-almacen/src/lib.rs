@@ -30,6 +30,19 @@
 
 #![forbid(unsafe_code)]
 
+pub mod cadena;
+pub mod esquema;
+pub mod merkle;
+pub mod resumen;
+
+#[cfg(test)]
+mod pruebas;
+
+pub use cadena::{Asiento, RegistroEvidencia};
+pub use esquema::{ClaseEvento, DDL_EVIDENCIA, DDL_SANDBOX};
+pub use merkle::{PruebaInclusion, Sello};
+pub use resumen::Resumen;
+
 use thiserror::Error;
 
 /// Errores del almacen.
@@ -121,35 +134,5 @@ pub const fn autorizar(base: BaseDestino, operacion: ClaseOperacion) -> Result<(
                 })
             }
         },
-    }
-}
-
-#[cfg(test)]
-mod pruebas {
-    use super::*;
-
-    #[test]
-    fn evidencia_admite_consulta_y_anexado() {
-        assert!(autorizar(BaseDestino::RegistroEvidencia, ClaseOperacion::Consulta).is_ok());
-        assert!(autorizar(BaseDestino::RegistroEvidencia, ClaseOperacion::Anexado).is_ok());
-    }
-
-    #[test]
-    fn evidencia_rechaza_modificacion_y_ddl() {
-        let evidencia = BaseDestino::RegistroEvidencia;
-        assert!(autorizar(evidencia, ClaseOperacion::Modificacion).is_err());
-        assert!(autorizar(evidencia, ClaseOperacion::DefinicionEsquema).is_err());
-    }
-
-    #[test]
-    fn sandbox_admite_todo() {
-        for operacion in [
-            ClaseOperacion::Consulta,
-            ClaseOperacion::Anexado,
-            ClaseOperacion::Modificacion,
-            ClaseOperacion::DefinicionEsquema,
-        ] {
-            assert!(autorizar(BaseDestino::SandboxAnalista, operacion).is_ok());
-        }
     }
 }

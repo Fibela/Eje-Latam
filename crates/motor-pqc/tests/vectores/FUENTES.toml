@@ -1,0 +1,65 @@
+# Procedencia de los vectores de prueba de motor-pqc.
+#
+# RPT-005 §4.3 y PA-17. Descargar con:  cargo xtask vectores
+#
+# En la primera ejecucion se escribe FUENTES.lock con el resumen SHA-256 de cada
+# fichero. En las siguientes se VERIFICA contra ese resumen. FUENTES.lock debe
+# versionarse en el repositorio: es lo que ancla el contenido y lo que hace
+# segura la exoneracion de gitleaks sobre este directorio.
+#
+# Sin anclaje, exonerar el directorio del escaneo de secretos seria un punto
+# ciego permanente.
+
+# ---------------------------------------------------------------------------
+# ACVP — vectores oficiales del NIST
+#
+# Comprueban que la implementacion CALCULA CORRECTAMENTE lo que debe calcular.
+# ---------------------------------------------------------------------------
+
+[[acvp]]
+nombre = "acvp_ml_kem_768_keygen.json"
+url = "https://raw.githubusercontent.com/usnistgov/ACVP-Server/master/gen-val/json-files/ML-KEM-keyGen-FIPS203/prompt.json"
+algoritmo = "ml-kem-768"
+
+[[acvp]]
+nombre = "acvp_ml_kem_768_encapdecap.json"
+url = "https://raw.githubusercontent.com/usnistgov/ACVP-Server/master/gen-val/json-files/ML-KEM-encapDecap-FIPS203/prompt.json"
+algoritmo = "ml-kem-768"
+
+[[acvp]]
+nombre = "acvp_ml_dsa_65_keygen.json"
+url = "https://raw.githubusercontent.com/usnistgov/ACVP-Server/master/gen-val/json-files/ML-DSA-keyGen-FIPS204/prompt.json"
+algoritmo = "ml-dsa-65"
+
+[[acvp]]
+nombre = "acvp_ml_dsa_65_sigver.json"
+url = "https://raw.githubusercontent.com/usnistgov/ACVP-Server/master/gen-val/json-files/ML-DSA-sigVer-FIPS204/prompt.json"
+algoritmo = "ml-dsa-65"
+
+# ---------------------------------------------------------------------------
+# Wycheproof — vectores adversarios
+#
+# Comprueban que la implementacion RECHAZA lo que debe rechazar. Sin estos,
+# CVE-2026-24850 (maleabilidad de firma en ML-DSA) habria pasado inadvertida:
+# el caso 18 de mldsa_44_verify_test.json esperaba `invalid` y obtenia `valid`.
+#
+# El fichero de ML-DSA-44 se incluye deliberadamente aunque el conjunto de
+# parametros elegido sea el 65: es el que contiene el caso concreto de la CVE y
+# sirve de prueba de regresion historica.
+# ---------------------------------------------------------------------------
+
+[[wycheproof]]
+nombre = "wycheproof_mlkem_768_test.json"
+url = "https://raw.githubusercontent.com/C2SP/wycheproof/master/testvectors_v1/mlkem_768_test.json"
+algoritmo = "ml-kem-768"
+
+[[wycheproof]]
+nombre = "wycheproof_mldsa_65_verify_test.json"
+url = "https://raw.githubusercontent.com/C2SP/wycheproof/master/testvectors_v1/mldsa_65_verify_test.json"
+algoritmo = "ml-dsa-65"
+
+[[wycheproof]]
+nombre = "wycheproof_mldsa_44_verify_test.json"
+url = "https://raw.githubusercontent.com/C2SP/wycheproof/master/testvectors_v1/mldsa_44_verify_test.json"
+algoritmo = "ml-dsa-44"
+motivo = "contiene el caso 18 de CVE-2026-24850: regresion historica"

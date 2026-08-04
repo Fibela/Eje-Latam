@@ -24,6 +24,16 @@
 
 #![forbid(unsafe_code)]
 
+pub mod combinador;
+pub mod conformidad;
+pub mod firma_hibrida;
+pub mod kem_hibrido;
+pub mod reposo;
+pub mod secreto;
+
+#[cfg(test)]
+mod pruebas;
+
 use thiserror::Error;
 
 /// Errores del motor poscuantico.
@@ -43,6 +53,14 @@ pub enum ErrorPqc {
     /// El descifrado autenticado no supero la comprobacion de integridad.
     #[error("fallo de integridad en descifrado autenticado")]
     IntegridadFallida,
+
+    /// La funcion de derivacion rechazo la longitud solicitada.
+    #[error("derivacion de clave fallida")]
+    DerivacionFallida,
+
+    /// El cifrado autenticado no pudo completarse.
+    #[error("cifrado autenticado fallido")]
+    CifradoFallido,
 }
 
 /// Mecanismo de encapsulado de clave resistente a computacion cuantica.
@@ -86,36 +104,4 @@ pub trait CifradoEnReposo {
 
     /// Descifra y verifica la integridad del texto cifrado.
     fn descifrar(&self, clave: &[u8], nonce: &[u8], cifrado: &[u8]) -> Result<Vec<u8>, ErrorPqc>;
-}
-
-/// Estado de conformidad del motor frente a los vectores oficiales del NIST.
-///
-/// RPT-003 §9.2 exige vectores ACVP para ML-KEM y ML-DSA antes de considerar
-/// verificable cualquier implementacion. Este tipo permite que la CI y el
-/// arranque del agente expongan ese estado.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConformidadAcvp {
-    /// Los vectores oficiales se ejecutaron y pasaron.
-    Verificado,
-    /// No se han ejecutado vectores oficiales contra esta implementacion.
-    NoVerificado,
-}
-
-impl ConformidadAcvp {
-    /// Indica si la implementacion puede considerarse apta para produccion.
-    #[must_use]
-    pub const fn apto_para_produccion(self) -> bool {
-        matches!(self, Self::Verificado)
-    }
-}
-
-#[cfg(test)]
-mod pruebas {
-    use super::*;
-
-    #[test]
-    fn sin_vectores_acvp_no_es_apto_para_produccion() {
-        assert!(!ConformidadAcvp::NoVerificado.apto_para_produccion());
-        assert!(ConformidadAcvp::Verificado.apto_para_produccion());
-    }
 }

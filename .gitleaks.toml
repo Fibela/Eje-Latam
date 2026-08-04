@@ -46,7 +46,16 @@ tags = ["clave", "pqc"]
 
 [allowlist]
 description = "Vectores de prueba publicos y documentacion"
+# Ruta relativa estricta: solo el directorio de vectores, no el crate entero.
+# Los vectores ACVP y Wycheproof contienen material de clave por diseno y son
+# publicos; sin esta exoneracion, gitleaks los marcaria en cada ejecucion.
+#
+# ADVERTENCIA. Exonerar un directorio del escaneo de secretos crea un punto
+# ciego permanente: quien deje ahi una clave real no sera detectado. La
+# exoneracion solo es segura porque el contenido de ese directorio esta
+# ANCLADO POR RESUMEN en FUENTES.toml y verificado por `cargo xtask vectores`.
+# Si se retira el anclaje, hay que retirar tambien esta exoneracion.
 paths = [
-    '''crates/motor-pqc/vectores-acvp/.*''',
+    '''crates/motor-pqc/tests/vectores/.*\.json$''',
     '''docs/reportes/.*\.md''',
 ]

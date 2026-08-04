@@ -302,7 +302,8 @@ Todo cambio funcional actualiza la documentación **en el mismo commit**. Un *pu
 |---|---|
 | Cobertura mínima por crate | 70 % de líneas; **90 % en `motor-pqc` y `guardian-cc`** |
 | Analizadores de protocolo | **Pruebas basadas en propiedades** obligatorias (`proptest`). Los parsers de red son la superficie de ataque número uno de todo el producto. |
-| `motor-pqc` | **Vectores de prueba oficiales NIST (ACVP)** para ML-KEM y ML-DSA. Innegociable: una implementación poscuántica sin vectores oficiales no es verificable. |
+| `motor-pqc` | **Vectores oficiales NIST (ACVP) — obligatorios y no suficientes.** ⚠️ *Enmendado por RPT-005 §4.3:* deben ejecutarse además los vectores **Wycheproof**. ACVP prueba que se calcula lo correcto; Wycheproof prueba que se **rechaza** lo incorrecto. CVE-2026-24850 —maleabilidad de firma en ML-DSA— pasó ACVP y fue detectada solo por Wycheproof. |
+| `motor-pqc` | **Contraste diferencial** entre dos implementaciones independientes (RustCrypto y libcrux). Ninguna implementación PQC en Rust tiene auditoría independiente; el contraste es el sustituto asequible (RPT-005 §7.3). |
 | `ALM-01` | Pruebas de invariante de la cadena Merkle: toda mutación fuera de la ruta de anexado debe ser detectada |
 | Ruta de contención | **Prohibido el uso de mocks.** Banco de pruebas con switch físico o emulador de fabricante. Un mock que devuelve éxito valida el mock, no la contención. |
 

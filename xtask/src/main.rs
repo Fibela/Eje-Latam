@@ -11,6 +11,7 @@
 
 mod exclusion;
 mod guardian;
+mod vectores;
 
 #[cfg(test)]
 mod pruebas;
@@ -32,6 +33,7 @@ fn main() -> ExitCode {
             let ruta = argumentos.get(1).map(String::as_str).unwrap_or("crates");
             ejecutar_guardian(Path::new(ruta))
         }
+        "vectores" => ejecutar_vectores(),
         "ayuda" | "--help" | "-h" => {
             ayuda();
             ExitCode::SUCCESS
@@ -47,7 +49,26 @@ fn main() -> ExitCode {
 fn ayuda() {
     println!("Herramientas de desarrollo de Eje-Latam\n");
     println!("  cargo xtask verificar [ruta]   Guardian de inconclusos (por defecto: crates)");
+    println!("  cargo xtask vectores           Descarga y ancla los vectores ACVP y Wycheproof");
     println!("  cargo xtask ayuda              Muestra esta ayuda");
+}
+
+fn ejecutar_vectores() -> ExitCode {
+    let raiz = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap_or(Path::new("."));
+
+    println!("{GRIS}Sincronizando vectores de prueba de motor-pqc{FIN}");
+    match vectores::sincronizar(raiz) {
+        Ok(()) => {
+            println!("{VERDE}Vectores sincronizados y anclados.{FIN}");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{ROJO}{error}{FIN}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn ejecutar_guardian(ruta: &Path) -> ExitCode {

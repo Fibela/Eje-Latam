@@ -138,6 +138,7 @@ que se emita una enmienda.
 | [RPT-002](docs/reportes/RPT-002_Arquitectura-Consolidada_2026-08-04_Arquitectura.md) | Arquitectura consolidada v2.0 |
 | [RPT-003](docs/reportes/RPT-003_Gobernanza-y-Cierre-de-Puntos-Abiertos_2026-08-04_Gobernanza.md) | Gobernanza, licenciamiento y política de calidad |
 | [RPT-004](docs/reportes/RPT-004_Especificacion-de-Eje-Vision_2026-08-04_Interfaz.md) | Especificación de Eje-Visión y frontera de licencia en la interfaz |
+| [RPT-005](docs/reportes/RPT-005_Seleccion-de-Bibliotecas-Poscuanticas_2026-08-04_Seguridad.md) | Selección de bibliotecas ML-KEM y ML-DSA para `motor-pqc` |
 
 **Regla de mantenimiento:** todo cambio funcional actualiza la documentación en el
 mismo commit. Un *pull request* que modifique comportamiento sin tocar `docs/` se
