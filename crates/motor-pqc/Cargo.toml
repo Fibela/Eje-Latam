@@ -27,3 +27,4 @@ workspace = true
 libcrux-ml-kem = "0.0.10"
 libcrux-ml-dsa = "0.0.10"
 rand = "0.9"
+serde_json = "1"

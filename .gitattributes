@@ -1,0 +1,35 @@
+# Normalizacion de finales de linea.
+#
+# Sin este fichero, Git convierte LF a CRLF en la copia de trabajo de Windows.
+# Para la mayor parte del repositorio eso solo es ruido; para los vectores de
+# prueba es un fallo real.
+
+# Todo el repositorio se almacena y se extrae con LF.
+* text=auto eol=lf
+
+# ---------------------------------------------------------------------------
+# Vectores de prueba: SIN conversion de ningun tipo
+# ---------------------------------------------------------------------------
+#
+# FUENTES.lock ancla el resumen SHA-256 de cada fichero de vectores, y ese
+# anclaje es lo que hace segura la exoneracion de gitleaks sobre el directorio
+# (.gitleaks.toml).
+#
+# Una conversion de fin de linea cambia los bytes y por tanto el resumen. Sin
+# esta regla, un desarrollador en Windows y la CI en Linux calcularian resumenes
+# distintos sobre el mismo commit, y el anclaje fallaria en una de las dos
+# plataformas sin que ninguna estuviera equivocada.
+crates/motor-pqc/tests/vectores/*.json -text
+crates/motor-pqc/tests/vectores/FUENTES.lock -text
+
+# ---------------------------------------------------------------------------
+# Binarios
+# ---------------------------------------------------------------------------
+*.png binary
+*.jpg binary
+*.pdf binary
+*.msi binary
+*.exe binary
+*.deb binary
+*.rpm binary
+*.pkg binary
