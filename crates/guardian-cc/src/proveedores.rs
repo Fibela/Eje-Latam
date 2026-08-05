@@ -50,6 +50,7 @@ use crate::ClaseExcluida;
 use crate::clasificacion::{
     Clasificacion, DeclaracionSegmento, Evidencia, MarcadoDispositivo, MotivoAmbiguedad, clasificar,
 };
+pub use crate::inventario::MarcadoVerificado;
 
 /// Direccion de capa de enlace.
 ///
@@ -120,47 +121,6 @@ impl Indicio {
     #[must_use]
     pub const fn es_concluyente(self) -> bool {
         !matches!(self, Self::Indeterminado)
-    }
-}
-
-/// Marcado administrativo verificado contra la raiz anclada.
-///
-/// Solo se construye tras comprobar firma **y** prueba de inclusion. Un valor de
-/// este tipo es, por construccion, un marcado que pertenece al inventario
-/// firmado.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MarcadoVerificado {
-    /// Clase declarada. `None` significa «declarado no critico».
-    pub clase: Option<ClaseExcluida>,
-    /// Instante de emision, en segundos desde la epoca.
-    pub emitido_en: u64,
-    /// Vigencia declarada, en dias.
-    pub vigencia_dias: u32,
-}
-
-impl MarcadoVerificado {
-    /// Indica si el marcado sigue vigente en el instante dado.
-    ///
-    /// # Politica de reloj
-    ///
-    /// Un agente Local-First puede tener el reloj desviado. Ante duda, este
-    /// metodo declara **caducado**, no vigente: un marcado caducado degrada a
-    /// ambiguo y escala a un humano, mientras que uno indebidamente vigente
-    /// permitiria contener un equipo critico.
-    ///
-    /// Por eso un `ahora` anterior a la emision —reloj atrasado, o marcado con
-    /// fecha futura— tambien cuenta como caducado en lugar de tratarse como
-    /// «aun no empieza».
-    #[must_use]
-    pub const fn vigente_en(&self, ahora: u64) -> bool {
-        if ahora < self.emitido_en {
-            return false;
-        }
-
-        let transcurrido = ahora - self.emitido_en;
-        let vigencia_segundos = (self.vigencia_dias as u64).saturating_mul(86_400);
-
-        transcurrido <= vigencia_segundos
     }
 }
 
@@ -336,7 +296,7 @@ pub fn reunir_evidencia(
 
     Ok(Evidencia {
         marcado: marcado.map(|marcado| MarcadoDispositivo {
-            clase: marcado.clase,
+            clase: marcado.clase(),
             vigente: marcado.vigente_en(ahora),
         }),
         segmento: historial.declaracion_efectiva(),

@@ -11,6 +11,16 @@ authors.workspace = true
 [dependencies]
 thiserror.workspace = true
 tracing.workspace = true
+# El inventario firmado reutiliza el Absorbedor y el arbol Merkle de ALM-01 en
+# lugar de definir una codificacion canonica paralela (RPT-011 §2).
+eje-almacen = { path = "../eje-almacen" }
+# Verificacion hibrida de la raiz del inventario.
+motor-pqc = { path = "../motor-pqc" }
+
+[dev-dependencies]
+# Misma version que motor-pqc. Alinearlas es deliberado: tres versiones de
+# rand_core conviviendo ya nos costo una sesion.
+rand_core = "0.10"
 
 [lints]
 workspace = true

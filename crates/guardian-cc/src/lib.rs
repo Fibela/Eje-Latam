@@ -16,6 +16,7 @@
 #![forbid(unsafe_code)]
 
 pub mod clasificacion;
+pub mod inventario;
 pub mod proveedores;
 
 use clasificacion::{Clasificacion, MotivoAmbiguedad};
@@ -1061,19 +1062,272 @@ mod pruebas {
         );
     }
 
+    // -----------------------------------------------------------------------
+    // Inventario firmado — RPT-011
+    // -----------------------------------------------------------------------
+
+    use eje_almacen::merkle::{PruebaInclusion, prueba_inclusion, raiz};
+    use eje_almacen::resumen::Resumen;
+    use inventario::{
+        ClaveInventario, DominioClave, ErrorInventario, MarcadoBruto, mensaje_de_raiz,
+    };
+    use motor_pqc::firma_hibrida::{FirmaHibrida, generar_par};
+
+    /// Generador determinista para pruebas reproducibles.
+    ///
+    /// Replica el de `motor-pqc`. No se exporta desde alli a proposito: un
+    /// generador de pruebas en la API publica de un crate criptografico es una
+    /// invitacion a usarlo fuera de las pruebas.
+    struct GeneradorDeterminista {
+        estado: u64,
+    }
+
+    impl GeneradorDeterminista {
+        const fn nuevo(semilla: u64) -> Self {
+            Self { estado: semilla }
+        }
+
+        /// xorshift64*, suficiente para reproducibilidad en pruebas.
+        fn siguiente(&mut self) -> u64 {
+            self.estado ^= self.estado >> 12;
+            self.estado ^= self.estado << 25;
+            self.estado ^= self.estado >> 27;
+            self.estado.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        }
+    }
+
+    impl rand_core::TryRng for GeneradorDeterminista {
+        type Error = rand_core::Infallible;
+
+        fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+            Ok((self.siguiente() >> 32) as u32)
+        }
+
+        fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+            Ok(self.siguiente())
+        }
+
+        fn try_fill_bytes(&mut self, destino: &mut [u8]) -> Result<(), Self::Error> {
+            for trozo in destino.chunks_mut(8) {
+                let valor = self.siguiente().to_le_bytes();
+                let longitud = trozo.len();
+                trozo.copy_from_slice(&valor[..longitud]);
+            }
+            Ok(())
+        }
+    }
+
+    impl rand_core::TryCryptoRng for GeneradorDeterminista {}
+
+    /// Inventario de prueba con su clave, raiz y firma.
+    ///
+    /// Las pruebas recorren la cadena real: generan clave, construyen el arbol,
+    /// firman la raiz y piden la prueba de inclusion. No existe atajo para
+    /// fabricar un `MarcadoVerificado`, que es justamente el punto.
+    struct Banco {
+        marcados: Vec<MarcadoBruto>,
+        raiz: Resumen,
+        firma: FirmaHibrida,
+        clave: ClaveInventario,
+    }
+
+    fn banco(dominio: DominioClave) -> Banco {
+        let marcados = vec![
+            MarcadoBruto {
+                mac: MAC,
+                clase: Some(ClaseExcluida::SoporteVital),
+                emitido_en: AHORA,
+                vigencia_dias: 365,
+            },
+            MarcadoBruto {
+                mac: [0x00, 0x1B, 0x21, 0x00, 0x00, 0x02],
+                clase: None,
+                emitido_en: AHORA,
+                vigencia_dias: 365,
+            },
+            MarcadoBruto {
+                mac: [0x00, 0x1B, 0x21, 0x00, 0x00, 0x03],
+                clase: Some(ClaseExcluida::SeguridadFuncional),
+                emitido_en: AHORA,
+                vigencia_dias: 365,
+            },
+        ];
+
+        let resumenes: Vec<Resumen> = marcados.iter().map(MarcadoBruto::resumen).collect();
+        let raiz = raiz(&resumenes).expect("el inventario no esta vacio");
+
+        let (firmante, verificadora) = generar_par(&mut GeneradorDeterminista::nuevo(0x45_4A_45));
+        let firma = motor_pqc::firma_hibrida::firmar(&firmante, &mensaje_de_raiz(&raiz));
+
+        Banco {
+            marcados,
+            raiz,
+            firma,
+            clave: ClaveInventario::nueva(verificadora, dominio),
+        }
+    }
+
+    impl Banco {
+        fn resumenes(&self) -> Vec<Resumen> {
+            self.marcados.iter().map(MarcadoBruto::resumen).collect()
+        }
+
+        fn prueba_de(&self, posicion: usize) -> PruebaInclusion {
+            prueba_inclusion(&self.resumenes(), posicion, posicion as u64)
+                .expect("la posicion existe")
+        }
+
+        fn verificar(&self, posicion: usize) -> Result<MarcadoVerificado, ErrorInventario> {
+            MarcadoVerificado::verificar_e_instanciar(
+                self.marcados[posicion],
+                &self.prueba_de(posicion),
+                &self.raiz,
+                &self.firma,
+                &self.clave,
+            )
+        }
+    }
+
+    #[test]
+    fn un_marcado_integro_verifica() {
+        let banco = banco(DominioClave::Cliente);
+        let marcado = banco.verificar(0).expect("la cadena esta completa");
+
+        assert_eq!(marcado.clase(), Some(ClaseExcluida::SoporteVital));
+        assert_eq!(marcado.mac(), &MAC);
+    }
+
+    #[test]
+    fn una_prueba_de_otra_entrada_se_rechaza() {
+        // El eslabon que se olvida. `verificar_inclusion` comprueba que la
+        // prueba es consistente con la raiz, pero nada en ella la ata al marcado
+        // que se esta verificando: sin este control, quien presente la prueba
+        // legitima de la entrada 1 podria colarla como si fuera la 0.
+        let banco = banco(DominioClave::Cliente);
+
+        let resultado = MarcadoVerificado::verificar_e_instanciar(
+            banco.marcados[0],
+            &banco.prueba_de(1),
+            &banco.raiz,
+            &banco.firma,
+            &banco.clave,
+        );
+
+        assert_eq!(resultado, Err(ErrorInventario::PruebaAjenaAlMarcado));
+    }
+
+    #[test]
+    fn alterar_el_marcado_rompe_la_cadena() {
+        let banco = banco(DominioClave::Cliente);
+
+        // Degradar «soporte vital» a «no critico» es el ataque util.
+        let mut alterado = banco.marcados[0];
+        alterado.clase = None;
+
+        let resultado = MarcadoVerificado::verificar_e_instanciar(
+            alterado,
+            &banco.prueba_de(0),
+            &banco.raiz,
+            &banco.firma,
+            &banco.clave,
+        );
+
+        assert_eq!(resultado, Err(ErrorInventario::PruebaAjenaAlMarcado));
+    }
+
+    #[test]
+    fn suprimir_una_entrada_invalida_la_firma_de_la_raiz() {
+        // RPT-010 §4 comprobado de extremo a extremo: con firma por entrada,
+        // borrar «esta bomba es soporte vital» no rompia nada. Con la raiz
+        // firmada, la raiz del inventario mutilado ya no es la firmada.
+        let banco = banco(DominioClave::Cliente);
+
+        let supervivientes: Vec<Resumen> = banco.marcados[1..]
+            .iter()
+            .map(MarcadoBruto::resumen)
+            .collect();
+        let raiz_mutilada = raiz(&supervivientes).expect("quedan entradas");
+
+        assert_ne!(raiz_mutilada, banco.raiz);
+
+        // La entrada 0 ya no existe; se intenta pasar la 1 con la raiz nueva.
+        let prueba = prueba_inclusion(&supervivientes, 0, 0).expect("la posicion existe");
+        let resultado = MarcadoVerificado::verificar_e_instanciar(
+            banco.marcados[1],
+            &prueba,
+            &raiz_mutilada,
+            &banco.firma,
+            &banco.clave,
+        );
+
+        assert_eq!(resultado, Err(ErrorInventario::FirmaDeRaizInvalida));
+    }
+
+    #[test]
+    fn una_raiz_ajena_no_verifica() {
+        let banco = banco(DominioClave::Cliente);
+        let otra = Resumen::desde_bytes([0x42; 32]);
+
+        let resultado = MarcadoVerificado::verificar_e_instanciar(
+            banco.marcados[0],
+            &banco.prueba_de(0),
+            &otra,
+            &banco.firma,
+            &banco.clave,
+        );
+
+        assert_eq!(resultado, Err(ErrorInventario::InclusionNoVerifica));
+    }
+
+    #[test]
+    fn la_clave_de_premoscorp_no_firma_inventarios() {
+        // Frontera de custodia. PremosCorp firma binarios; el administrador del
+        // cliente firma que equipos son criticos. Reutilizar la infraestructura
+        // de PA-14 por comodidad permitiria al proveedor declarar que equipos
+        // del cliente son incontenibles.
+        let banco = banco(DominioClave::PremosCorp);
+
+        assert_eq!(
+            banco.verificar(0),
+            Err(ErrorInventario::DominioDeClaveIncorrecto {
+                encontrado: DominioClave::PremosCorp,
+                esperado: DominioClave::Cliente,
+            })
+        );
+    }
+
+    #[test]
+    fn el_resumen_del_marcado_separa_su_dominio() {
+        // Dos marcados que solo difieren en la clase deben producir hojas
+        // distintas. La clase viaja como escalar cerrado, no como cadena.
+        let base = MarcadoBruto {
+            mac: MAC,
+            clase: None,
+            emitido_en: AHORA,
+            vigencia_dias: 365,
+        };
+        let mut critico = base;
+        critico.clase = Some(ClaseExcluida::SoporteVital);
+
+        assert_ne!(base.resumen(), critico.resumen());
+
+        // Y el mensaje de raiz no coincide con el resumen crudo de la raiz: si
+        // coincidieran, una firma sobre 32 bytes cualesquiera valdria como firma
+        // de raiz.
+        let raiz_falsa = Resumen::desde_bytes([7u8; 32]);
+        assert_ne!(mensaje_de_raiz(&raiz_falsa), raiz_falsa.bytes().to_vec());
+    }
+
     // --- Vigencia y reloj ---
 
     #[test]
     fn el_marcado_caduca_al_pasar_su_vigencia() {
-        let marcado = MarcadoVerificado {
-            clase: Some(ClaseExcluida::SoporteVital),
-            emitido_en: AHORA,
-            vigencia_dias: 1,
-        };
+        let banco = banco(DominioClave::Cliente);
+        let marcado = banco.verificar(0).expect("la cadena esta completa");
 
         assert!(marcado.vigente_en(AHORA));
-        assert!(marcado.vigente_en(AHORA + 86_400));
-        assert!(!marcado.vigente_en(AHORA + 86_401));
+        assert!(marcado.vigente_en(AHORA + 365 * 86_400));
+        assert!(!marcado.vigente_en(AHORA + 365 * 86_400 + 1));
     }
 
     #[test]
@@ -1081,11 +1335,8 @@ mod pruebas {
         // Ante desviacion de reloj se falla hacia «caducado», que degrada a
         // ambiguo y escala a un humano. Lo contrario permitiria contener un
         // equipo critico con un reloj mal puesto.
-        let marcado = MarcadoVerificado {
-            clase: None,
-            emitido_en: AHORA,
-            vigencia_dias: 365,
-        };
+        let banco = banco(DominioClave::Cliente);
+        let marcado = banco.verificar(0).expect("la cadena esta completa");
 
         assert!(!marcado.vigente_en(AHORA - 1));
     }
