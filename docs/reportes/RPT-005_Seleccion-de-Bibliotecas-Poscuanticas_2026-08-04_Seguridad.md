@@ -196,12 +196,75 @@ No se adopta ML-KEM-512 ni ML-DSA-44 (categoría 2, margen insuficiente para inf
 
 ## 8. Puntos Abiertos
 
-| ID | Punto | Bloquea |
+| ID | Punto | Estado |
 |---|---|---|
-| **PA-16** | Ratificación de la selección de §7.2 y del enfoque diferencial de §7.3 | Primer commit de `motor-pqc` |
-| **PA-17** | Origen y versionado de los conjuntos ACVP y Wycheproof en el repositorio, y su exclusión en `.gitleaks.toml` | CI de `motor-pqc` |
-| **PA-18** | Fuente de aleatoriedad: DRBG conforme al NIST frente a `OsRng` | Generación de claves |
-| **PA-19** | Momento de reevaluación: ¿se revisa esta decisión cuando alguna implementación reciba auditoría independiente, o en fecha fija? | Gobernanza |
+| ~~PA-16~~ | ~~Ratificación de la selección y del enfoque diferencial~~ | ✅ Cerrado |
+| ~~PA-17~~ | ~~Vectores ACVP y Wycheproof en el repositorio, anclaje y ejecución~~ | ✅ **Cerrado 4-ago-2026** — ver §9 |
+| **PA-18** | Fuente de aleatoriedad: DRBG conforme al NIST frente a `OsRng` | 🟡 Abierto — generación de claves |
+| **PA-19** | Momento de reevaluación: ¿se revisa esta decisión cuando alguna implementación reciba auditoría independiente, o en fecha fija? | 🟡 Abierto — gobernanza |
+| **PA-14** | Cadena de firma de releases. **Absorbe la atestación de conformidad** (§9.4) | 🟡 Abierto — RPT-004 §10 |
+
+---
+
+## 9. Cierre de PA-17 — Evidencia de Conformidad
+
+### 9.1 Lo que quedó integrado
+
+Tres capas de evidencia independientes, todas en verde en `principal`:
+
+| Capa | Cobertura | Qué establece |
+|---|---|---|
+| **ACVP** (NIST) | 4 suites: ML-KEM keygen y encapsulado, ML-DSA keygen y sigVer | Que se **calcula** lo correcto |
+| **Wycheproof** (C2SP) | 399 casos: 206 ML-DSA (127 inválidos) y 193 ML-KEM | Que se **rechaza** lo incorrecto |
+| **Contraste diferencial** | 7 pruebas contra libcrux | Que dos implementaciones independientes **coinciden** e interoperan |
+
+Los ficheros de vectores están versionados y anclados por SHA-256 en `FUENTES.lock`, lo que hace segura la exoneración de `.gitleaks.toml` sobre ese directorio.
+
+**Variantes declaradas fuera de alcance**, con recuento explícito en las propias suites: la interfaz interna de FIPS 204, HashML-DSA (`preHash`), el `externalMu`, y el desencapsulado de ML-KEM en ACVP —este último cubierto por Wycheproof y por el contraste diferencial en ambos sentidos.
+
+### 9.2 Lo que NO establece este cierre
+
+**`Conformidad::apto_para_produccion()` sigue devolviendo `false`, y es correcto que así sea.**
+
+Ningún código conecta las suites que pasan con el tipo que expone ese estado. Cerrar PA-17 significa que la **evidencia** está construida y verificada, no que exista una **atestación** que la comunique al binario en ejecución.
+
+Se consigna aquí para que nadie interprete el cierre de PA-17 como aptitud declarada.
+
+### 9.3 Diseño aprobado — `CONFORMIDAD.lock`
+
+Se evaluaron y descartaron dos mecanismos:
+
+| Mecanismo | Por qué se descarta |
+|---|---|
+| Constante `true` en el código | No prueba nada; solo traslada la afirmación de sitio |
+| Variable de entorno o bandera de compilación (`PQC_CONFORMITY_TOKEN`) | **Falsificable**: la fija cualquiera antes de compilar. Si va firmada, la clave o está en el repositorio —y no es secreto— o solo en la CI, lo que la convierte en dependencia de PA-14 |
+
+**El defecto de fondo de ambos es el mismo: tratan la conformidad como una propiedad del *evento de compilación*, cuando es una propiedad de las *entradas*.**
+
+Si mañana se actualiza `ml-dsa` a 0.1.2 en `Cargo.lock`, un binario compilado hoy seguiría portando su bandera de conforme aunque las suites nunca se ejecutaran contra la versión nueva. Un atestado del tipo "la CI pasó" caduca en silencio, que es el modo de fallo que este proyecto lleva persiguiendo desde RPT-003 §9.5.
+
+**Diseño adoptado.** Atar el atestado a la huella de lo que efectivamente se probó:
+
+```
+CONFORMIDAD.lock
+  ├── versiones exactas de ml-kem, ml-dsa y libcrux-*   (de Cargo.lock)
+  ├── resumen SHA-256 de FUENTES.lock                    (los vectores)
+  ├── versión del toolchain
+  └── huella = SHA-256 sobre todo lo anterior
+```
+
+- `cargo xtask conformidad` ejecuta las tres suites y, **solo si pasan**, emite el fichero.
+- `tests/atestacion.rs` **recalcula la huella** desde `Cargo.lock` y `FUENTES.lock` y falla si no coincide con la registrada.
+
+La propiedad que se gana es la que importa: **si alguien sube una dependencia o cambia un vector sin volver a ejecutar la conformidad, las huellas divergen y la CI se pone roja sola.** El atestado se autoinvalida. Es el mismo mecanismo del anclaje Merkle de los vectores, aplicado al árbol de dependencias, y no necesita `build.rs`, ni variable de entorno, ni clave.
+
+### 9.4 Hueco residual — por qué se delega en PA-14
+
+Este diseño ata **qué** se probó, no **que** se probó. Alguien podría calcular la huella correcta sin haber ejecutado las suites.
+
+Cerrarlo del todo exige que la CI sea el único productor de confianza, con una clave que solo ella posea. Eso es exactamente el alcance de **PA-14** (cadena de firma de releases), y por eso la implementación se delega allí en lugar de construir ahora una atestación que quedaría a medias.
+
+**Consecuencia práctica:** hasta que PA-14 se cierre, la conformidad de `motor-pqc` se establece por la CI en verde y por este reporte, no por un valor consultable en tiempo de ejecución.
 
 ---
 

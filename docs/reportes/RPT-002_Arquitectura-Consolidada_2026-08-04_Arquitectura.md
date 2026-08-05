@@ -449,7 +449,11 @@ Todo reporte incluye tabla de metadatos, sección de trazabilidad indicando qué
 | PA-12 | Empaquetador de `eje-vision` | 🟡 Abierto — RPT-004 §10 |
 | PA-15 | `CON-SIM` deshabilitado durante incidente activo | 🟡 Abierto — RPT-004 §10 |
 | PA-13 | Biblioteca de componentes de la capa base y su licencia | 🟡 Abierto — RPT-004 §10 |
-| PA-14 | Cadena de firma del paquete empresarial | 🟡 Abierto — RPT-004 §10 |
+| PA-14 | Cadena de firma de releases y del paquete empresarial. **Absorbe la atestación de conformidad PQC** | 🟡 Abierto — RPT-004 §10, RPT-005 §9.4 |
+| ~~PA-16~~ | ~~Selección de bibliotecas poscuánticas~~ | ✅ Cerrado — RPT-005 §7.2 |
+| ~~PA-17~~ | ~~Vectores ACVP y Wycheproof: anclaje y ejecución~~ | ✅ Cerrado 4-ago-2026 — RPT-005 §9 |
+| PA-18 | Fuente de aleatoriedad: DRBG conforme al NIST | 🟡 Abierto — RPT-005 §7.4 |
+| PA-19 | Ventana de reevaluación de la decisión PQC | 🟡 Abierto — RPT-005 §8 |
 
 ---
 
