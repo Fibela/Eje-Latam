@@ -229,6 +229,10 @@ significado = "Sin marcado de dispositivo y en un segmento que admite equipos cr
 nombre = "InferenciaSugiereCriticidad"
 significado = "La huella o el OUI apuntan a un equipo critico sin marcado que lo confirme o lo desmienta."
 
+[[motivo_ambiguedad]]
+nombre = "EvidenciaNoVerificable"
+significado = "Una fuente DECLARATIVA no respondio, o el inventario no verifica. Una firma invalida o una inclusion no probada no son 'marcado ausente': son manipulacion, y se distinguen de la ausencia."
+
 [clasificacion]
 # Vigencia por defecto de un marcado, en dias. Un parque cambia; un marcado de
 # hace tres anos describe un equipo que quiza ya no esta.

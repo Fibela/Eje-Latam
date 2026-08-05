@@ -107,15 +107,22 @@ pub enum MotivoAmbiguedad {
     SegmentoPuedeAlojarCriticos,
     /// La inferencia apunta a un equipo critico sin marcado que lo confirme.
     InferenciaSugiereCriticidad,
+    /// Una fuente **declarativa** no respondio, o el inventario no verifica.
+    ///
+    /// Se distingue de la ausencia de marcado a proposito: una firma invalida o
+    /// una inclusion no probada indican manipulacion del inventario, no que el
+    /// dispositivo carezca de marcado (RPT-010).
+    EvidenciaNoVerificable,
 }
 
 impl MotivoAmbiguedad {
     /// Todos los motivos.
-    pub const TODOS: [Self; 4] = [
+    pub const TODOS: [Self; 5] = [
         Self::ConflictoEntreFuentes,
         Self::MarcadoCaducado,
         Self::SegmentoPuedeAlojarCriticos,
         Self::InferenciaSugiereCriticidad,
+        Self::EvidenciaNoVerificable,
     ];
 
     /// Identificador estable, tal como figura en `contrato-contencion.toml`.
@@ -126,6 +133,7 @@ impl MotivoAmbiguedad {
             Self::MarcadoCaducado => "MarcadoCaducado",
             Self::SegmentoPuedeAlojarCriticos => "SegmentoPuedeAlojarCriticos",
             Self::InferenciaSugiereCriticidad => "InferenciaSugiereCriticidad",
+            Self::EvidenciaNoVerificable => "EvidenciaNoVerificable",
         }
     }
 }

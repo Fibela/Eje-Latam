@@ -16,6 +16,7 @@
 #![forbid(unsafe_code)]
 
 pub mod clasificacion;
+pub mod proveedores;
 
 use clasificacion::{Clasificacion, MotivoAmbiguedad};
 use thiserror::Error;
@@ -264,6 +265,31 @@ pub enum Veredicto {
         /// Clase que motiva la prohibicion.
         clase: ClaseExcluida,
     },
+}
+
+impl Veredicto {
+    /// Indica si el veredicto obliga a notificar a un operador.
+    ///
+    /// Todo lo que no sea [`Veredicto::Ejecutar`] escala. Un bloqueo silencioso
+    /// convierte la lista de exclusion en una via de evasion comoda: al atacante
+    /// le bastaria parecer un equipo critico para que su actividad se archivara
+    /// sin que nadie la viera.
+    #[must_use]
+    pub const fn exige_alerta(&self) -> bool {
+        !matches!(self, Self::Ejecutar)
+    }
+
+    /// Indica si se detecto una amenaza sobre un dispositivo **incontenible**.
+    ///
+    /// Es la condicion mas urgente que este producto puede comunicar, y no puede
+    /// tratarse como una alerta ordinaria: no existe accion automatica posible,
+    /// asi que la unica respuesta es humana e inmediata. Aislar la bomba no es
+    /// una opcion; aislar lo que la rodea, avisar a ingenieria clinica o a
+    /// planta, si.
+    #[must_use]
+    pub const fn es_amenaza_incontenible(&self) -> bool {
+        matches!(self, Self::Prohibida { .. })
+    }
 }
 
 impl PerfilSegmento {
@@ -828,6 +854,273 @@ mod pruebas {
         assert!(
             ejecutadas > 0,
             "ninguna combinacion permite contener; la politica es inaplicable"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Proveedores — RPT-010, PA-24
+    // -----------------------------------------------------------------------
+
+    use proveedores::{
+        DireccionEnlace, ErrorProveedor, HistorialSegmento, Indicio, MarcadoVerificado,
+        ProveedorHuella, ProveedorInventario, ProveedorOui, ProveedorSegmento, Proveedores,
+        clasificar_con_proveedores,
+    };
+
+    const MAC: DireccionEnlace = [0x00, 0x1B, 0x21, 0x00, 0x00, 0x01];
+    /// 5 de agosto de 2026, aproximado. Solo importan las diferencias.
+    const AHORA: u64 = 1_785_888_000;
+
+    /// Doble de inventario. Legitimo: es un banco de la propia logica, no una
+    /// simulacion de un equipo de red de tercero (RPT-008 §2).
+    struct InventarioDe(Result<Option<MarcadoVerificado>, ErrorProveedor>);
+    impl ProveedorInventario for InventarioDe {
+        fn marcado(
+            &self,
+            _mac: &DireccionEnlace,
+        ) -> Result<Option<MarcadoVerificado>, ErrorProveedor> {
+            self.0.clone()
+        }
+    }
+
+    struct SegmentoDe(Result<HistorialSegmento, ErrorProveedor>);
+    impl ProveedorSegmento for SegmentoDe {
+        fn historial(&self, _mac: &DireccionEnlace) -> Result<HistorialSegmento, ErrorProveedor> {
+            self.0.clone()
+        }
+    }
+
+    struct OuiDe(Result<Indicio, ErrorProveedor>);
+    impl ProveedorOui for OuiDe {
+        fn indicio(&self, _mac: &DireccionEnlace) -> Result<Indicio, ErrorProveedor> {
+            self.0.clone()
+        }
+    }
+
+    struct HuellaDe(Result<Indicio, ErrorProveedor>);
+    impl ProveedorHuella for HuellaDe {
+        fn indicio(&self, _mac: &DireccionEnlace) -> Result<Indicio, ErrorProveedor> {
+            self.0.clone()
+        }
+    }
+
+    fn segmento_limpio() -> HistorialSegmento {
+        HistorialSegmento {
+            actual: DeclaracionSegmento::SinDispositivosCriticos,
+            visto_en_segmento_critico: false,
+        }
+    }
+
+    // --- PA24-UT-01: firma alterada o inclusion no probada ---
+
+    #[test]
+    fn una_firma_invalida_no_se_lee_como_marcado_ausente() {
+        // Es la distincion central: «no hay marcado» permite contener en un
+        // segmento limpio; «el marcado no verifica» nunca lo permite.
+        for error in [
+            ErrorProveedor::FirmaInvalida {
+                detalle: "prueba".to_owned(),
+            },
+            ErrorProveedor::InclusionNoProbada,
+        ] {
+            let inventario = InventarioDe(Err(error.clone()));
+            let proveedores = Proveedores {
+                inventario: &inventario,
+                segmento: &SegmentoDe(Ok(segmento_limpio())),
+                oui: &OuiDe(Ok(Indicio::SinIndicio)),
+                huella: &HuellaDe(Ok(Indicio::SinIndicio)),
+            };
+
+            assert_eq!(
+                clasificar_con_proveedores(&proveedores, &MAC, AHORA),
+                Clasificacion::Ambiguo {
+                    motivo: MotivoAmbiguedad::EvidenciaNoVerificable
+                },
+                "el error {error:?} no debe confundirse con ausencia de marcado"
+            );
+        }
+    }
+
+    #[test]
+    fn el_ataque_de_supresion_no_produce_permiso() {
+        // Suprimir la entrada «esto es soporte vital» del inventario deja las
+        // firmas restantes intactas. Lo que no deja intacta es la prueba de
+        // inclusion contra la raiz anclada, y ese es el motivo de que la
+        // verificacion no pueda ser solo por entrada.
+        let inventario = InventarioDe(Err(ErrorProveedor::InclusionNoProbada));
+        let proveedores = Proveedores {
+            inventario: &inventario,
+            segmento: &SegmentoDe(Ok(segmento_limpio())),
+            oui: &OuiDe(Ok(Indicio::SinIndicio)),
+            huella: &HuellaDe(Ok(Indicio::SinIndicio)),
+        };
+
+        let veredicto = evaluar(
+            clasificar_con_proveedores(&proveedores, &MAC, AHORA),
+            PerfilSegmento::Corporativo,
+        );
+        assert_ne!(veredicto, Veredicto::Ejecutar);
+        assert!(veredicto.exige_alerta());
+    }
+
+    // --- PA24-UT-02: OUI generico con protocolo industrial ---
+
+    #[test]
+    fn la_huella_eleva_la_criticidad_pese_a_un_oui_comercial() {
+        let proveedores = Proveedores {
+            inventario: &InventarioDe(Ok(None)),
+            segmento: &SegmentoDe(Ok(segmento_limpio())),
+            oui: &OuiDe(Ok(Indicio::SinIndicio)),
+            huella: &HuellaDe(Ok(Indicio::SugiereCriticidad(
+                ClaseExcluida::SeguridadFuncional,
+            ))),
+        };
+
+        assert_eq!(
+            clasificar_con_proveedores(&proveedores, &MAC, AHORA),
+            Clasificacion::Ambiguo {
+                motivo: MotivoAmbiguedad::InferenciaSugiereCriticidad
+            }
+        );
+    }
+
+    // --- PA24-UT-04: equipo rodante ---
+
+    #[test]
+    fn la_ambiguedad_de_segmento_es_pegajosa() {
+        // Un carro de telemedicina que paso por la VLAN clinica y aparece ahora
+        // en la administrativa no debe volverse contenible por haberse movido.
+        let historial = HistorialSegmento {
+            actual: DeclaracionSegmento::SinDispositivosCriticos,
+            visto_en_segmento_critico: true,
+        };
+        assert_eq!(
+            historial.declaracion_efectiva(),
+            DeclaracionSegmento::PuedeAlojarCriticos
+        );
+
+        let proveedores = Proveedores {
+            inventario: &InventarioDe(Ok(None)),
+            segmento: &SegmentoDe(Ok(historial)),
+            oui: &OuiDe(Ok(Indicio::SinIndicio)),
+            huella: &HuellaDe(Ok(Indicio::SinIndicio)),
+        };
+
+        assert_eq!(
+            clasificar_con_proveedores(&proveedores, &MAC, AHORA),
+            Clasificacion::Ambiguo {
+                motivo: MotivoAmbiguedad::SegmentoPuedeAlojarCriticos
+            }
+        );
+    }
+
+    // --- Asimetria de los fallos de proveedor ---
+
+    #[test]
+    fn un_fallo_declarativo_bloquea() {
+        let proveedores = Proveedores {
+            inventario: &InventarioDe(Ok(None)),
+            segmento: &SegmentoDe(Err(ErrorProveedor::FuenteInaccesible {
+                fuente: "registro-de-segmentos".to_owned(),
+            })),
+            oui: &OuiDe(Ok(Indicio::SinIndicio)),
+            huella: &HuellaDe(Ok(Indicio::SinIndicio)),
+        };
+
+        assert_eq!(
+            clasificar_con_proveedores(&proveedores, &MAC, AHORA),
+            Clasificacion::Ambiguo {
+                motivo: MotivoAmbiguedad::EvidenciaNoVerificable
+            }
+        );
+    }
+
+    #[test]
+    fn un_fallo_inferido_no_bloquea() {
+        // Si tumbar la captura inutilizara la contencion en toda la red, el
+        // producto seria fragil ante un atacante que solo tuviera que apagar una
+        // fuente. El permiso vino de una fuente declarativa; la inferencia nunca
+        // lo concedio, asi que su ausencia no puede retirarlo (RPT-009 §3).
+        let proveedores = Proveedores {
+            inventario: &InventarioDe(Ok(None)),
+            segmento: &SegmentoDe(Ok(segmento_limpio())),
+            oui: &OuiDe(Err(ErrorProveedor::FuenteInaccesible {
+                fuente: "oui".to_owned(),
+            })),
+            huella: &HuellaDe(Err(ErrorProveedor::FuenteInaccesible {
+                fuente: "captura".to_owned(),
+            })),
+        };
+
+        assert_eq!(
+            evaluar(
+                clasificar_con_proveedores(&proveedores, &MAC, AHORA),
+                PerfilSegmento::Corporativo
+            ),
+            Veredicto::Ejecutar
+        );
+    }
+
+    // --- Vigencia y reloj ---
+
+    #[test]
+    fn el_marcado_caduca_al_pasar_su_vigencia() {
+        let marcado = MarcadoVerificado {
+            clase: Some(ClaseExcluida::SoporteVital),
+            emitido_en: AHORA,
+            vigencia_dias: 1,
+        };
+
+        assert!(marcado.vigente_en(AHORA));
+        assert!(marcado.vigente_en(AHORA + 86_400));
+        assert!(!marcado.vigente_en(AHORA + 86_401));
+    }
+
+    #[test]
+    fn un_reloj_atrasado_caduca_el_marcado_en_lugar_de_extenderlo() {
+        // Ante desviacion de reloj se falla hacia «caducado», que degrada a
+        // ambiguo y escala a un humano. Lo contrario permitiria contener un
+        // equipo critico con un reloj mal puesto.
+        let marcado = MarcadoVerificado {
+            clase: None,
+            emitido_en: AHORA,
+            vigencia_dias: 365,
+        };
+
+        assert!(!marcado.vigente_en(AHORA - 1));
+    }
+
+    // --- La prohibicion no puede ser silenciosa ---
+
+    #[test]
+    fn toda_prohibicion_exige_alerta_maxima() {
+        for clase in ClaseExcluida::TODAS {
+            let veredicto = evaluar(
+                Clasificacion::Clasificado {
+                    clase: Some(clase),
+                    fuente: FuenteEvidencia::MarcadoAdministrativo,
+                },
+                PerfilSegmento::Corporativo,
+            );
+
+            assert!(veredicto.exige_alerta());
+            assert!(
+                veredicto.es_amenaza_incontenible(),
+                "una amenaza sobre un equipo que no podemos contener es lo mas \
+                 urgente que este producto puede comunicar; bloquear en silencio \
+                 convierte la lista de exclusion en una via de evasion comoda"
+            );
+        }
+    }
+
+    #[test]
+    fn solo_la_ejecucion_no_alerta() {
+        assert!(!evaluar(contenible(), PerfilSegmento::Corporativo).exige_alerta());
+        assert!(evaluar(contenible(), PerfilSegmento::Ot).exige_alerta());
+        assert!(
+            !evaluar(contenible(), PerfilSegmento::Ot).es_amenaza_incontenible(),
+            "requerir aprobacion no es una amenaza incontenible; confundirlas \
+             ahogaria la senal urgente entre las ordinarias"
         );
     }
 }
