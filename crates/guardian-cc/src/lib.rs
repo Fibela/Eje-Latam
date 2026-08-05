@@ -1066,12 +1066,13 @@ mod pruebas {
     // Inventario firmado — RPT-011
     // -----------------------------------------------------------------------
 
-    use eje_almacen::merkle::{PruebaInclusion, prueba_inclusion, raiz};
+    use eje_almacen::merkle::{PruebaInclusion, prueba_inclusion};
     use eje_almacen::resumen::Resumen;
     use inventario::{
-        ClaveInventario, DominioClave, ErrorInventario, MarcadoBruto, mensaje_de_raiz,
+        Centinela, ClaveInventario, DominioClave, ErrorInventario, Inventario, MarcadoBruto,
+        RaizAnclada, RaizVerificada, mensaje_de_raiz,
     };
-    use motor_pqc::firma_hibrida::{FirmaHibrida, generar_par};
+    use motor_pqc::firma_hibrida::{ClaveVerificacionHibrida, FirmaHibrida, generar_par};
 
     /// Generador determinista para pruebas reproducibles.
     ///
@@ -1125,14 +1126,23 @@ mod pruebas {
     /// firman la raiz y piden la prueba de inclusion. No existe atajo para
     /// fabricar un `MarcadoVerificado`, que es justamente el punto.
     struct Banco {
-        marcados: Vec<MarcadoBruto>,
-        raiz: Resumen,
+        inventario: Inventario,
+        anclada: RaizAnclada,
         firma: FirmaHibrida,
         clave: ClaveInventario,
+        centinela: Centinela,
     }
 
-    fn banco(dominio: DominioClave) -> Banco {
-        let marcados = vec![
+    /// Marcados de prueba. Se pasan **desordenados** a proposito: el orden
+    /// canonico lo impone `Inventario::construir`, no quien los escribe.
+    fn marcados_de_prueba() -> Vec<MarcadoBruto> {
+        vec![
+            MarcadoBruto {
+                mac: [0x00, 0x1B, 0x21, 0x00, 0x00, 0x03],
+                clase: Some(ClaseExcluida::SeguridadFuncional),
+                emitido_en: AHORA,
+                vigencia_dias: 365,
+            },
             MarcadoBruto {
                 mac: MAC,
                 clase: Some(ClaseExcluida::SoporteVital),
@@ -1145,45 +1155,62 @@ mod pruebas {
                 emitido_en: AHORA,
                 vigencia_dias: 365,
             },
-            MarcadoBruto {
-                mac: [0x00, 0x1B, 0x21, 0x00, 0x00, 0x03],
-                clase: Some(ClaseExcluida::SeguridadFuncional),
-                emitido_en: AHORA,
-                vigencia_dias: 365,
-            },
-        ];
+        ]
+    }
 
-        let resumenes: Vec<Resumen> = marcados.iter().map(MarcadoBruto::resumen).collect();
-        let raiz = raiz(&resumenes).expect("el inventario no esta vacio");
-
+    fn firmar_raiz(anclada: &RaizAnclada) -> (FirmaHibrida, ClaveVerificacionHibrida) {
         let (firmante, verificadora) = generar_par(&mut GeneradorDeterminista::nuevo(0x45_4A_45));
-        let firma = motor_pqc::firma_hibrida::firmar(&firmante, &mensaje_de_raiz(&raiz));
+        let firma = motor_pqc::firma_hibrida::firmar(&firmante, &mensaje_de_raiz(anclada));
+        (firma, verificadora)
+    }
+
+    fn banco_con(dominio: DominioClave, secuencia: u64, centinela: Centinela) -> Banco {
+        let inventario =
+            Inventario::construir(marcados_de_prueba()).expect("no hay direcciones repetidas");
+        let anclada = RaizAnclada {
+            raiz: inventario.raiz().expect("el inventario no esta vacio"),
+            secuencia,
+        };
+        let (firma, verificadora) = firmar_raiz(&anclada);
 
         Banco {
-            marcados,
-            raiz,
+            inventario,
+            anclada,
             firma,
             clave: ClaveInventario::nueva(verificadora, dominio),
+            centinela,
         }
     }
 
+    fn banco(dominio: DominioClave) -> Banco {
+        banco_con(dominio, 7, Centinela::Establecido(7))
+    }
+
     impl Banco {
-        fn resumenes(&self) -> Vec<Resumen> {
-            self.marcados.iter().map(MarcadoBruto::resumen).collect()
+        fn raiz_verificada(&self) -> Result<RaizVerificada, ErrorInventario> {
+            RaizVerificada::verificar(self.anclada, &self.firma, &self.clave, self.centinela)
+        }
+
+        /// Posicion canonica de una direccion en el inventario ordenado.
+        fn posicion(&self, mac: &[u8; 6]) -> usize {
+            self.inventario.posicion_de(mac).expect("la mac figura")
+        }
+
+        fn marcado(&self, posicion: usize) -> MarcadoBruto {
+            self.inventario.marcados()[posicion]
         }
 
         fn prueba_de(&self, posicion: usize) -> PruebaInclusion {
-            prueba_inclusion(&self.resumenes(), posicion, posicion as u64)
+            prueba_inclusion(&self.inventario.resumenes(), posicion, posicion as u64)
                 .expect("la posicion existe")
         }
 
         fn verificar(&self, posicion: usize) -> Result<MarcadoVerificado, ErrorInventario> {
+            let raiz = self.raiz_verificada()?;
             MarcadoVerificado::verificar_e_instanciar(
-                self.marcados[posicion],
+                self.marcado(posicion),
                 &self.prueba_de(posicion),
-                &self.raiz,
-                &self.firma,
-                &self.clave,
+                &raiz,
             )
         }
     }
@@ -1191,7 +1218,8 @@ mod pruebas {
     #[test]
     fn un_marcado_integro_verifica() {
         let banco = banco(DominioClave::Cliente);
-        let marcado = banco.verificar(0).expect("la cadena esta completa");
+        let posicion = banco.posicion(&MAC);
+        let marcado = banco.verificar(posicion).expect("la cadena esta completa");
 
         assert_eq!(marcado.clase(), Some(ClaseExcluida::SoporteVital));
         assert_eq!(marcado.mac(), &MAC);
@@ -1202,15 +1230,15 @@ mod pruebas {
         // El eslabon que se olvida. `verificar_inclusion` comprueba que la
         // prueba es consistente con la raiz, pero nada en ella la ata al marcado
         // que se esta verificando: sin este control, quien presente la prueba
-        // legitima de la entrada 1 podria colarla como si fuera la 0.
+        // legitima de otra entrada podria colarla como si fuera esta.
         let banco = banco(DominioClave::Cliente);
+        let raiz = banco.raiz_verificada().expect("la raiz verifica");
+        let posicion = banco.posicion(&MAC);
 
         let resultado = MarcadoVerificado::verificar_e_instanciar(
-            banco.marcados[0],
-            &banco.prueba_de(1),
-            &banco.raiz,
-            &banco.firma,
-            &banco.clave,
+            banco.marcado(posicion),
+            &banco.prueba_de(posicion + 1),
+            &raiz,
         );
 
         assert_eq!(resultado, Err(ErrorInventario::PruebaAjenaAlMarcado));
@@ -1219,18 +1247,15 @@ mod pruebas {
     #[test]
     fn alterar_el_marcado_rompe_la_cadena() {
         let banco = banco(DominioClave::Cliente);
+        let raiz = banco.raiz_verificada().expect("la raiz verifica");
+        let posicion = banco.posicion(&MAC);
 
         // Degradar «soporte vital» a «no critico» es el ataque util.
-        let mut alterado = banco.marcados[0];
+        let mut alterado = banco.marcado(posicion);
         alterado.clase = None;
 
-        let resultado = MarcadoVerificado::verificar_e_instanciar(
-            alterado,
-            &banco.prueba_de(0),
-            &banco.raiz,
-            &banco.firma,
-            &banco.clave,
-        );
+        let resultado =
+            MarcadoVerificado::verificar_e_instanciar(alterado, &banco.prueba_de(posicion), &raiz);
 
         assert_eq!(resultado, Err(ErrorInventario::PruebaAjenaAlMarcado));
     }
@@ -1241,23 +1266,29 @@ mod pruebas {
         // borrar «esta bomba es soporte vital» no rompia nada. Con la raiz
         // firmada, la raiz del inventario mutilado ya no es la firmada.
         let banco = banco(DominioClave::Cliente);
+        let posicion = banco.posicion(&MAC);
 
-        let supervivientes: Vec<Resumen> = banco.marcados[1..]
+        let supervivientes: Vec<MarcadoBruto> = banco
+            .inventario
+            .marcados()
             .iter()
-            .map(MarcadoBruto::resumen)
+            .enumerate()
+            .filter(|(indice, _)| *indice != posicion)
+            .map(|(_, marcado)| *marcado)
             .collect();
-        let raiz_mutilada = raiz(&supervivientes).expect("quedan entradas");
+        let mutilado = Inventario::construir(supervivientes).expect("sigue sin duplicados");
+        let raiz_mutilada = mutilado.raiz().expect("quedan entradas");
 
-        assert_ne!(raiz_mutilada, banco.raiz);
+        assert_ne!(raiz_mutilada, banco.anclada.raiz);
 
-        // La entrada 0 ya no existe; se intenta pasar la 1 con la raiz nueva.
-        let prueba = prueba_inclusion(&supervivientes, 0, 0).expect("la posicion existe");
-        let resultado = MarcadoVerificado::verificar_e_instanciar(
-            banco.marcados[1],
-            &prueba,
-            &raiz_mutilada,
+        let resultado = RaizVerificada::verificar(
+            RaizAnclada {
+                raiz: raiz_mutilada,
+                secuencia: banco.anclada.secuencia,
+            },
             &banco.firma,
             &banco.clave,
+            banco.centinela,
         );
 
         assert_eq!(resultado, Err(ErrorInventario::FirmaDeRaizInvalida));
@@ -1265,18 +1296,159 @@ mod pruebas {
 
     #[test]
     fn una_raiz_ajena_no_verifica() {
+        // La raiz firmada es legitima, pero la prueba pertenece a otro arbol.
         let banco = banco(DominioClave::Cliente);
-        let otra = Resumen::desde_bytes([0x42; 32]);
+        let otra = Inventario::construir(vec![MarcadoBruto {
+            mac: [0xAA; 6],
+            clase: None,
+            emitido_en: AHORA,
+            vigencia_dias: 1,
+        }])
+        .expect("una sola entrada");
 
-        let resultado = MarcadoVerificado::verificar_e_instanciar(
-            banco.marcados[0],
-            &banco.prueba_de(0),
-            &otra,
-            &banco.firma,
-            &banco.clave,
-        );
+        let raiz = banco.raiz_verificada().expect("la raiz verifica");
+        let prueba = prueba_inclusion(&otra.resumenes(), 0, 0).expect("la posicion existe");
+
+        let resultado =
+            MarcadoVerificado::verificar_e_instanciar(otra.marcados()[0], &prueba, &raiz);
 
         assert_eq!(resultado, Err(ErrorInventario::InclusionNoVerifica));
+    }
+
+    // --- PA-27: reversion y frescura ---
+
+    #[test]
+    fn un_inventario_anterior_se_rechaza_pese_a_firma_valida() {
+        // El ataque de PA-27. Quien compromete el almacen no falsifica nada:
+        // restaura el fichero legitimo de la semana pasada, emitido antes de que
+        // la bomba se marcara como soporte vital.
+        let banco = banco_con(DominioClave::Cliente, 6, Centinela::Establecido(9));
+
+        assert_eq!(
+            banco.raiz_verificada(),
+            Err(ErrorInventario::ReversionDetectada {
+                aceptada: 9,
+                presentada: 6,
+            })
+        );
+    }
+
+    #[test]
+    fn la_misma_secuencia_se_admite_y_una_posterior_tambien() {
+        // Reemitir sin cambios no es un ataque; retroceder si.
+        assert!(
+            banco_con(DominioClave::Cliente, 9, Centinela::Establecido(9))
+                .raiz_verificada()
+                .is_ok()
+        );
+        assert!(
+            banco_con(DominioClave::Cliente, 10, Centinela::Establecido(9))
+                .raiz_verificada()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn borrar_el_centinela_no_se_lee_como_primera_vez() {
+        // Si la ausencia de centinela significara «primera vez», bastaria
+        // borrarlo para desactivar toda la proteccion de frescura. Borrarlo debe
+        // ser tan detectable como rebobinarlo.
+        let banco = banco_con(DominioClave::Cliente, 1, Centinela::SinEstablecer);
+
+        assert_eq!(
+            banco.raiz_verificada(),
+            Err(ErrorInventario::FrescuraNoEstablecida)
+        );
+    }
+
+    #[test]
+    fn el_aprovisionamiento_inicial_establece_el_centinela() {
+        let banco = banco_con(DominioClave::Cliente, 4, Centinela::SinEstablecer);
+        let (raiz, centinela) =
+            RaizVerificada::aprovisionar(banco.anclada, &banco.firma, &banco.clave)
+                .expect("el aprovisionamiento ocurre con un humano presente");
+
+        assert_eq!(raiz.secuencia(), 4);
+        assert_eq!(centinela, Centinela::Establecido(4));
+    }
+
+    #[test]
+    fn el_centinela_nunca_retrocede() {
+        assert_eq!(
+            Centinela::Establecido(9).avanzar(3),
+            Centinela::Establecido(9)
+        );
+        assert_eq!(
+            Centinela::Establecido(9).avanzar(11),
+            Centinela::Establecido(11)
+        );
+        assert_eq!(
+            Centinela::SinEstablecer.avanzar(2),
+            Centinela::Establecido(2)
+        );
+    }
+
+    #[test]
+    fn la_secuencia_viaja_dentro_del_mensaje_firmado() {
+        // Firmar la raiz por un lado y la secuencia por otro permitiria
+        // recombinar la raiz vieja con la secuencia nueva.
+        let raiz = Resumen::desde_bytes([9u8; 32]);
+        let uno = mensaje_de_raiz(&RaizAnclada { raiz, secuencia: 1 });
+        let dos = mensaje_de_raiz(&RaizAnclada { raiz, secuencia: 2 });
+
+        assert_ne!(uno, dos);
+    }
+
+    #[test]
+    fn recombinar_raiz_vieja_con_secuencia_nueva_no_verifica() {
+        let vieja = banco_con(DominioClave::Cliente, 5, Centinela::Establecido(5));
+
+        // Se conserva la firma de la secuencia 5 y se declara la 12.
+        let resultado = RaizVerificada::verificar(
+            RaizAnclada {
+                raiz: vieja.anclada.raiz,
+                secuencia: 12,
+            },
+            &vieja.firma,
+            &vieja.clave,
+            Centinela::Establecido(5),
+        );
+
+        assert_eq!(resultado, Err(ErrorInventario::FirmaDeRaizInvalida));
+    }
+
+    // --- Orden canonico y duplicados ---
+
+    #[test]
+    fn el_orden_de_entrada_no_altera_la_raiz() {
+        // Dos herramientas administrativas que enumeren los equipos en orden
+        // distinto deben producir la misma raiz.
+        let uno = Inventario::construir(marcados_de_prueba()).expect("sin duplicados");
+        let mut invertidos = marcados_de_prueba();
+        invertidos.reverse();
+        let otro = Inventario::construir(invertidos).expect("sin duplicados");
+
+        assert_eq!(uno.raiz(), otro.raiz());
+        assert_eq!(uno.marcados(), otro.marcados());
+    }
+
+    #[test]
+    fn un_dispositivo_declarado_dos_veces_se_rechaza() {
+        // Sin este control, un lector indulgente elegiria entre dos entradas
+        // contradictorias, y una de las dos elecciones favorece al atacante que
+        // anade una segunda entrada «no critico».
+        let mut marcados = marcados_de_prueba();
+        marcados.push(MarcadoBruto {
+            mac: MAC,
+            clase: None,
+            emitido_en: AHORA,
+            vigencia_dias: 365,
+        });
+
+        assert_eq!(
+            Inventario::construir(marcados),
+            Err(ErrorInventario::DispositivoDuplicado { mac: MAC })
+        );
     }
 
     #[test]
@@ -1315,7 +1487,13 @@ mod pruebas {
         // coincidieran, una firma sobre 32 bytes cualesquiera valdria como firma
         // de raiz.
         let raiz_falsa = Resumen::desde_bytes([7u8; 32]);
-        assert_ne!(mensaje_de_raiz(&raiz_falsa), raiz_falsa.bytes().to_vec());
+        assert_ne!(
+            mensaje_de_raiz(&RaizAnclada {
+                raiz: raiz_falsa,
+                secuencia: 1
+            }),
+            raiz_falsa.bytes().to_vec()
+        );
     }
 
     // --- Vigencia y reloj ---
