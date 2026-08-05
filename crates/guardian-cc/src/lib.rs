@@ -15,6 +15,9 @@
 
 #![forbid(unsafe_code)]
 
+pub mod clasificacion;
+
+use clasificacion::{Clasificacion, MotivoAmbiguedad};
 use thiserror::Error;
 
 /// Errores del guardian.
@@ -232,7 +235,18 @@ impl ClaseExcluida {
     }
 }
 
-/// Veredicto previo a emitir una contencion. RPT-008 §5.
+/// Veredicto previo a emitir una contencion. RPT-008 §5, RPT-009.
+///
+/// # Dos formas distintas de decir que no
+///
+/// [`Veredicto::Prohibida`] es permanente y **nadie** la levanta: el dispositivo
+/// *es* de una clase excluida. [`Veredicto::RequiereAprobacion`] escala a un
+/// humano que puede decidir proceder: la evidencia no basta.
+///
+/// Confundirlas seria un defecto en cualquiera de las dos direcciones. Tratar
+/// una ambiguedad como prohibicion permanente dejaria un dispositivo
+/// incontenible para siempre por un falso positivo; tratar una prohibicion como
+/// ambiguedad permitiria aislar una bomba de infusion con un clic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Veredicto {
     /// Puede ejecutarse sin intervencion.
@@ -241,7 +255,10 @@ pub enum Veredicto {
     ///
     /// El ensayo recorre precondiciones y resolucion de objetivo, y se detiene
     /// justo antes de la escritura.
-    RequiereAprobacion,
+    RequiereAprobacion {
+        /// Por que se escala. `None` cuando lo impone el perfil y no la evidencia.
+        motivo: Option<MotivoAmbiguedad>,
+    },
     /// No puede ejecutarse por ninguna via.
     Prohibida {
         /// Clase que motiva la prohibicion.
@@ -263,20 +280,43 @@ impl PerfilSegmento {
     }
 }
 
-/// Decide si una orden puede ejecutarse, y como. RPT-008 §5.
+/// Decide si una orden puede ejecutarse, y como. RPT-008 §5, RPT-009.
 ///
-/// El orden de evaluacion importa: la exclusion permanente se comprueba
-/// **antes** que el perfil, porque ninguna aprobacion humana la levanta.
+/// # Orden de evaluacion
+///
+/// La clasificacion se comprueba **antes** que el perfil, porque ninguna
+/// aprobacion humana levanta una exclusion permanente. Si el perfil se
+/// comprobara primero, un segmento corporativo ejecutaria contencion sobre un
+/// dispositivo de soporte vital.
+///
+/// Ninguna combinacion de entradas produce [`Veredicto::Ejecutar`] partiendo de
+/// una clasificacion que no sea [`Clasificacion::Clasificado`] con `clase: None`.
+/// Esa es la propiedad que hace que la evidencia ausente, insuficiente o
+/// contradictoria no pueda desembocar en una escritura automatica.
 #[must_use]
-pub fn evaluar(clase: Option<ClaseExcluida>, perfil: PerfilSegmento) -> Veredicto {
-    if let Some(clase) = clase {
-        return Veredicto::Prohibida { clase };
-    }
+pub fn evaluar(clasificacion: Clasificacion, perfil: PerfilSegmento) -> Veredicto {
+    match clasificacion {
+        Clasificacion::Clasificado {
+            clase: Some(clase), ..
+        } => Veredicto::Prohibida { clase },
 
-    if perfil.permite_respuesta_automatica() {
-        Veredicto::Ejecutar
-    } else {
-        Veredicto::RequiereAprobacion
+        Clasificacion::Ambiguo { motivo } => Veredicto::RequiereAprobacion {
+            motivo: Some(motivo),
+        },
+
+        // Sin evidencia de ninguna clase se escala igual que ante ambiguedad:
+        // no saber nada de un dispositivo no es permiso para actuar sobre el.
+        Clasificacion::NoClasificado => Veredicto::RequiereAprobacion {
+            motivo: Some(MotivoAmbiguedad::SegmentoPuedeAlojarCriticos),
+        },
+
+        Clasificacion::Clasificado { clase: None, .. } => {
+            if perfil.permite_respuesta_automatica() {
+                Veredicto::Ejecutar
+            } else {
+                Veredicto::RequiereAprobacion { motivo: None }
+            }
+        }
     }
 }
 
@@ -316,6 +356,10 @@ mod pruebas {
     // en codigo de produccion, donde el guardian de inconclusos la vigila.
     #![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
 
+    use super::clasificacion::{
+        Clasificacion, DeclaracionSegmento, Evidencia, FuenteEvidencia, MarcadoDispositivo,
+        MotivoAmbiguedad, clasificar,
+    };
     use super::*;
 
     fn orden(origen: OrigenEvento) -> OrdenContencion {
@@ -485,29 +529,41 @@ mod pruebas {
         // comprobara primero, un corporativo ejecutaria sobre un dispositivo de
         // soporte vital.
         for clase in ClaseExcluida::TODAS {
+            let clasificado = Clasificacion::Clasificado {
+                clase: Some(clase),
+                fuente: FuenteEvidencia::MarcadoAdministrativo,
+            };
             assert_eq!(
-                evaluar(Some(clase), PerfilSegmento::Corporativo),
+                evaluar(clasificado, PerfilSegmento::Corporativo),
                 Veredicto::Prohibida { clase }
             );
             assert_eq!(
-                evaluar(Some(clase), PerfilSegmento::Ot),
+                evaluar(clasificado, PerfilSegmento::Ot),
                 Veredicto::Prohibida { clase }
             );
+        }
+    }
+
+    /// Clasificacion contenible con respaldo humano.
+    const fn contenible() -> Clasificacion {
+        Clasificacion::Clasificado {
+            clase: None,
+            fuente: FuenteEvidencia::MarcadoAdministrativo,
         }
     }
 
     #[test]
     fn el_perfil_ot_nunca_ejecuta_sin_aprobacion() {
         assert_eq!(
-            evaluar(None, PerfilSegmento::Ot),
-            Veredicto::RequiereAprobacion
+            evaluar(contenible(), PerfilSegmento::Ot),
+            Veredicto::RequiereAprobacion { motivo: None }
         );
     }
 
     #[test]
     fn el_perfil_corporativo_ejecuta_si_no_hay_exclusion() {
         assert_eq!(
-            evaluar(None, PerfilSegmento::Corporativo),
+            evaluar(contenible(), PerfilSegmento::Corporativo),
             Veredicto::Ejecutar
         );
     }
@@ -520,5 +576,258 @@ mod pruebas {
         assert!(EstadoContencion::Desconocido.escala_a_humano());
         assert!(EstadoContencion::Rechazada.escala_a_humano());
         assert!(!EstadoContencion::Contenido.escala_a_humano());
+    }
+
+    // -----------------------------------------------------------------------
+    // Clasificacion — RPT-009, PA-23
+    // -----------------------------------------------------------------------
+
+    fn evidencia() -> Evidencia {
+        Evidencia {
+            marcado: None,
+            segmento: DeclaracionSegmento::NoDeclarado,
+            inferencia: None,
+        }
+    }
+
+    #[test]
+    fn las_fuentes_coinciden_con_el_manifiesto() {
+        let declaradas = valores_bajo(&manifiesto(), "[[fuente_evidencia]]", "nombre");
+        let implementadas: Vec<String> = FuenteEvidencia::TODAS
+            .iter()
+            .map(|fuente| fuente.identificador().to_owned())
+            .collect();
+
+        assert_eq!(
+            declaradas, implementadas,
+            "las fuentes de evidencia divergen del manifiesto.\n  \
+             manifiesto: {declaradas:?}\n  \
+             codigo    : {implementadas:?}"
+        );
+    }
+
+    #[test]
+    fn los_motivos_de_ambiguedad_coinciden_con_el_manifiesto() {
+        let declarados = valores_bajo(&manifiesto(), "[[motivo_ambiguedad]]", "nombre");
+        let implementados: Vec<String> = MotivoAmbiguedad::TODOS
+            .iter()
+            .map(|motivo| motivo.identificador().to_owned())
+            .collect();
+
+        assert_eq!(declarados, implementados);
+    }
+
+    #[test]
+    fn solo_las_fuentes_declarativas_descartan_criticidad() {
+        // La asimetria de la inferencia, comprobada contra el manifiesto: una
+        // huella no puede demostrar que un equipo NO es critico.
+        let contenido = manifiesto();
+
+        for fuente in FuenteEvidencia::TODAS {
+            let bloque = contenido
+                .split("[[fuente_evidencia]]")
+                .find(|bloque| bloque.contains(&format!("nombre = \"{}\"", fuente.identificador())))
+                .expect("toda fuente debe figurar en el manifiesto");
+
+            let declarado = bloque.contains("puede_declarar_no_critico = true");
+            assert_eq!(
+                declarado,
+                fuente.puede_declarar_no_critico(),
+                "'{}' declara puede_declarar_no_critico = {declarado} en el manifiesto \
+                 y {} en el codigo",
+                fuente.identificador(),
+                fuente.puede_declarar_no_critico()
+            );
+        }
+    }
+
+    // --- Evidencia ausente ---
+
+    #[test]
+    fn sin_evidencia_alguna_no_se_contiene_automaticamente() {
+        let clasificacion = clasificar(&evidencia());
+        assert_eq!(
+            clasificacion,
+            Clasificacion::Ambiguo {
+                motivo: MotivoAmbiguedad::SegmentoPuedeAlojarCriticos
+            }
+        );
+        assert!(!clasificacion.permite_accion_automatica());
+    }
+
+    #[test]
+    fn un_segmento_no_declarado_se_trata_como_si_alojara_criticos() {
+        // La ausencia de declaracion no es una declaracion de ausencia.
+        assert!(DeclaracionSegmento::NoDeclarado.admite_criticos());
+        assert!(DeclaracionSegmento::PuedeAlojarCriticos.admite_criticos());
+        assert!(!DeclaracionSegmento::SinDispositivosCriticos.admite_criticos());
+    }
+
+    // --- Evidencia insuficiente ---
+
+    #[test]
+    fn la_inferencia_nunca_produce_prohibicion_permanente() {
+        // Un falso positivo permanente e irrevocable seria tan malo como el
+        // fallo que se quiere evitar: el dispositivo quedaria incontenible para
+        // siempre sin que nadie pudiera corregirlo.
+        let mut evidencia = evidencia();
+        evidencia.inferencia = Some(ClaseExcluida::SoporteVital);
+
+        let clasificacion = clasificar(&evidencia);
+        assert_eq!(
+            clasificacion,
+            Clasificacion::Ambiguo {
+                motivo: MotivoAmbiguedad::InferenciaSugiereCriticidad
+            }
+        );
+
+        // Y sobre todo: NO es Prohibida.
+        assert!(!matches!(
+            evaluar(clasificacion, PerfilSegmento::Corporativo),
+            Veredicto::Prohibida { .. }
+        ));
+    }
+
+    #[test]
+    fn un_marcado_caducado_no_vale_como_marcado() {
+        // Un marcado vencido se degrada a ausencia. Conservarlo como valido
+        // seria afirmar algo sobre un parque que ya pudo cambiar.
+        let mut evidencia = evidencia();
+        evidencia.marcado = Some(MarcadoDispositivo {
+            clase: None,
+            vigente: false,
+        });
+
+        assert_eq!(
+            clasificar(&evidencia),
+            Clasificacion::Ambiguo {
+                motivo: MotivoAmbiguedad::MarcadoCaducado
+            }
+        );
+    }
+
+    // --- Evidencia contradictoria ---
+
+    #[test]
+    fn un_marcado_no_critico_contradicho_por_la_huella_es_ambiguo() {
+        // El humano manda para PROHIBIR pero no para PERMITIR. Si el marcado
+        // dice "no critico" y la huella dice lo contrario, o el marcado esta
+        // obsoleto o el equipo fue sustituido. Ambas exigen mirar.
+        let mut evidencia = evidencia();
+        evidencia.marcado = Some(MarcadoDispositivo {
+            clase: None,
+            vigente: true,
+        });
+        evidencia.inferencia = Some(ClaseExcluida::SeguridadFuncional);
+
+        assert_eq!(
+            clasificar(&evidencia),
+            Clasificacion::Ambiguo {
+                motivo: MotivoAmbiguedad::ConflictoEntreFuentes
+            }
+        );
+    }
+
+    #[test]
+    fn un_marcado_critico_vence_a_la_inferencia_discrepante() {
+        // La direccion contraria SI resuelve: anadir una prohibicion con una
+        // firma humana es legitimo aunque la huella no la respalde.
+        let mut evidencia = evidencia();
+        evidencia.marcado = Some(MarcadoDispositivo {
+            clase: Some(ClaseExcluida::SoporteVital),
+            vigente: true,
+        });
+        evidencia.inferencia = None;
+
+        assert_eq!(
+            evaluar(clasificar(&evidencia), PerfilSegmento::Corporativo),
+            Veredicto::Prohibida {
+                clase: ClaseExcluida::SoporteVital
+            }
+        );
+    }
+
+    // --- El unico camino a la ejecucion automatica ---
+
+    #[test]
+    fn solo_un_segmento_declarado_limpio_permite_contener_sin_marcado() {
+        let mut evidencia = evidencia();
+        evidencia.segmento = DeclaracionSegmento::SinDispositivosCriticos;
+
+        assert_eq!(
+            evaluar(clasificar(&evidencia), PerfilSegmento::Corporativo),
+            Veredicto::Ejecutar
+        );
+    }
+
+    #[test]
+    fn ninguna_evidencia_dudosa_desemboca_en_ejecucion() {
+        // Barrido exhaustivo del espacio de entradas. Es la propiedad central de
+        // PA-23 y merece comprobarse por enumeracion y no por argumento.
+        let marcados = [
+            None,
+            Some(MarcadoDispositivo {
+                clase: None,
+                vigente: true,
+            }),
+            Some(MarcadoDispositivo {
+                clase: None,
+                vigente: false,
+            }),
+            Some(MarcadoDispositivo {
+                clase: Some(ClaseExcluida::SoporteVital),
+                vigente: true,
+            }),
+            Some(MarcadoDispositivo {
+                clase: Some(ClaseExcluida::SoporteVital),
+                vigente: false,
+            }),
+        ];
+        let segmentos = [
+            DeclaracionSegmento::SinDispositivosCriticos,
+            DeclaracionSegmento::PuedeAlojarCriticos,
+            DeclaracionSegmento::NoDeclarado,
+        ];
+        let inferencias = [None, Some(ClaseExcluida::SeguridadFuncional)];
+
+        let mut ejecutadas = 0_u32;
+
+        for marcado in marcados {
+            for segmento in segmentos {
+                for inferencia in inferencias {
+                    let evidencia = Evidencia {
+                        marcado,
+                        segmento,
+                        inferencia,
+                    };
+                    let clasificacion = clasificar(&evidencia);
+                    let veredicto = evaluar(clasificacion, PerfilSegmento::Corporativo);
+
+                    if veredicto == Veredicto::Ejecutar {
+                        ejecutadas += 1;
+                        // Toda ejecucion debe apoyarse en una clasificacion
+                        // declarativa que descarte criticidad. Sin excepciones.
+                        assert!(
+                            clasificacion.permite_accion_automatica(),
+                            "se ejecutaria sobre {evidencia:?} con clasificacion {clasificacion:?}"
+                        );
+                    }
+
+                    // El perfil OT jamas ejecuta, sea cual sea la evidencia.
+                    assert_ne!(
+                        evaluar(clasificacion, PerfilSegmento::Ot),
+                        Veredicto::Ejecutar,
+                        "el perfil OT no debe ejecutar nunca; entrada: {evidencia:?}"
+                    );
+                }
+            }
+        }
+
+        // Si esto bajara a cero, el producto no contendria nada y las pruebas de
+        // arriba seguirian pasando: seria teatro en la direccion contraria.
+        assert!(
+            ejecutadas > 0,
+            "ninguna combinacion permite contener; la politica es inaplicable"
+        );
     }
 }

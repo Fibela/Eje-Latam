@@ -457,7 +457,8 @@ Todo reporte incluye tabla de metadatos, sección de trazabilidad indicando qué
 | ~~PA-20~~ | ~~Contrato IPC entre Eje-Visión y Eje-Agente~~ | ✅ Cerrado 5-ago-2026 — RPT-006 |
 | ~~PA-21~~ | ~~Tipado de carga útil por canal del contrato IPC~~ | ✅ Cerrado 5-ago-2026 — RPT-007 |
 | PA-22 | Cobertura de fabricantes OT (Siemens, Moxa, Hirschmann): sin oráculo que no sea equipo físico | 🟡 Abierto — RPT-008 §8 |
-| PA-23 | Clasificación de dispositivo para la exclusión permanente (soporte vital, seguridad funcional) | 🔴 **Abierto, crítico** — RPT-008 §8 |
+| ~~PA-23~~ | ~~Clasificación de dispositivo para la exclusión permanente~~ | ✅ Cerrado 5-ago-2026 — RPT-009. **Sin umbral configurable; la inferencia solo excluye** |
+| PA-24 | Productores de evidencia: huella pasiva, OUI, almacén de marcados firmados y su vigencia | 🟡 Abierto — RPT-009 §8 |
 
 ---
 

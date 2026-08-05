@@ -143,6 +143,100 @@ clase = "camino-de-gestion"
 motivo = "Aislar el camino por el que se administra el equipo hace la accion irreversible en remoto."
 
 # ---------------------------------------------------------------------------
+# CLASIFICACION DE DISPOSITIVO — RPT-009, PA-23
+# ---------------------------------------------------------------------------
+#
+# La lista de exclusion de arriba no sirve de nada si nadie sabe determinar que
+# un dispositivo pertenece a esas clases. Esta seccion define como se determina.
+#
+# NO HAY PUNTUACION NI UMBRAL. Una confianza numerica con umbral configurable es
+# un mando que alguien bajara para reducir falsos positivos, y el dia que lo baje
+# la proteccion desaparece sin que ninguna prueba falle. Las fuentes se ordenan
+# por AUTORIDAD y las reglas son discretas.
+#
+# ---------------------------------------------------------------------------
+# LA ASIMETRIA DE LA INFERENCIA
+# ---------------------------------------------------------------------------
+#
+# Una huella pasiva puede sugerir que un dispositivo es critico. NO PUEDE
+# demostrar que no lo es. Una bomba de infusion y una impresora de red hablan
+# HTTP y DHCP; muchos equipos medicos usan modulos de red comerciales, asi que
+# el OUI apunta al fabricante del modulo y no al del equipo.
+#
+# En consecuencia:
+#   - la inferencia solo mueve la clasificacion HACIA la exclusion, nunca al reves
+#   - solo un marcado humano firmado puede declarar que un dispositivo es
+#     contenible con seguridad
+#   - la inferencia jamas produce una prohibicion permanente: produce Ambiguo,
+#     que un humano puede resolver. Un falso positivo permanente e irrevocable
+#     seria un modo de fallo tan malo como el que se quiere evitar.
+
+[[fuente_evidencia]]
+nombre = "MarcadoAdministrativo"
+# Unica fuente con un humano responsable detras. Por eso es la unica que puede
+# declarar AUSENCIA de criticidad.
+autoridad = "declarativa"
+puede_declarar_critico = true
+puede_declarar_no_critico = true
+caduca = true
+
+[[fuente_evidencia]]
+nombre = "DeclaracionDeSegmento"
+# El administrador declara la naturaleza de una VLAN, no de cada dispositivo.
+# Es lo que hace la clasificacion tratable: decenas de segmentos en lugar de
+# miles de equipos.
+autoridad = "declarativa"
+puede_declarar_critico = true
+puede_declarar_no_critico = true
+caduca = true
+
+[[fuente_evidencia]]
+nombre = "HuellaPasiva"
+autoridad = "inferida"
+puede_declarar_critico = true
+puede_declarar_no_critico = false
+caduca = false
+
+[[fuente_evidencia]]
+nombre = "OuiFabricante"
+autoridad = "inferida"
+puede_declarar_critico = true
+puede_declarar_no_critico = false
+caduca = false
+
+# ---------------------------------------------------------------------------
+# MOTIVOS DE AMBIGUEDAD
+# ---------------------------------------------------------------------------
+#
+# Ambiguo NO es lo mismo que Prohibida. Prohibida es permanente y nadie la
+# levanta. Ambiguo escala a un humano que puede decidir proceder. Confundirlas
+# seria un defecto: la primera protege dispositivos, la segunda protege
+# decisiones.
+
+[[motivo_ambiguedad]]
+nombre = "ConflictoEntreFuentes"
+significado = "El marcado dice una cosa y la huella observada dice otra. O el marcado esta obsoleto o el equipo fue sustituido; ambas exigen mirar."
+
+[[motivo_ambiguedad]]
+nombre = "MarcadoCaducado"
+significado = "Existio un marcado y su vigencia expiro. Un marcado vencido no es un marcado valido: se degrada a ausencia, no se conserva."
+
+[[motivo_ambiguedad]]
+nombre = "SegmentoPuedeAlojarCriticos"
+significado = "Sin marcado de dispositivo y en un segmento que admite equipos criticos, o sin declaracion de segmento."
+
+[[motivo_ambiguedad]]
+nombre = "InferenciaSugiereCriticidad"
+significado = "La huella o el OUI apuntan a un equipo critico sin marcado que lo confirme o lo desmienta."
+
+[clasificacion]
+# Vigencia por defecto de un marcado, en dias. Un parque cambia; un marcado de
+# hace tres anos describe un equipo que quiza ya no esta.
+vigencia_marcado_dias = 365
+# Un segmento sin declaracion se trata como si pudiera alojar criticos.
+segmento_no_declarado_admite_criticos = true
+
+# ---------------------------------------------------------------------------
 # POLITICA POR PERFIL
 # ---------------------------------------------------------------------------
 #
