@@ -803,6 +803,7 @@ dependencies = [
  "ml-kem",
  "rand 0.9.5",
  "rand_core 0.10.1",
+ "serde_json",
  "sha2",
  "thiserror",
  "x25519-dalek",

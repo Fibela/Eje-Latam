@@ -207,7 +207,9 @@ fn acvp_ml_kem_768_encapsulado() {
             ejecutados += 1;
 
             if c.as_slice() != c_esperado.as_slice() {
-                fallos.push(format!("tcId {identificador}: el texto cifrado no coincide con 'c'"));
+                fallos.push(format!(
+                    "tcId {identificador}: el texto cifrado no coincide con 'c'"
+                ));
             }
             if k.as_slice() != k_esperado.as_slice() {
                 fallos.push(format!(
@@ -400,8 +402,16 @@ fn acvp_ml_dsa_65_verificacion_de_firma() {
             if obtenido_valido != esperado_valido {
                 fallos.push(format!(
                     "tcId {identificador} ({motivo}): se esperaba {} y se obtuvo {}",
-                    if esperado_valido { "aceptar" } else { "rechazar" },
-                    if obtenido_valido { "aceptar" } else { "rechazar" },
+                    if esperado_valido {
+                        "aceptar"
+                    } else {
+                        "rechazar"
+                    },
+                    if obtenido_valido {
+                        "aceptar"
+                    } else {
+                        "rechazar"
+                    },
                 ));
             }
         }
