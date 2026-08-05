@@ -7,6 +7,7 @@ members = [
     "crates/eje-almacen",
     "crates/boveda",
     "crates/eje-red",
+    "crates/eje-ipc",
     "xtask",
 ]
 

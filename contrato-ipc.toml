@@ -1,0 +1,93 @@
+# Contrato IPC entre Eje-Visión y Eje-Agente.
+#
+# RPT-006. PA-20.
+#
+# ---------------------------------------------------------------------------
+# POR QUE EXISTE ESTE FICHERO
+# ---------------------------------------------------------------------------
+#
+# Rust y TypeScript no pueden compartir una definicion de tipos. Si cada lado
+# declara los canales por su cuenta, divergen: es exactamente lo que ocurrio en
+# este proyecto, donde `eje-vision` tenia su lista de canales y `eje-agente` no
+# tenia ninguna.
+#
+# Este manifiesto es la UNICA FUENTE DE VERDAD. Ambos lados incluyen una prueba
+# que lo lee y falla si su definicion local no coincide. La divergencia deja de
+# ser posible en silencio: se convierte en CI en rojo.
+#
+# Es el mismo mecanismo que FUENTES.toml con su anclaje: declaracion unica mas
+# comprobacion ejecutable en cada extremo.
+#
+# ---------------------------------------------------------------------------
+# ANADIR UN CANAL
+# ---------------------------------------------------------------------------
+#
+# Requiere tocar TRES sitios, y esa friccion es deliberada:
+#   1. este fichero
+#   2. `crates/eje-ipc/src/lib.rs`  (enum Canal)
+#   3. `apps/eje-vision/packages/eje-vision-base/src/ipc/puente.ts`
+#
+# Un canal es una ampliacion de la superficie de ataque del proceso privilegiado.
+# No debe poder anadirse sin que tres revisiones lo vean.
+
+[marco]
+# Longitud maxima de un marco, en bytes. Acota el consumo del proceso principal
+# ante un renderer comprometido (RPT-004 §6.2).
+longitud_maxima = 1048576
+# Prefijo de longitud en 4 bytes big-endian antes de cada carga util.
+prefijo_longitud_bytes = 4
+
+# ---------------------------------------------------------------------------
+# CANALES PERMITIDOS
+# ---------------------------------------------------------------------------
+#
+# La lista es de PERMITIDOS, no de bloqueados: un canal que no figure aqui se
+# rechaza aunque el preload lo invoque (RPT-004 §6.2).
+
+[[canal]]
+nombre = "obtener-estado-agente"
+vista = "VIS-04"
+direccion = "consulta"
+descripcion = "Estado resumido del demonio: version, perfil de segmento y vigencia de reglas."
+
+[[canal]]
+nombre = "obtener-inventario"
+vista = "VIS-04"
+direccion = "consulta"
+descripcion = "Inventario vivo de dispositivos IoT/OT descubiertos y su postura."
+
+[[canal]]
+nombre = "obtener-estado-boveda"
+vista = "VIS-04"
+direccion = "consulta"
+descripcion = "Ocupacion de la Boveda Aislada, para la alerta obligatoria de capacidad."
+
+[[canal]]
+nombre = "consultar-sandbox"
+vista = "VIS-01"
+direccion = "consulta"
+descripcion = "Consulta SQL contra ALM-02. Nunca alcanza ALM-01 (RPT-002 §5)."
+
+# ---------------------------------------------------------------------------
+# CANALES PROHIBIDOS
+# ---------------------------------------------------------------------------
+#
+# No son una lista de bloqueo —la autoridad es la lista de permitidos— sino
+# pruebas de regresion. Si alguien introduce uno de estos nombres, las suites de
+# ambos lados lo detectan y explican por que esta prohibido.
+
+[[prohibido]]
+nombre = "ordenar-contencion"
+motivo = "La contencion se decide en guardian-cc a partir de telemetria real. Exponerla al renderer permitiria que la interfaz aislara nodos de una planta."
+
+[[prohibido]]
+nombre = "ejecutar-ddl-evidencia"
+motivo = "ALM-01 es de solo anexado. Ninguna ruta de la interfaz puede emitir DDL contra el registro de evidencia (RPT-002 §5)."
+
+[[prohibido]]
+nombre = "invocar"
+motivo = "Un pasamanos generico traslada la decision de autorizacion al renderer, que es justo la capa que no debe tenerla (RPT-004 §6.2)."
+
+[[prohibido]]
+nombre = "ejecutar-comando"
+motivo = "Misma razon que 'invocar'."

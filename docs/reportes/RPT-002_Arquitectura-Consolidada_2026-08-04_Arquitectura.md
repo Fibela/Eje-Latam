@@ -454,6 +454,8 @@ Todo reporte incluye tabla de metadatos, sección de trazabilidad indicando qué
 | ~~PA-17~~ | ~~Vectores ACVP y Wycheproof: anclaje y ejecución~~ | ✅ Cerrado 4-ago-2026 — RPT-005 §9 |
 | PA-18 | Fuente de aleatoriedad: DRBG conforme al NIST | 🟡 Abierto — RPT-005 §7.4 |
 | PA-19 | Ventana de reevaluación de la decisión PQC | 🟡 Abierto — RPT-005 §8 |
+| ~~PA-20~~ | ~~Contrato IPC entre Eje-Visión y Eje-Agente~~ | ✅ Cerrado 5-ago-2026 — RPT-006 |
+| PA-21 | Tipado de carga útil por canal del contrato IPC | 🟡 Abierto — RPT-006 §6 |
 
 ---
 

@@ -390,6 +390,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "eje-ipc"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "eje-red"
 version = "0.1.0"
 dependencies = [

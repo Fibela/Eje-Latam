@@ -139,6 +139,7 @@ que se emita una enmienda.
 | [RPT-003](docs/reportes/RPT-003_Gobernanza-y-Cierre-de-Puntos-Abiertos_2026-08-04_Gobernanza.md) | Gobernanza, licenciamiento y política de calidad |
 | [RPT-004](docs/reportes/RPT-004_Especificacion-de-Eje-Vision_2026-08-04_Interfaz.md) | Especificación de Eje-Visión y frontera de licencia en la interfaz |
 | [RPT-005](docs/reportes/RPT-005_Seleccion-de-Bibliotecas-Poscuanticas_2026-08-04_Seguridad.md) | Selección de bibliotecas ML-KEM y ML-DSA para `motor-pqc` |
+| [RPT-006](docs/reportes/RPT-006_Contrato-IPC-y-Verificadores-Triestaticos_2026-08-05_Interfaz.md) | Contrato IPC y principio de verificación triestática |
 
 **Regla de mantenimiento:** todo cambio funcional actualiza la documentación en el
 mismo commit. Un *pull request* que modifique comportamiento sin tocar `docs/` se
