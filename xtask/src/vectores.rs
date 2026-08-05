@@ -23,6 +23,14 @@ use sha2::{Digest, Sha256};
 /// Directorio de vectores, relativo a la raíz del workspace.
 const DIRECTORIO: &str = "crates/motor-pqc/tests/vectores";
 
+/// Tamaño máximo admitido por fichero.
+///
+/// Los `internalProjection.json` de ACVP cubren todos los conjuntos de
+/// parámetros del algoritmo y pueden ser muy grandes. Vendorizar cientos de
+/// megabytes en el repositorio no es aceptable: por encima de este límite hay
+/// que podar a los conjuntos que realmente usamos antes de versionar.
+const TAMANO_MAXIMO_BYTES: u64 = 64 * 1024 * 1024;
+
 /// Fichero declarado en `FUENTES.toml`.
 struct Fuente {
     nombre: String,
@@ -45,6 +53,13 @@ pub enum ErrorVectores {
         /// Resumen calculado sobre el contenido descargado.
         obtenido: String,
     },
+    /// El fichero descargado excede el límite admitido.
+    DemasiadoGrande {
+        /// Fichero afectado.
+        nombre: String,
+        /// Tamaño obtenido en bytes.
+        bytes: u64,
+    },
 }
 
 impl std::fmt::Display for ErrorVectores {
@@ -61,7 +76,18 @@ impl std::fmt::Display for ErrorVectores {
                 "el resumen de '{nombre}' no coincide con el anclaje.\n  \
                  esperado: {esperado}\n  obtenido: {obtenido}\n  \
                  El contenido cambio respecto a lo versionado. NO se acepta sin revision \
-                 manual: este anclaje es lo que hace segura la exoneracion de gitleaks."
+                 manual: este anclaje es lo que hace segura la exoneracion de gitleaks.\n  \
+                 Si el cambio es deliberado —una correccion de FUENTES.toml, por ejemplo—: \
+                 cargo xtask vectores --actualizar"
+            ),
+            Self::DemasiadoGrande { nombre, bytes } => write!(
+                formateador,
+                "'{nombre}' ocupa {} MB y supera el limite de {} MB.\n  \
+                 Vendorizar un fichero de ese tamano en el repositorio no es aceptable.\n  \
+                 Pode el conjunto a los parametros que realmente se usan (ML-KEM-768 y \
+                 ML-DSA-65) antes de versionarlo.",
+                bytes / (1024 * 1024),
+                TAMANO_MAXIMO_BYTES / (1024 * 1024)
             ),
         }
     }
@@ -169,7 +195,7 @@ fn leer_anclaje(ruta: &Path) -> Vec<(String, String)> {
 ///
 /// Devuelve error si la descarga falla o si el resumen de un fichero no coincide
 /// con el anclaje versionado.
-pub fn sincronizar(raiz: &Path) -> Result<(), ErrorVectores> {
+pub fn sincronizar(raiz: &Path, actualizar: bool) -> Result<(), ErrorVectores> {
     let directorio = raiz.join(DIRECTORIO);
     let declaracion = directorio.join("FUENTES.toml");
     let anclaje = directorio.join("FUENTES.lock");
@@ -184,10 +210,17 @@ pub fn sincronizar(raiz: &Path) -> Result<(), ErrorVectores> {
         ));
     }
 
-    let previo = leer_anclaje(&anclaje);
+    let previo = if actualizar {
+        Vec::new()
+    } else {
+        leer_anclaje(&anclaje)
+    };
     let primera_vez = previo.is_empty();
 
-    if primera_vez {
+    if actualizar {
+        println!("Modo --actualizar: se REESCRIBE el anclaje sin verificar el previo.");
+        println!("Revise el diff de FUENTES.lock antes de versionarlo.\n");
+    } else if primera_vez {
         println!("No hay anclaje previo: se creara FUENTES.lock.");
         println!("Revise el contenido descargado antes de versionarlo.\n");
     } else {
@@ -201,6 +234,16 @@ pub fn sincronizar(raiz: &Path) -> Result<(), ErrorVectores> {
         print!("  {} ... ", fuente.nombre);
 
         let bytes = descargar(&fuente.url, &destino)?;
+
+        if bytes.len() as u64 > TAMANO_MAXIMO_BYTES {
+            println!("DEMASIADO GRANDE");
+            let _ = fs::remove_file(&destino);
+            return Err(ErrorVectores::DemasiadoGrande {
+                nombre: fuente.nombre.clone(),
+                bytes: bytes.len() as u64,
+            });
+        }
+
         let resumen = resumir(&bytes);
 
         if let Some((_, esperado)) = previo.iter().find(|(nombre, _)| *nombre == fuente.nombre) {

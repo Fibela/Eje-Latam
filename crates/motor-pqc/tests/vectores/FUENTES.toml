@@ -14,26 +14,42 @@
 # ACVP — vectores oficiales del NIST
 #
 # Comprueban que la implementacion CALCULA CORRECTAMENTE lo que debe calcular.
+#
+# CORRECCION (agosto 2026). La primera version de este fichero apuntaba a
+# `prompt.json`, que contiene UNICAMENTE LAS ENTRADAS: un caso de keygen trae
+# `z` y `d` y nada mas; uno de sigVer trae `pk`, `message`, `context` y
+# `signature`, pero no si la firma debe aceptarse. Con esos ficheros no se puede
+# verificar nada, y se descargaron 3,7 MB para nada.
+#
+# `internalProjection.json` es el fichero autocontenido: entradas y resultados
+# esperados juntos, pensado para arneses de prueba locales sin cruzar dos
+# ficheros.
+#
+# ADVERTENCIA DE TAMANO. Estos ficheros cubren TODOS los conjuntos de parametros
+# del algoritmo, no solo el nuestro, y pueden ser muy superiores a los `prompt`.
+# `cargo xtask vectores` aborta por encima de 64 MB por fichero: vendorizar
+# cientos de megabytes en el repositorio no seria aceptable. Si se supera el
+# limite, la via correcta es podar a ML-KEM-768 y ML-DSA-65 en la descarga.
 # ---------------------------------------------------------------------------
 
 [[acvp]]
 nombre = "acvp_ml_kem_768_keygen.json"
-url = "https://raw.githubusercontent.com/usnistgov/ACVP-Server/master/gen-val/json-files/ML-KEM-keyGen-FIPS203/prompt.json"
+url = "https://raw.githubusercontent.com/usnistgov/ACVP-Server/master/gen-val/json-files/ML-KEM-keyGen-FIPS203/internalProjection.json"
 algoritmo = "ml-kem-768"
 
 [[acvp]]
 nombre = "acvp_ml_kem_768_encapdecap.json"
-url = "https://raw.githubusercontent.com/usnistgov/ACVP-Server/master/gen-val/json-files/ML-KEM-encapDecap-FIPS203/prompt.json"
+url = "https://raw.githubusercontent.com/usnistgov/ACVP-Server/master/gen-val/json-files/ML-KEM-encapDecap-FIPS203/internalProjection.json"
 algoritmo = "ml-kem-768"
 
 [[acvp]]
 nombre = "acvp_ml_dsa_65_keygen.json"
-url = "https://raw.githubusercontent.com/usnistgov/ACVP-Server/master/gen-val/json-files/ML-DSA-keyGen-FIPS204/prompt.json"
+url = "https://raw.githubusercontent.com/usnistgov/ACVP-Server/master/gen-val/json-files/ML-DSA-keyGen-FIPS204/internalProjection.json"
 algoritmo = "ml-dsa-65"
 
 [[acvp]]
 nombre = "acvp_ml_dsa_65_sigver.json"
-url = "https://raw.githubusercontent.com/usnistgov/ACVP-Server/master/gen-val/json-files/ML-DSA-sigVer-FIPS204/prompt.json"
+url = "https://raw.githubusercontent.com/usnistgov/ACVP-Server/master/gen-val/json-files/ML-DSA-sigVer-FIPS204/internalProjection.json"
 algoritmo = "ml-dsa-65"
 
 # ---------------------------------------------------------------------------

@@ -33,7 +33,10 @@ fn main() -> ExitCode {
             let ruta = argumentos.get(1).map(String::as_str).unwrap_or("crates");
             ejecutar_guardian(Path::new(ruta))
         }
-        "vectores" => ejecutar_vectores(),
+        "vectores" => {
+            let actualizar = argumentos.iter().any(|a| a == "--actualizar");
+            ejecutar_vectores(actualizar)
+        }
         "ayuda" | "--help" | "-h" => {
             ayuda();
             ExitCode::SUCCESS
@@ -50,16 +53,19 @@ fn ayuda() {
     println!("Herramientas de desarrollo de Eje-Latam\n");
     println!("  cargo xtask verificar [ruta]   Guardian de inconclusos (por defecto: crates)");
     println!("  cargo xtask vectores           Descarga y ancla los vectores ACVP y Wycheproof");
+    println!(
+        "    --actualizar                 Reescribe el anclaje (usar solo tras cambiar FUENTES.toml)"
+    );
     println!("  cargo xtask ayuda              Muestra esta ayuda");
 }
 
-fn ejecutar_vectores() -> ExitCode {
+fn ejecutar_vectores(actualizar: bool) -> ExitCode {
     let raiz = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap_or(Path::new("."));
 
     println!("{GRIS}Sincronizando vectores de prueba de motor-pqc{FIN}");
-    match vectores::sincronizar(raiz) {
+    match vectores::sincronizar(raiz, actualizar) {
         Ok(()) => {
             println!("{VERDE}Vectores sincronizados y anclados.{FIN}");
             ExitCode::SUCCESS
