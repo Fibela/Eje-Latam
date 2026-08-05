@@ -443,8 +443,8 @@ Todo reporte incluye tabla de metadatos, sección de trazabilidad indicando qué
 | PA-06 | Alojamiento del servidor STUN/DERP | ✅ Resuelto — RPT-003 §7 |
 | ~~PA-07~~ | ~~Ratificación de la frontera invertida~~ | ✅ Cerrado 4-ago-2026 — RPT-003 §2.7 |
 | PA-08 | Presupuesto de ancho de banda del relevo DERP | 🟡 Abierto — `RED-02` |
-| PA-09 | Banco de pruebas de switch para contención | 🟡 Abierto — pruebas de `AGT-01` |
-| PA-10 | Fabricantes de switch para conectores de Fase 1 | 🟡 Abierto — alcance comercial |
+| PA-09 | Banco de pruebas de switch para contención | 🔵 **Parcial** 5-ago-2026 — RPT-008 §6. Criterio, contrato y política cerrados; falta levantar el banco |
+| ~~PA-10~~ | ~~Fabricantes de switch para conectores de Fase 1~~ | ✅ Cerrado 5-ago-2026 — RPT-008 §3. **Cisco IOS XE primario, Arista EOS segundo** |
 | ~~PA-11~~ | ~~Mecanismo único del guardián de inconclusos~~ | ✅ Cerrado 4-ago-2026 — `cargo xtask verificar`, RPT-003 §9.5 |
 | PA-12 | Empaquetador de `eje-vision` | 🟡 Abierto — RPT-004 §10 |
 | PA-15 | `CON-SIM` deshabilitado durante incidente activo | 🟡 Abierto — RPT-004 §10 |
@@ -456,6 +456,8 @@ Todo reporte incluye tabla de metadatos, sección de trazabilidad indicando qué
 | PA-19 | Ventana de reevaluación de la decisión PQC | 🟡 Abierto — RPT-005 §8 |
 | ~~PA-20~~ | ~~Contrato IPC entre Eje-Visión y Eje-Agente~~ | ✅ Cerrado 5-ago-2026 — RPT-006 |
 | ~~PA-21~~ | ~~Tipado de carga útil por canal del contrato IPC~~ | ✅ Cerrado 5-ago-2026 — RPT-007 |
+| PA-22 | Cobertura de fabricantes OT (Siemens, Moxa, Hirschmann): sin oráculo que no sea equipo físico | 🟡 Abierto — RPT-008 §8 |
+| PA-23 | Clasificación de dispositivo para la exclusión permanente (soporte vital, seguridad funcional) | 🔴 **Abierto, crítico** — RPT-008 §8 |
 
 ---
 

@@ -1,0 +1,228 @@
+# Contrato de contencion de Guardian-CC.
+#
+# RPT-008. PA-09 y PA-10.
+#
+# ---------------------------------------------------------------------------
+# POR QUE EXISTE ESTE FICHERO
+# ---------------------------------------------------------------------------
+#
+# La contencion es la unica accion del producto que MODIFICA la red del cliente.
+# Todo lo demas observa. Un fallo de observacion produce un informe incompleto;
+# un fallo de contencion apaga un puerto de quirofano o detiene una linea de
+# produccion.
+#
+# La asimetria de consecuencias obliga a una asimetria de rigor. Este manifiesto
+# describe la accion de contencion COMO DATO, independiente del fabricante y del
+# transporte, para que:
+#
+#   1. la logica de decision sea probable sin ningun switch,
+#   2. el adaptador de cada fabricante sea una traduccion verificable y estrecha,
+#   3. anadir un fabricante no pueda introducir un modo de fallo nuevo en
+#      silencio.
+#
+# Mismo mecanismo que contrato-ipc.toml y FUENTES.toml: declaracion unica mas
+# comprobacion ejecutable.
+#
+# ---------------------------------------------------------------------------
+# LO QUE ESTE FICHERO NO ES
+# ---------------------------------------------------------------------------
+#
+# No es una abstraccion de configuracion de red. No pretende cubrir lo que un
+# switch sabe hacer. Cubre exclusivamente las acciones que Guardian-CC puede
+# emitir, que son deliberadamente pocas. Un vocabulario amplio aqui seria una
+# ampliacion de la superficie de dano.
+
+[version]
+contrato = "1.0.0"
+reporte = "RPT-008"
+
+# ---------------------------------------------------------------------------
+# ESTADOS — el principio triestatico aplicado a la contencion
+# ---------------------------------------------------------------------------
+#
+# RPT-006 §4. Un verificador que no distingue "no hay violacion" de "no pude
+# comprobarlo" miente. Aplicado a la contencion, el tercer estado no es una
+# sutileza metodologica: es el estado peligroso.
+#
+# Un puerto que se cree aislado y no lo esta es peor que un puerto que se sabe
+# no aislado, porque el segundo escala a un humano y el primero no.
+
+[[estado]]
+nombre = "Contenido"
+significado = "La accion se aplico Y una lectura posterior independiente lo confirma."
+# El read-back no es opcional. Sin el, este estado seria una declaracion de
+# intencion y no un hecho observado.
+exige_relectura = true
+escala_a_humano = false
+
+[[estado]]
+nombre = "ContencionRechazada"
+significado = "El equipo rechazo la accion y devolvio un motivo interpretable."
+exige_relectura = false
+escala_a_humano = true
+
+[[estado]]
+nombre = "EstadoDesconocido"
+significado = "Se emitio la accion y no se pudo determinar si surtio efecto."
+# Causas reales, no hipoteticas: expiro el plazo, la sesion cayo entre el envio
+# y la confirmacion, el equipo acepto la escritura pero la relectura no responde,
+# la configuracion se aplico parcialmente en un apilamiento.
+exige_relectura = false
+escala_a_humano = true
+# Prohibido colapsar este estado en ninguno de los otros dos. Es la regla que
+# cinco incidentes con el guardian de fronteras nos ensenaron a escribir.
+colapsable = false
+
+# ---------------------------------------------------------------------------
+# ACCIONES
+# ---------------------------------------------------------------------------
+#
+# El vocabulario completo. Ampliarlo exige reporte.
+
+[[accion]]
+nombre = "aislar-puerto"
+descripcion = "Deja el puerto administrativamente abajo."
+reversible = true
+# Que debe cumplirse ANTES de emitir. Cada precondicion existe porque su
+# ausencia produce un dano concreto, no por prudencia generica.
+precondiciones = [
+  "el-puerto-esta-identificado-por-nombre-y-no-por-indice",
+  "el-puerto-no-figura-en-la-lista-de-exclusion-permanente",
+  "existe-un-camino-de-gestion-que-no-atraviesa-el-puerto",
+]
+# La ultima es la que se olvida: aislar el puerto por el que se gestiona el
+# switch deja el equipo inalcanzable y la accion irreversible en remoto.
+relectura = "estado-administrativo-del-puerto"
+plazo_segundos = 10
+reversion = "restaurar-estado-administrativo-previo"
+
+[[accion]]
+nombre = "reasignar-vlan"
+descripcion = "Mueve el puerto a la VLAN de cuarentena."
+reversible = true
+precondiciones = [
+  "la-vlan-de-cuarentena-existe-en-el-equipo",
+  "el-puerto-esta-identificado-por-nombre-y-no-por-indice",
+  "el-puerto-no-figura-en-la-lista-de-exclusion-permanente",
+  "se-registro-la-vlan-previa-para-poder-revertir",
+]
+relectura = "vlan-de-acceso-del-puerto"
+plazo_segundos = 10
+reversion = "restaurar-vlan-previa"
+
+[[accion]]
+nombre = "consultar-estado-puerto"
+descripcion = "Lectura pura. No modifica nada."
+reversible = true
+precondiciones = []
+relectura = "no-aplica"
+plazo_segundos = 5
+reversion = "no-aplica"
+
+# ---------------------------------------------------------------------------
+# EXCLUSION PERMANENTE
+# ---------------------------------------------------------------------------
+#
+# Clases de dispositivo que Guardian-CC NO PUEDE contener por ninguna via, ni
+# siquiera con aprobacion humana, porque el riesgo de la contencion supera
+# cualquier beneficio esperable.
+#
+# La lista se aplica ANTES de evaluar el perfil o la politica. No es una
+# preferencia configurable: es un limite del producto.
+
+[[exclusion]]
+clase = "soporte-vital"
+motivo = "Aislar un dispositivo de soporte vital es un evento clinico, no de red."
+
+[[exclusion]]
+clase = "seguridad-funcional"
+motivo = "Paro de emergencia, cortinas opticas, enclavamientos. Aislarlos puede provocar una condicion insegura en planta en lugar de evitarla."
+
+[[exclusion]]
+clase = "camino-de-gestion"
+motivo = "Aislar el camino por el que se administra el equipo hace la accion irreversible en remoto."
+
+# ---------------------------------------------------------------------------
+# POLITICA POR PERFIL
+# ---------------------------------------------------------------------------
+#
+# El perfil OT no ejecuta contencion automatica. No es una restriccion de
+# producto que se pueda relajar comercialmente: es coherente con el resto de la
+# arquitectura (eje-red bloquea descubrimiento activo en OT) y con el hecho de
+# que en IACS la disponibilidad y la seguridad fisica dominan sobre la
+# confidencialidad.
+
+[[perfil]]
+nombre = "corporativo"
+respuesta_automatica = true
+requiere_aprobacion_humana = false
+modo_ensayo_por_defecto = false
+
+[[perfil]]
+nombre = "ot"
+respuesta_automatica = false
+requiere_aprobacion_humana = true
+# En OT el primer paso de toda contencion es un ensayo que calcula el efecto y
+# no lo aplica. El operador ve que se va a hacer antes de que se haga.
+modo_ensayo_por_defecto = true
+
+# ---------------------------------------------------------------------------
+# MODO ENSAYO
+# ---------------------------------------------------------------------------
+#
+# El ensayo recorre TODAS las precondiciones y la resolucion del objetivo, y se
+# detiene justo antes de la escritura. Un ensayo que no ejecuta las
+# precondiciones no prueba nada: seria el mismo defecto que la suite de vectores
+# que solo comprobaba que los ficheros existieran.
+
+[ensayo]
+ejecuta_precondiciones = true
+resuelve_objetivo = true
+emite_escritura = false
+produce_informe = true
+
+# ---------------------------------------------------------------------------
+# FABRICANTES DE FASE 1
+# ---------------------------------------------------------------------------
+#
+# Seleccion en RPT-008 §3. El campo `oraculo` declara contra que se prueba el
+# adaptador, y su AUTORIA es el criterio: si el comportamiento lo escribimos
+# nosotros, la prueba es un espejo.
+
+# El campo `mecanismo` NO es libre: debe ser una variante de
+# `MecanismoContencion` en crates/guardian-cc/src/lib.rs. Ese enum es vocabulario
+# ratificado y prohibe explicitamente la suplantacion ARP; SNMPv1 y v2c quedan
+# fuera porque las cadenas de comunidad viajan sin cifrar (RPT-003 §6.4).
+#
+# Un borrador previo de este fichero declaraba `ssh-cli` y `eapi`, que no estan
+# en el enum y ademas son peores: raspar CLI es fragil y poco auditable. Se
+# corrigio antes de escribir adaptador alguno.
+
+[[fabricante]]
+nombre = "cisco-ios-xe"
+familia = "IOS XE"
+# Cubre Catalyst de campus y Catalyst IE3x00 industrial con el MISMO sistema
+# operativo, que es lo que permite que un solo adaptador sirva a TI y a OT.
+cubre_ot = true
+mecanismo = "Netconf"
+oraculo = "imagen-virtual-del-fabricante"
+oraculo_autor = "cisco"
+verificado = false
+
+[[fabricante]]
+nombre = "arista-eos"
+familia = "EOS"
+cubre_ot = false
+mecanismo = "Netconf"
+oraculo = "imagen-de-contenedor-del-fabricante"
+oraculo_autor = "arista"
+verificado = false
+
+# `RadiusCoa` no se ata a fabricante a proposito: opera sobre la sesion 802.1X y
+# no sobre la configuracion del equipo, asi que es el unico mecanismo que no deja
+# residuo en el switch si la reversion falla. Es el candidato natural para OT y
+# se evaluara en PA-22.
+
+# `verificado = false` en ambos: la disponibilidad y las condiciones de licencia
+# de las imagenes NO se han comprobado descargandolas. Declararlo aqui evita que
+# una lectura futura tome por hecho lo que todavia es una expectativa.
