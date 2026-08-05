@@ -7,6 +7,9 @@
   "type": "module",
   "main": "./dist/indice.js",
   "types": "./dist/indice.d.ts",
+  "dependencies": {
+    "@eje/vision-base": "0.1.0"
+  },
   "scripts": {
     "compilar": "tsc --build"
   }

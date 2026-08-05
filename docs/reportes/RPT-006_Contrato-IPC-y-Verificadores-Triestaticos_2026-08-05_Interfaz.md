@@ -150,9 +150,11 @@ Y en el lado Rust, `cargo test --package eje-ipc`: **14/14**.
 
 | ID | Punto | Bloquea |
 |---|---|---|
-| **PA-21** | **Tipado de carga útil por canal.** El manifiesto blinda qué canales existen, su orden, la cota y las prohibiciones — pero **no la forma de los mensajes**. Es la siguiente capa donde los dos extremos pueden divergir en silencio | Implementación de las vistas |
+| ~~**PA-21**~~ | ~~**Tipado de carga útil por canal.** El manifiesto blinda qué canales existen, su orden, la cota y las prohibiciones — pero **no la forma de los mensajes**. Es la siguiente capa donde los dos extremos pueden divergir en silencio~~ | ✅ Cerrado 5-ago-2026 — **RPT-007** |
 
 El patrón a aplicar es el mismo: declarar los esquemas en el manifiesto y comprobar la paridad desde ambos lados. Lo que no debe hacerse es declararlos dos veces y confiar.
+
+> **Nota de cierre (5-ago-2026).** RPT-007 aplicó ese patrón y documentó dos hallazgos que este reporte no anticipaba: la **asimetría de fallo** entre `serde` y TypeScript ante el mismo defecto, y que `satisfies` cubre solo la mitad del problema. Las cifras de §5 son las vigentes en el momento de redactar este reporte y se conservan sin retocar.
 
 ---
 

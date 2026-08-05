@@ -91,3 +91,152 @@ motivo = "Un pasamanos generico traslada la decision de autorizacion al renderer
 [[prohibido]]
 nombre = "ejecutar-comando"
 motivo = "Misma razon que 'invocar'."
+
+# ---------------------------------------------------------------------------
+# CARGA UTIL — PA-21
+# ---------------------------------------------------------------------------
+#
+# La lista de permitidos blinda QUE canales existen. Esta seccion blinda QUE
+# FORMA tienen sus mensajes, que es la siguiente capa donde ambos extremos
+# pueden divergir.
+#
+# ASIMETRIA DEL FALLO. Los dos lados no fallan igual ante una forma inesperada:
+#
+#   Rust        serde con `deny_unknown_fields` RECHAZA ruidosamente. Un campo
+#               ausente, sobrante o de tipo incorrecto es error de
+#               deserializacion en la frontera.
+#   TypeScript  accede a `respuesta.version`, obtiene `undefined` y el problema
+#               aflora tres capas mas arriba, lejos de la causa.
+#
+# Por eso el rigor de Rust esta en el deserializador y el de TypeScript en la
+# prueba de paridad: no hace falta el mismo mecanismo a ambos lados, hace falta
+# el mecanismo adecuado en cada uno.
+#
+# VOCABULARIO DE TIPOS
+#   texto              cadena UTF-8
+#   entero             entero sin signo de 64 bits
+#   booleano           verdadero o falso
+#   enumerado          conjunto cerrado, valores separados por '|'
+#   lista<T>           secuencia homogenea; admite anidamiento
+#
+# NOMBRES EN EL CABLE. Se usa camelCase porque el extremo TypeScript los consume
+# tal cual. Rust los mapea con `#[serde(rename_all = "camelCase")]`.
+
+# --- Registros -------------------------------------------------------------
+
+[[registro]]
+nombre = "EstadoAgente"
+descripcion = "Estado resumido del demonio local."
+
+[[campo]]
+registro = "EstadoAgente"
+nombre = "version"
+tipo = "texto"
+
+[[campo]]
+registro = "EstadoAgente"
+nombre = "perfil"
+tipo = "enumerado"
+valores = "corporativo|ot"
+
+[[campo]]
+registro = "EstadoAgente"
+nombre = "respuestaAutomatica"
+tipo = "booleano"
+
+[[registro]]
+nombre = "NodoInventario"
+descripcion = "Dispositivo IoT/OT descubierto y su postura."
+
+[[campo]]
+registro = "NodoInventario"
+nombre = "identificador"
+tipo = "texto"
+
+[[campo]]
+registro = "NodoInventario"
+nombre = "direccionEnlace"
+tipo = "texto"
+
+[[campo]]
+registro = "NodoInventario"
+nombre = "clase"
+tipo = "enumerado"
+valores = "plc|camara|medico|estacion|desconocido"
+
+[[campo]]
+registro = "NodoInventario"
+nombre = "postura"
+tipo = "enumerado"
+valores = "conforme|anomalo|contenido"
+
+[[registro]]
+nombre = "EstadoBoveda"
+descripcion = "Ocupacion de la Boveda Aislada, para la alerta de capacidad."
+
+[[campo]]
+registro = "EstadoBoveda"
+nombre = "usadoBytes"
+tipo = "entero"
+
+[[campo]]
+registro = "EstadoBoveda"
+nombre = "limiteBytes"
+tipo = "entero"
+
+[[campo]]
+registro = "EstadoBoveda"
+nombre = "eventosPendientes"
+tipo = "entero"
+
+[[registro]]
+nombre = "PeticionConsulta"
+descripcion = "Consulta SQL dirigida al sandbox del analista (ALM-02)."
+
+[[campo]]
+registro = "PeticionConsulta"
+nombre = "sentencia"
+tipo = "texto"
+
+[[registro]]
+nombre = "ResultadoConsulta"
+descripcion = "Filas devueltas por el sandbox."
+
+[[campo]]
+registro = "ResultadoConsulta"
+nombre = "columnas"
+tipo = "lista<texto>"
+
+[[campo]]
+registro = "ResultadoConsulta"
+nombre = "filas"
+tipo = "lista<lista<texto>>"
+
+# --- Mensajes por canal ----------------------------------------------------
+#
+# Un canal sin peticion declarada no lleva carga util en esa direccion.
+
+[[mensaje]]
+canal = "obtener-estado-agente"
+direccion = "respuesta"
+forma = "EstadoAgente"
+
+[[mensaje]]
+canal = "obtener-inventario"
+direccion = "respuesta"
+forma = "lista<NodoInventario>"
+
+[[mensaje]]
+canal = "obtener-estado-boveda"
+direccion = "respuesta"
+forma = "EstadoBoveda"
+
+[[mensaje]]
+canal = "consultar-sandbox"
+direccion = "peticion"
+forma = "PeticionConsulta"
+
+[[mensaje]]
+canal = "consultar-sandbox"
+direccion = "respuesta"
+forma = "ResultadoConsulta"

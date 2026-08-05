@@ -208,6 +208,231 @@ fn un_prefijo_malicioso_no_provoca_reserva() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Carga util — PA-21
+// ---------------------------------------------------------------------------
+
+use crate::mensajes::{
+    CAMPOS_ESTADO_AGENTE, CAMPOS_ESTADO_BOVEDA, CAMPOS_NODO_INVENTARIO, CAMPOS_PETICION_CONSULTA,
+    CAMPOS_RESULTADO_CONSULTA, ClaseDispositivo, EstadoAgente, EstadoBoveda, NodoInventario,
+    PerfilSegmento, PeticionConsulta, Postura, ResultadoConsulta,
+};
+
+/// Campo declarado en el manifiesto.
+struct CampoDeclarado {
+    registro: String,
+    nombre: String,
+    tipo: String,
+}
+
+/// Extrae el valor entrecomillado de una línea `clave = "valor"`.
+fn entrecomillado(linea: &str, prefijo: &str) -> Option<String> {
+    let resto = linea.strip_prefix(prefijo)?;
+    let sin_inicio = resto.strip_prefix('"')?;
+    let fin = sin_inicio.find('"')?;
+    Some(sin_inicio[..fin].to_owned())
+}
+
+/// Lee los bloques `[[campo]]` del manifiesto, en orden de aparición.
+fn campos_declarados(contenido: &str) -> Vec<CampoDeclarado> {
+    let mut salida = Vec::new();
+    let mut actual: Option<(String, String, String)> = None;
+
+    let cerrar = |actual: Option<(String, String, String)>, salida: &mut Vec<CampoDeclarado>| {
+        if let Some((registro, nombre, tipo)) = actual {
+            if !registro.is_empty() && !nombre.is_empty() {
+                salida.push(CampoDeclarado {
+                    registro,
+                    nombre,
+                    tipo,
+                });
+            }
+        }
+    };
+
+    for linea in contenido.lines() {
+        let limpia = linea.trim();
+
+        if limpia.starts_with('[') {
+            cerrar(actual.take(), &mut salida);
+            if limpia == "[[campo]]" {
+                actual = Some((String::new(), String::new(), String::new()));
+            }
+            continue;
+        }
+        if limpia.starts_with('#') {
+            continue;
+        }
+
+        if let Some((registro, nombre, tipo)) = actual.as_mut() {
+            if let Some(valor) = entrecomillado(limpia, "registro = ") {
+                *registro = valor;
+            } else if let Some(valor) = entrecomillado(limpia, "nombre = ") {
+                *nombre = valor;
+            } else if let Some(valor) = entrecomillado(limpia, "tipo = ") {
+                *tipo = valor;
+            }
+        }
+    }
+
+    cerrar(actual, &mut salida);
+    salida
+}
+
+/// Compara los campos declarados para un registro con los implementados.
+fn comprobar_registro(registro: &str, esperados: &[(&str, &str)]) {
+    let contenido = manifiesto();
+    let declarados: Vec<(String, String)> = campos_declarados(&contenido)
+        .into_iter()
+        .filter(|campo| campo.registro == registro)
+        .map(|campo| (campo.nombre, campo.tipo))
+        .collect();
+
+    let implementados: Vec<(String, String)> = esperados
+        .iter()
+        .map(|(nombre, tipo)| ((*nombre).to_owned(), (*tipo).to_owned()))
+        .collect();
+
+    assert_eq!(
+        declarados, implementados,
+        "el registro '{registro}' diverge entre contrato-ipc.toml y el codigo.\n  \
+         manifiesto: {declarados:?}\n  codigo    : {implementados:?}\n  \
+         El orden tambien importa: reordenar en un solo lado produce un diff que \
+         parece inocuo."
+    );
+}
+
+#[test]
+fn los_registros_coinciden_con_el_manifiesto() {
+    comprobar_registro("EstadoAgente", &CAMPOS_ESTADO_AGENTE);
+    comprobar_registro("NodoInventario", &CAMPOS_NODO_INVENTARIO);
+    comprobar_registro("EstadoBoveda", &CAMPOS_ESTADO_BOVEDA);
+    comprobar_registro("PeticionConsulta", &CAMPOS_PETICION_CONSULTA);
+    comprobar_registro("ResultadoConsulta", &CAMPOS_RESULTADO_CONSULTA);
+}
+
+#[test]
+fn las_constantes_estan_atadas_a_los_structs() {
+    // Desestructuracion exhaustiva, SIN `..`. Anadir un campo a cualquiera de
+    // estos structs rompe la compilacion hasta que se anada tambien a su
+    // constante. Es lo que impide que CAMPOS_* sea una tercera declaracion
+    // independiente que pueda divergir en silencio.
+    let EstadoAgente {
+        version,
+        perfil,
+        respuesta_automatica,
+    } = EstadoAgente {
+        version: "0.1.0".to_owned(),
+        perfil: PerfilSegmento::Ot,
+        respuesta_automatica: false,
+    };
+    let _ = (version, perfil, respuesta_automatica);
+    assert_eq!(CAMPOS_ESTADO_AGENTE.len(), 3);
+
+    let NodoInventario {
+        identificador,
+        direccion_enlace,
+        clase,
+        postura,
+    } = NodoInventario {
+        identificador: "plc-3".to_owned(),
+        direccion_enlace: "00:11:22:33:44:55".to_owned(),
+        clase: ClaseDispositivo::Plc,
+        postura: Postura::Conforme,
+    };
+    let _ = (identificador, direccion_enlace, clase, postura);
+    assert_eq!(CAMPOS_NODO_INVENTARIO.len(), 4);
+
+    let EstadoBoveda {
+        usado_bytes,
+        limite_bytes,
+        eventos_pendientes,
+    } = EstadoBoveda {
+        usado_bytes: 0,
+        limite_bytes: 1,
+        eventos_pendientes: 0,
+    };
+    let _ = (usado_bytes, limite_bytes, eventos_pendientes);
+    assert_eq!(CAMPOS_ESTADO_BOVEDA.len(), 3);
+
+    let PeticionConsulta { sentencia } = PeticionConsulta {
+        sentencia: "SELECT 1".to_owned(),
+    };
+    let _ = sentencia;
+    assert_eq!(CAMPOS_PETICION_CONSULTA.len(), 1);
+
+    let ResultadoConsulta { columnas, filas } = ResultadoConsulta {
+        columnas: Vec::new(),
+        filas: Vec::new(),
+    };
+    let _ = (columnas, filas);
+    assert_eq!(CAMPOS_RESULTADO_CONSULTA.len(), 2);
+}
+
+#[test]
+fn todo_canal_declara_su_respuesta() {
+    let contenido = manifiesto();
+    for canal in Canal::TODOS {
+        let marca = format!("canal = \"{}\"", canal.identificador());
+        assert!(
+            contenido.contains(&marca),
+            "el canal '{}' no declara ningun mensaje en el manifiesto",
+            canal.identificador()
+        );
+    }
+}
+
+// --- Rigor del deserializador ----------------------------------------------
+//
+// El rigor de Rust vive aqui. TypeScript no tiene equivalente natural, y por eso
+// su rigor vive en la prueba de paridad (RPT-006, asimetria del fallo).
+
+#[test]
+fn un_campo_sobrante_se_rechaza() {
+    let bruto = r#"{"version":"0.1.0","perfil":"ot","respuestaAutomatica":false,"extra":1}"#;
+    assert!(
+        serde_json::from_str::<EstadoAgente>(bruto).is_err(),
+        "deny_unknown_fields debe rechazar campos no declarados"
+    );
+}
+
+#[test]
+fn un_campo_ausente_se_rechaza() {
+    let bruto = r#"{"version":"0.1.0","perfil":"ot"}"#;
+    assert!(serde_json::from_str::<EstadoAgente>(bruto).is_err());
+}
+
+#[test]
+fn un_valor_fuera_del_enumerado_se_rechaza() {
+    let bruto = r#"{"version":"0.1.0","perfil":"militar","respuestaAutomatica":false}"#;
+    assert!(serde_json::from_str::<EstadoAgente>(bruto).is_err());
+}
+
+#[test]
+fn el_nombre_en_el_cable_es_camel_case() {
+    // snake_case en Rust, camelCase en el cable. Si el mapeo se rompiera, el
+    // extremo TypeScript recibiria `undefined` en silencio.
+    let bruto = r#"{"version":"0.1.0","perfil":"ot","respuestaAutomatica":true}"#;
+    let estado: EstadoAgente =
+        serde_json::from_str(bruto).expect("el mensaje canonico debe deserializarse");
+    assert!(estado.respuesta_automatica);
+
+    let vuelta = serde_json::to_string(&estado).expect("debe serializarse");
+    assert!(vuelta.contains("respuestaAutomatica"));
+    assert!(!vuelta.contains("respuesta_automatica"));
+}
+
+#[test]
+fn el_mensaje_completo_es_reversible() {
+    let original = ResultadoConsulta {
+        columnas: vec!["numero".to_owned(), "clase".to_owned()],
+        filas: vec![vec!["1".to_owned(), "deteccion-anomalia".to_owned()]],
+    };
+    let texto = serde_json::to_string(&original).expect("debe serializarse");
+    let recuperado: ResultadoConsulta = serde_json::from_str(&texto).expect("debe deserializarse");
+    assert_eq!(original, recuperado);
+}
+
 #[test]
 fn un_marco_con_cola_sobrante_devuelve_solo_lo_declarado() {
     // El transporte puede entregar varios marcos en una lectura. Devolver la cola

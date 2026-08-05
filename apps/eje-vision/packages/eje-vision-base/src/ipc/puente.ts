@@ -87,6 +87,86 @@ export interface PuenteEje {
  */
 export const UMBRAL_ALERTA_BOVEDA = 0.85;
 
+// ---------------------------------------------------------------------------
+// Descripción declarativa de las cargas útiles — PA-21
+// ---------------------------------------------------------------------------
+//
+// TypeScript borra sus tipos al compilar: no hay forma de comparar una interfaz
+// contra el manifiesto en tiempo de ejecución. Estas constantes son el puente,
+// y `contrato.prueba.ts` comprueba que coincidan con `contrato-ipc.toml`.
+//
+// El lado Rust ata su equivalente a los structs mediante desestructuración
+// exhaustiva: añadir un campo rompe la compilación. Aquí hacen falta **dos**
+// mecanismos para lograr lo mismo, porque `satisfies` solo cubre la mitad:
+//
+//   1. `satisfies readonly (readonly [keyof T, string])[]` rechaza un nombre de
+//      campo que no exista en la interfaz — cubre el campo *sobrante*.
+//   2. `exigirCompleto<Faltantes<...>>()` rechaza que quede alguna clave de la
+//      interfaz sin declarar — cubre el campo *ausente*.
+//
+// Sin (2) esta constante sería una lista optativa: alguien añadiría un campo a
+// la interfaz, no lo declararía aquí, y nada protestaría.
+
+/** Claves que una tabla de campos declara. */
+type ClavesDeclaradas<T extends readonly (readonly [string, string])[]> =
+  T[number][0];
+
+/** Claves de `I` que la tabla `T` **no** declara. `never` si están todas. */
+type Faltantes<
+  I,
+  T extends readonly (readonly [string, string])[],
+> = Exclude<keyof I, ClavesDeclaradas<T>>;
+
+/**
+ * Falla la compilación si el parámetro de tipo no es `never`.
+ *
+ * Equivalente en TypeScript a la desestructuración exhaustiva de Rust. El error
+ * nombra la clave que falta, así que el diagnóstico es directo.
+ */
+function exigirCompleto<_Faltantes extends never>(): void {
+  // Sin cuerpo: toda la comprobación ocurre en el sistema de tipos.
+}
+
+/** Campos de [`EstadoAgente`], en el orden del manifiesto. */
+export const CAMPOS_ESTADO_AGENTE = [
+  ["version", "texto"],
+  ["perfil", "enumerado"],
+  ["respuestaAutomatica", "booleano"],
+] as const satisfies readonly (readonly [keyof EstadoAgente, string])[];
+
+/** Campos de [`NodoInventario`]. */
+export const CAMPOS_NODO_INVENTARIO = [
+  ["identificador", "texto"],
+  ["direccionEnlace", "texto"],
+  ["clase", "enumerado"],
+  ["postura", "enumerado"],
+] as const satisfies readonly (readonly [keyof NodoInventario, string])[];
+
+/** Campos de [`EstadoBoveda`]. */
+export const CAMPOS_ESTADO_BOVEDA = [
+  ["usadoBytes", "entero"],
+  ["limiteBytes", "entero"],
+  ["eventosPendientes", "entero"],
+] as const satisfies readonly (readonly [keyof EstadoBoveda, string])[];
+
+/** Campos de la petición de `consultar-sandbox`. */
+export const CAMPOS_PETICION_CONSULTA = [["sentencia", "texto"]] as const;
+
+/** Campos de [`ResultadoConsulta`]. */
+export const CAMPOS_RESULTADO_CONSULTA = [
+  ["columnas", "lista<texto>"],
+  ["filas", "lista<lista<texto>>"],
+] as const satisfies readonly (readonly [keyof ResultadoConsulta, string])[];
+
+// Comprobación de exhaustividad. Estas cuatro llamadas no producen código: si
+// una interfaz gana un campo y su tabla no lo declara, `tsc` falla aquí.
+// `PeticionConsulta` no tiene interfaz propia — es el argumento de
+// `consultarSandbox`— y por eso no figura.
+exigirCompleto<Faltantes<EstadoAgente, typeof CAMPOS_ESTADO_AGENTE>>();
+exigirCompleto<Faltantes<NodoInventario, typeof CAMPOS_NODO_INVENTARIO>>();
+exigirCompleto<Faltantes<EstadoBoveda, typeof CAMPOS_ESTADO_BOVEDA>>();
+exigirCompleto<Faltantes<ResultadoConsulta, typeof CAMPOS_RESULTADO_CONSULTA>>();
+
 /**
  * Indica si el estado de la Bóveda exige alerta en VIS-04.
  *

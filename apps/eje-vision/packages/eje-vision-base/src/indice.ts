@@ -17,7 +17,15 @@ export type {
   PuenteEje,
   ResultadoConsulta,
 } from "./ipc/puente.js";
-export { requiereAlertaCapacidad, UMBRAL_ALERTA_BOVEDA } from "./ipc/puente.js";
+export {
+  CAMPOS_ESTADO_AGENTE,
+  CAMPOS_ESTADO_BOVEDA,
+  CAMPOS_NODO_INVENTARIO,
+  CAMPOS_PETICION_CONSULTA,
+  CAMPOS_RESULTADO_CONSULTA,
+  requiereAlertaCapacidad,
+  UMBRAL_ALERTA_BOVEDA,
+} from "./ipc/puente.js";
 
 export { BASE_DE_LA_CONSOLA } from "./vistas/vis-01-consola-almacen/indice.js";
 export type { BaseAlcanzable } from "./vistas/vis-01-consola-almacen/indice.js";

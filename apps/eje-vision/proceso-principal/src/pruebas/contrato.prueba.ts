@@ -21,6 +21,13 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  CAMPOS_ESTADO_AGENTE,
+  CAMPOS_ESTADO_BOVEDA,
+  CAMPOS_NODO_INVENTARIO,
+  CAMPOS_PETICION_CONSULTA,
+  CAMPOS_RESULTADO_CONSULTA,
+} from "@eje/vision-base";
+import {
   CANALES_PERMITIDOS,
   CANALES_PROHIBIDOS,
   CARGA_MAXIMA_BYTES,
@@ -51,6 +58,52 @@ function manifiesto(): string {
  * añadir una dependencia TOML solo para esta prueba no se justifica. Es el mismo
  * criterio que en `xtask/src/vectores.rs`.
  */
+/**
+ * Extrae los bloques `[[campo]]` de un registro, en orden de aparición.
+ *
+ * Devuelve pares `[nombre, tipo]` comparables con las constantes del código.
+ */
+function camposDe(contenido: string, registro: string): [string, string][] {
+  const campos: [string, string][] = [];
+  let dentro = false;
+  let actual: { registro?: string; nombre?: string; tipo?: string } | null = null;
+
+  const cerrar = (): void => {
+    if (
+      actual?.registro === registro &&
+      actual.nombre !== undefined &&
+      actual.tipo !== undefined
+    ) {
+      campos.push([actual.nombre, actual.tipo]);
+    }
+    actual = null;
+  };
+
+  for (const linea of contenido.split("\n")) {
+    const limpia = linea.trim();
+
+    if (limpia.startsWith("[")) {
+      cerrar();
+      dentro = limpia === "[[campo]]";
+      if (dentro) {
+        actual = {};
+      }
+      continue;
+    }
+    if (limpia.startsWith("#") || actual === null) {
+      continue;
+    }
+
+    const coincidencia = /^(registro|nombre|tipo)\s*=\s*"([^"]+)"/u.exec(limpia);
+    if (coincidencia?.[1] !== undefined && coincidencia[2] !== undefined) {
+      actual[coincidencia[1] as "registro" | "nombre" | "tipo"] = coincidencia[2];
+    }
+  }
+  cerrar();
+
+  return campos;
+}
+
 function nombresBajo(contenido: string, cabecera: string): string[] {
   const nombres: string[] = [];
   let dentro = false;
@@ -122,6 +175,32 @@ describe("PA-20 — paridad con contrato-ipc.toml", () => {
     }
   });
 
+  it("las cargas útiles coinciden con el manifiesto", () => {
+    // PA-21. El manifiesto blinda qué canales existen; esto blinda qué forma
+    // tienen sus mensajes, que es la siguiente capa donde ambos extremos pueden
+    // divergir sin que nadie se entere hasta que algo llega `undefined`.
+    const contenido = manifiesto();
+
+    const registros: [string, readonly (readonly [string, string])[]][] = [
+      ["EstadoAgente", CAMPOS_ESTADO_AGENTE],
+      ["NodoInventario", CAMPOS_NODO_INVENTARIO],
+      ["EstadoBoveda", CAMPOS_ESTADO_BOVEDA],
+      ["PeticionConsulta", CAMPOS_PETICION_CONSULTA],
+      ["ResultadoConsulta", CAMPOS_RESULTADO_CONSULTA],
+    ];
+
+    for (const [nombre, implementados] of registros) {
+      const declarados = camposDe(contenido, nombre);
+      assert.deepEqual(
+        declarados,
+        implementados.map(([campo, tipo]) => [campo, tipo]),
+        `el registro '${nombre}' diverge entre contrato-ipc.toml y el codigo.\n` +
+          `  manifiesto: ${JSON.stringify(declarados)}\n` +
+          `  codigo    : ${JSON.stringify(implementados)}`,
+      );
+    }
+  });
+
   it("el límite de carga coincide con el manifiesto", () => {
     // Un límite distinto en cada extremo permite que un lado acepte lo que el
     // otro rechaza, y esa asimetría es explotable.
@@ -130,6 +209,16 @@ describe("PA-20 — paridad con contrato-ipc.toml", () => {
       contenido.includes(`longitud_maxima = ${CARGA_MAXIMA_BYTES}`),
       `el manifiesto debe declarar 'longitud_maxima = ${CARGA_MAXIMA_BYTES}'`,
     );
+  });
+
+  it("el manifiesto declara la forma de cada canal", () => {
+    const contenido = manifiesto();
+    for (const canal of CANALES_PERMITIDOS) {
+      assert.ok(
+        contenido.includes(`canal = "${canal}"`),
+        `el canal '${canal}' no declara ningun mensaje en el manifiesto`,
+      );
+    }
   });
 
   it("el manifiesto documenta el motivo de cada prohibición", () => {

@@ -22,6 +22,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod mensajes;
+
 #[cfg(test)]
 mod pruebas;
 
