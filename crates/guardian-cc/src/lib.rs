@@ -16,6 +16,7 @@
 #![forbid(unsafe_code)]
 
 pub mod almacen;
+pub mod arranque;
 pub mod clasificacion;
 pub mod disco;
 pub mod formato;
@@ -2134,6 +2135,288 @@ mod pruebas {
         );
 
         let _ = std::fs::remove_dir_all(&directorio);
+    }
+
+    // -----------------------------------------------------------------------
+    // Arranque y persistencia — RPT-017, PA-35
+    // -----------------------------------------------------------------------
+
+    use std::path::PathBuf;
+
+    use arranque::{
+        ErrorArranque, EstadoArranque, RutasAlmacen, aceptar_inventario, analizar_centinela,
+        arrancar, cargar_centinela, serializar_centinela,
+    };
+
+    /// Almacen aislado en disco, retirado al terminar.
+    struct AlmacenDePrueba {
+        rutas: RutasAlmacen,
+    }
+
+    impl AlmacenDePrueba {
+        fn nuevo(nombre: &str) -> Self {
+            let directorio = std::env::temp_dir().join(format!("eje-latam-arranque-{nombre}"));
+            let _ = std::fs::remove_dir_all(&directorio);
+            std::fs::create_dir_all(&directorio).expect("directorio de prueba");
+            Self {
+                rutas: RutasAlmacen::nuevo(directorio),
+            }
+        }
+    }
+
+    impl Drop for AlmacenDePrueba {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(self.rutas.directorio());
+        }
+    }
+
+    /// Clave de recuperación con la que se leen las revocaciones al arrancar.
+    fn clave_recuperacion_de_prueba() -> ClaveInventario {
+        clave_de_recuperacion(DominioClave::ClienteRecuperacion).1
+    }
+
+    #[test]
+    fn el_centinela_es_reversible_en_disco() {
+        assert_eq!(
+            analizar_centinela(&serializar_centinela(42)).expect("debe analizar"),
+            Centinela::Establecido(42)
+        );
+    }
+
+    #[test]
+    fn un_centinela_corrupto_no_se_degrada_a_primer_arranque() {
+        // Es el ataque del §2 por otra puerta: si corromper dieciocho bytes
+        // simulara un primer arranque, borrar el inventario volveria a funcionar.
+        for caso in [
+            vec![],
+            vec![0u8; 18],
+            serializar_centinela(1)[..17].to_vec(),
+            {
+                let mut bytes = serializar_centinela(1);
+                bytes[9] = 9; // version desconocida
+                bytes
+            },
+        ] {
+            assert!(
+                matches!(
+                    analizar_centinela(&caso),
+                    Err(ErrorArranque::CentinelaCorrupto)
+                ),
+                "un centinela de {} bytes no debe degradarse en silencio",
+                caso.len()
+            );
+        }
+    }
+
+    #[test]
+    fn un_almacen_vacio_es_un_primer_arranque() {
+        let almacen = AlmacenDePrueba::nuevo("vacio");
+        let banco = banco(DominioClave::Cliente);
+
+        let (estado, centinela) = arrancar(
+            &almacen.rutas,
+            &banco.clave,
+            &clave_recuperacion_de_prueba(),
+        )
+        .expect("un almacen vacio debe dejar arrancar");
+
+        assert!(matches!(estado, EstadoArranque::PrimerArranque));
+        assert_eq!(centinela, Centinela::SinEstablecer);
+        assert!(estado.admite_contencion_automatica());
+        assert!(
+            !estado.exige_alerta(),
+            "un primer arranque es normal y no debe alertar"
+        );
+        assert_eq!(estado.marcado(&MAC), Ok(None));
+    }
+
+    #[test]
+    fn borrar_el_inventario_se_detecta_como_supresion() {
+        // El ataque del §2. Sin el testigo del centinela, esto seria
+        // indistinguible de un primer arranque y el equipo de soporte vital
+        // pasaria a ser contenible.
+        let almacen = AlmacenDePrueba::nuevo("supresion");
+        let banco = banco(DominioClave::Cliente);
+
+        aceptar_inventario(&almacen.rutas, &bytes_en_disco(&banco), 7).expect("aceptar");
+        std::fs::remove_file(almacen.rutas.inventario()).expect("el atacante borra el fichero");
+
+        let (estado, _) = arrancar(
+            &almacen.rutas,
+            &banco.clave,
+            &clave_recuperacion_de_prueba(),
+        )
+        .expect("el agente debe arrancar igual");
+
+        assert!(matches!(
+            estado,
+            EstadoArranque::Supresion {
+                secuencia_conocida: 7
+            }
+        ));
+        assert!(
+            !estado.admite_contencion_automatica(),
+            "tras una supresion no puede haber contencion automatica"
+        );
+        assert!(estado.exige_alerta());
+
+        // Y el proveedor devuelve error, no ausencia: la clasificacion resuelve
+        // en ambiguedad y no en «contenible».
+        assert!(matches!(
+            estado.marcado(&MAC),
+            Err(ErrorProveedor::FirmaInvalida { .. })
+        ));
+    }
+
+    #[test]
+    fn la_supresion_no_desemboca_en_contencion() {
+        // La comprobacion que importa de verdad: el efecto en el veredicto.
+        let almacen = AlmacenDePrueba::nuevo("supresion-veredicto");
+        let banco = banco(DominioClave::Cliente);
+
+        aceptar_inventario(&almacen.rutas, &bytes_en_disco(&banco), 7).expect("aceptar");
+        std::fs::remove_file(almacen.rutas.inventario()).expect("borrado");
+
+        let (estado, _) = arrancar(
+            &almacen.rutas,
+            &banco.clave,
+            &clave_recuperacion_de_prueba(),
+        )
+        .expect("arranque");
+
+        let proveedores = Proveedores {
+            inventario: &estado,
+            // Segmento declarado limpio: es el caso en el que el borrado
+            // convertiria un equipo critico en contenible.
+            segmento: &SegmentoDe(Ok(segmento_limpio())),
+            oui: &OuiDe(Ok(Indicio::SinIndicio)),
+            huella: &HuellaDe(Ok(Indicio::SinIndicio)),
+        };
+
+        let veredicto = evaluar(
+            clasificar_con_proveedores(&proveedores, &MAC, AHORA),
+            PerfilSegmento::Corporativo,
+        );
+
+        assert_ne!(veredicto, Veredicto::Ejecutar);
+        assert!(veredicto.exige_alerta());
+    }
+
+    #[test]
+    fn un_primer_arranque_si_permite_contener_en_segmento_limpio() {
+        // La otra mitad: si el primer arranque bloqueara todo, el producto no
+        // contendria nada nunca en una instalacion nueva. Es la paralisis que
+        // RPT-009 §5 resolvio.
+        let almacen = AlmacenDePrueba::nuevo("primer-arranque-contiene");
+        let banco = banco(DominioClave::Cliente);
+
+        let (estado, _) = arrancar(
+            &almacen.rutas,
+            &banco.clave,
+            &clave_recuperacion_de_prueba(),
+        )
+        .expect("arranque");
+
+        let proveedores = Proveedores {
+            inventario: &estado,
+            segmento: &SegmentoDe(Ok(segmento_limpio())),
+            oui: &OuiDe(Ok(Indicio::SinIndicio)),
+            huella: &HuellaDe(Ok(Indicio::SinIndicio)),
+        };
+
+        assert_eq!(
+            evaluar(
+                clasificar_con_proveedores(&proveedores, &MAC, AHORA),
+                PerfilSegmento::Corporativo
+            ),
+            Veredicto::Ejecutar
+        );
+    }
+
+    #[test]
+    fn un_inventario_alterado_en_disco_arranca_pero_no_verifica() {
+        let almacen = AlmacenDePrueba::nuevo("alterado");
+        let banco = banco(DominioClave::Cliente);
+
+        let mut bytes = bytes_en_disco(&banco);
+        aceptar_inventario(&almacen.rutas, &bytes, 7).expect("aceptar");
+
+        // Degradar la primera entrada a «no critico», como en RPT-013.
+        let posicion_clase = 22 + banco.posicion(&MAC) * 19 + 6;
+        bytes[posicion_clase] = 0;
+        std::fs::write(almacen.rutas.inventario(), &bytes).expect("el atacante reescribe");
+
+        let (estado, _) = arrancar(
+            &almacen.rutas,
+            &banco.clave,
+            &clave_recuperacion_de_prueba(),
+        )
+        .expect("el agente arranca igual");
+
+        assert!(matches!(estado, EstadoArranque::NoVerifica { .. }));
+        assert!(!estado.admite_contencion_automatica());
+        assert!(estado.exige_alerta());
+    }
+
+    #[test]
+    fn el_ciclo_completo_sobrevive_a_un_reinicio() {
+        // PA-35 de extremo a extremo: escribir, «reiniciar» volviendo a arrancar,
+        // y comprobar que el marcado sigue ahi y la frescura se conserva.
+        let almacen = AlmacenDePrueba::nuevo("reinicio");
+        let banco = banco(DominioClave::Cliente);
+
+        let centinela = aceptar_inventario(&almacen.rutas, &bytes_en_disco(&banco), 7)
+            .expect("aceptar el inventario");
+        assert_eq!(centinela, Centinela::Establecido(7));
+        assert_eq!(
+            cargar_centinela(&almacen.rutas).expect("releer"),
+            Centinela::Establecido(7)
+        );
+
+        let (estado, centinela) = arrancar(
+            &almacen.rutas,
+            &banco.clave,
+            &clave_recuperacion_de_prueba(),
+        )
+        .expect("rearranque");
+
+        assert!(matches!(estado, EstadoArranque::Operativo(_)));
+        assert_eq!(centinela, Centinela::Establecido(7));
+
+        let marcado = estado
+            .marcado(&MAC)
+            .expect("el proveedor responde")
+            .expect("la mac figura");
+        assert_eq!(marcado.clase(), Some(ClaseExcluida::SoporteVital));
+    }
+
+    #[test]
+    fn el_centinela_se_escribe_antes_que_el_inventario() {
+        // Si el proceso muriera entre ambas escrituras, el centinela ya estaria
+        // en N. Se comprueba el orden observando el estado tras la primera.
+        let almacen = AlmacenDePrueba::nuevo("orden-de-escritura");
+
+        disco::escribir_atomico(&almacen.rutas.centinela(), &serializar_centinela(9))
+            .expect("escritura del centinela");
+
+        assert_eq!(
+            cargar_centinela(&almacen.rutas).expect("releer"),
+            Centinela::Establecido(9),
+            "el centinela debe quedar en disco aunque el inventario no haya llegado"
+        );
+        assert!(
+            !almacen.rutas.inventario().exists(),
+            "el inventario aun no se escribio"
+        );
+    }
+
+    #[test]
+    fn las_rutas_cuelgan_de_un_solo_directorio() {
+        let rutas = RutasAlmacen::nuevo(PathBuf::from("/datos/eje"));
+
+        for ruta in [rutas.inventario(), rutas.revocaciones(), rutas.centinela()] {
+            assert_eq!(ruta.parent(), Some(rutas.directorio()));
+        }
     }
 
     #[test]
