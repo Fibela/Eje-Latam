@@ -1719,8 +1719,8 @@ mod pruebas {
     // -----------------------------------------------------------------------
 
     use revocacion::{
-        CertificadoRevocacion, CertificadoVerificado, ErrorRevocacion, IdentificadorClave,
-        RegistroRevocaciones, mensaje_de_certificado,
+        Anotacion, ArchivoRevocaciones, CertificadoRevocacion, CertificadoVerificado, ErrorArchivo,
+        ErrorRevocacion, IdentificadorClave, RegistroRevocaciones, mensaje_de_certificado,
     };
 
     /// Par de recuperacion, distinto del operativo por semilla.
@@ -1991,6 +1991,151 @@ mod pruebas {
         );
     }
 
+    // --- PA-34: persistencia del registro ---
+
+    /// Anotacion firmada lista para persistir.
+    fn anotacion_para(banco: &Banco, corte: u64, firmante: &ClaveFirmaHibrida) -> Anotacion {
+        let certificado = certificado_para(banco, corte);
+        Anotacion {
+            firma: firmar_certificado(&certificado, firmante),
+            certificado,
+        }
+    }
+
+    #[test]
+    fn el_archivo_de_revocaciones_es_reversible() {
+        let banco = banco(DominioClave::Cliente);
+        let (firmante, clave) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+
+        let mut archivo = ArchivoRevocaciones::nuevo();
+        archivo.anotar(anotacion_para(&banco, 7, &firmante));
+
+        let bytes = archivo.serializar();
+        let leido = ArchivoRevocaciones::analizar(&bytes, &clave).expect("debe reverificar");
+
+        assert_eq!(leido.anotaciones().len(), 1);
+        assert_eq!(leido.serializar(), bytes);
+        assert_eq!(
+            leido.registro().corte_de(&banco.clave.identificador()),
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn alterar_un_corte_en_el_fichero_se_detecta() {
+        // El motivo de guardar la firma y no solo el par derivado. Sin
+        // reverificar, subir el corte aflojaria la revocacion sin dejar rastro.
+        let banco = banco(DominioClave::Cliente);
+        let (firmante, clave) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+
+        let mut archivo = ArchivoRevocaciones::nuevo();
+        archivo.anotar(anotacion_para(&banco, 7, &firmante));
+
+        let mut bytes = archivo.serializar();
+        // El corte vive tras la cabecera (14) y el identificador revocado (32).
+        bytes[14 + 32..14 + 40].copy_from_slice(&u64::MAX.to_be_bytes());
+
+        assert!(matches!(
+            ArchivoRevocaciones::analizar(&bytes, &clave),
+            Err(ErrorArchivo::NoVerifica { posicion: 0, .. })
+        ));
+    }
+
+    #[test]
+    fn un_archivo_sin_anotaciones_es_valido() {
+        // A diferencia del inventario, un registro de revocaciones vacio es el
+        // estado normal: la mayoria de los despliegues nunca revocan nada.
+        let (_, clave) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+        let bytes = ArchivoRevocaciones::nuevo().serializar();
+
+        let leido = ArchivoRevocaciones::analizar(&bytes, &clave).expect("vacio es valido");
+        assert_eq!(leido.anotaciones().len(), 0);
+        assert_eq!(leido.registro().anotadas(), 0);
+    }
+
+    #[test]
+    fn el_archivo_conserva_el_corte_mas_bajo() {
+        let banco = banco(DominioClave::Cliente);
+        let (firmante, _) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+
+        let mut archivo = ArchivoRevocaciones::nuevo();
+        for corte in [9, 3, 20] {
+            archivo.anotar(anotacion_para(&banco, corte, &firmante));
+        }
+
+        assert_eq!(archivo.anotaciones().len(), 1, "es la misma clave");
+        assert_eq!(
+            archivo.registro().corte_de(&banco.clave.identificador()),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn un_magico_ajeno_en_revocaciones_se_rechaza() {
+        let (_, clave) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+        let mut bytes = ArchivoRevocaciones::nuevo().serializar();
+        bytes[0] = b'X';
+
+        assert_eq!(
+            ArchivoRevocaciones::analizar(&bytes, &clave).err(),
+            Some(ErrorArchivo::MagicoAusente)
+        );
+    }
+
+    #[test]
+    fn bytes_sobrantes_en_revocaciones_se_rechazan() {
+        let (_, clave) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+        let mut bytes = ArchivoRevocaciones::nuevo().serializar();
+        bytes.extend_from_slice(b"cola");
+
+        assert_eq!(
+            ArchivoRevocaciones::analizar(&bytes, &clave).err(),
+            Some(ErrorArchivo::BytesSobrantes { sobrantes: 4 })
+        );
+    }
+
+    #[test]
+    fn un_numero_de_anotaciones_absurdo_no_reserva_memoria() {
+        let (_, clave) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+        let mut bytes = Vec::from(*revocacion::MAGICO_REVOCACIONES);
+        bytes.extend_from_slice(&1u16.to_be_bytes());
+        bytes.extend_from_slice(&u32::MAX.to_be_bytes());
+
+        assert_eq!(
+            ArchivoRevocaciones::analizar(&bytes, &clave).err(),
+            Some(ErrorArchivo::DemasiadasAnotaciones {
+                declaradas: u32::MAX as usize
+            })
+        );
+    }
+
+    #[test]
+    fn el_registro_sobrevive_a_un_ciclo_por_disco() {
+        // PA-34 de extremo a extremo: la revocacion deja de durar lo que dura el
+        // proceso.
+        let banco = banco(DominioClave::Cliente);
+        let (firmante, clave) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+
+        let mut archivo = ArchivoRevocaciones::nuevo();
+        archivo.anotar(anotacion_para(&banco, 4, &firmante));
+
+        let directorio = std::env::temp_dir().join("eje-latam-revocaciones");
+        let _ = std::fs::remove_dir_all(&directorio);
+        std::fs::create_dir_all(&directorio).expect("directorio de prueba");
+        let ruta = directorio.join("revocaciones.rev");
+
+        disco::escribir_atomico(&ruta, &archivo.serializar()).expect("escritura atomica");
+        let leido = ArchivoRevocaciones::analizar(&disco::leer(&ruta).expect("lectura"), &clave)
+            .expect("reverificacion");
+
+        assert_eq!(
+            leido.registro().corte_de(&banco.clave.identificador()),
+            Some(4)
+        );
+
+        let _ = std::fs::remove_dir_all(&directorio);
+    }
+
     #[test]
     fn el_centinela_no_baja_sin_certificado() {
         // `avanzar` sigue siendo monotono; solo `reiniciar_por` baja, y exige un
@@ -2109,6 +2254,68 @@ mod pruebas {
                 mutar(&mut caso, &mut generador);
             }
             comprobar_invariantes_del_analizador(&caso);
+        }
+    }
+
+    #[test]
+    fn el_analizador_de_revocaciones_resiste_mutaciones() {
+        // El fichero de revocaciones es la **segunda** entrada no autenticada del
+        // producto, y llegó cinco reportes despues que la primera. Sin este
+        // arnes, RPT-014 protegeria un analizador y dejaria el otro a la
+        // intemperie.
+        let banco = banco(DominioClave::Cliente);
+        let (firmante, clave) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+
+        let mut archivo = ArchivoRevocaciones::nuevo();
+        archivo.anotar(anotacion_para(&banco, 7, &firmante));
+        let semilla = archivo.serializar();
+
+        let comprobar = |caso: &[u8]| {
+            if let Ok(leido) = ArchivoRevocaciones::analizar(caso, &clave) {
+                // Aqui la comparacion SI incluye la firma: un `Ok` significa que
+                // verifico, y una firma que verifica esta bien formada, asi que
+                // reencodearla no puede normalizarla. Es la diferencia con el
+                // arnes del inventario, donde `analizar` no verifica nada.
+                assert_eq!(
+                    leido.serializar().as_slice(),
+                    caso,
+                    "el analizador acepto una codificacion no canonica de {} bytes",
+                    caso.len()
+                );
+            }
+        };
+
+        comprobar(&semilla);
+
+        // Menos casos que en el arnes del inventario, y a proposito.
+        //
+        // Aqui cada caso estructuralmente valido dispara una verificacion de
+        // firma hibrida completa —ML-DSA-65 mas Ed25519—, que en modo depuracion
+        // cuesta milisegundos, no microsegundos. Con 10 000 casos este arnes solo
+        // llevaba `guardian-cc` de 3 s a 32 s.
+        //
+        // Los 8 000 casos que se retiran compraban muy poco: el mutador es ciego
+        // y con semilla fija, asi que no crece ni explora rutas nuevas por
+        // repetir. La afirmacion de resistencia descansa en `cargo-fuzz`
+        // (RPT-014 §4), no en el numero de vueltas de aqui.
+        let mut generador = GeneradorDeterminista::nuevo(0x52_45_56_4D_55_54);
+        for _ in 0..2_000 {
+            let mut caso = semilla.clone();
+            let cuantas = 1 + (generador.siguiente() % 4);
+            for _ in 0..cuantas {
+                mutar(&mut caso, &mut generador);
+            }
+            comprobar(&caso);
+        }
+
+        // Y sin semilla, que es donde vive el desbordamiento de indice. Estos son
+        // baratos: se rechazan por magico o longitud antes de tocar criptografia.
+        for _ in 0..3_000 {
+            let longitud = (generador.siguiente() % 64) as usize;
+            let caso: Vec<u8> = (0..longitud)
+                .map(|_| (generador.siguiente() >> 24) as u8)
+                .collect();
+            comprobar(&caso);
         }
     }
 

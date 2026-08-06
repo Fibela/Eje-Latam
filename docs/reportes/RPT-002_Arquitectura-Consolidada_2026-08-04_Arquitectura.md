@@ -464,7 +464,8 @@ Todo reporte incluye tabla de metadatos, sección de trazabilidad indicando qué
 | ~~PA-31~~ | ~~Entrega del certificado de revocación a un agente sin red~~ | ✅ Cerrado 5-ago-2026 — RPT-015. **Viaja con el paquete de inventario; no se busca en servidor** |
 | ~~PA-32~~ | ~~Custodia de la clave de recuperación del cliente~~ | ✅ Cerrado 5-ago-2026 — RPT-015 §8.1. **2-de-3 fuera de línea**, con salvedad sobre la localidad de los fragmentos |
 | ~~PA-33~~ | ~~Enmienda de RPT-012: el centinela retrocede ante certificado de revocación válido~~ | ✅ Cerrado 5-ago-2026 — RPT-015 §6.1 y §10 |
-| PA-34 | Persistencia del registro de revocaciones en disco | 🟡 Abierto — RPT-015 §11 |
+| ~~PA-34~~ | ~~Persistencia del registro de revocaciones en disco~~ | ✅ Cerrado 5-ago-2026 — RPT-016. **Se guardan los certificados firmados, no el par derivado** |
+| PA-35 | Cableado de la persistencia: rutas, momento de carga y arranque sin ficheros | 🟡 Abierto — RPT-016 §7 |
 | PA-27 | Reversión del inventario firmado y revocación de la clave del administrador | 🔵 **Parcial** 5-ago-2026 — RPT-012. Secuencia firmada y centinela; falta el ancla y la revocación |
 | PA-28 | Ancla de confianza para el centinela de frescura (TPM 2.0 o equivalente) | 🟡 Abierto — RPT-012 §7 |
 | PA-25 | Distribución de la base OUI en Local-First | 🟡 Abierto — RPT-010 §9 |
