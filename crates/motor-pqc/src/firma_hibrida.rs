@@ -54,6 +54,22 @@ pub struct ClaveVerificacionHibrida {
     pub clasica: PublicaEd25519,
 }
 
+impl ClaveVerificacionHibrida {
+    /// Serializa la clave pública con la componente clásica al final.
+    ///
+    /// Existe para que quien la consuma pueda derivar un identificador estable
+    /// —un resumen— sin conocer la estructura interna. Ambas componentes tienen
+    /// longitud fija, así que no hacen falta prefijos para delimitarlas.
+    ///
+    /// No es material secreto: son las claves **públicas**.
+    #[must_use]
+    pub fn a_bytes(&self) -> Vec<u8> {
+        let mut salida = self.poscuantica.encode().to_vec();
+        salida.extend_from_slice(self.clasica.as_bytes());
+        salida
+    }
+}
+
 /// Firma híbrida: ambas componentes deben verificar.
 #[derive(Clone)]
 pub struct FirmaHibrida {

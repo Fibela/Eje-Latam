@@ -35,6 +35,7 @@ use crate::inventario::{
     Centinela, ClaveInventario, ErrorInventario, Inventario, MarcadoVerificado, RaizVerificada,
 };
 use crate::proveedores::{DireccionEnlace, ErrorProveedor, ProveedorInventario};
+use crate::revocacion::RegistroRevocaciones;
 
 /// Fallo al cargar el inventario desde el almacen local.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -67,9 +68,16 @@ impl InventarioLocal {
         bytes: &[u8],
         clave: &ClaveInventario,
         centinela: Centinela,
+        revocaciones: &RegistroRevocaciones,
     ) -> Result<Self, ErrorCarga> {
         let fichero = analizar(bytes)?;
-        let raiz = RaizVerificada::verificar(fichero.anclada, &fichero.firma, clave, centinela)?;
+        let raiz = RaizVerificada::verificar(
+            fichero.anclada,
+            &fichero.firma,
+            clave,
+            centinela,
+            revocaciones,
+        )?;
 
         Ok(Self {
             inventario: fichero.inventario,

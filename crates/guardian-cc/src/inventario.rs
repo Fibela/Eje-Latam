@@ -47,6 +47,7 @@ use motor_pqc::firma_hibrida::{ClaveVerificacionHibrida, FirmaHibrida, verificar
 
 use crate::ClaseExcluida;
 use crate::proveedores::DireccionEnlace;
+use crate::revocacion::{CertificadoVerificado, IdentificadorClave, RegistroRevocaciones};
 
 /// Dominio del resumen de un marcado individual.
 const DOMINIO_MARCADO: &[u8] = b"eje-latam/agt-01/marcado-inventario/v1";
@@ -76,6 +77,13 @@ pub enum DominioClave {
     Cliente,
     /// PremosCorp. Firma binarios, reglas e imagenes de release (PA-14).
     PremosCorp,
+    /// Clave de recuperacion del cliente, fuera de linea.
+    ///
+    /// Firma **solo** certificados de revocacion (RPT-015 §4). Separada de la
+    /// operativa a proposito: si fueran la misma, quien roba la operativa podria
+    /// revocarse a si mismo a una secuencia de corte alta, que es lo contrario de
+    /// una revocacion.
+    ClienteRecuperacion,
 }
 
 /// Errores de verificacion del inventario.
@@ -122,6 +130,18 @@ pub enum ErrorInventario {
     #[error("no hay centinela de frescura; el inventario no puede fecharse")]
     FrescuraNoEstablecida,
 
+    /// La clave que firma esta revocada para esta secuencia.
+    ///
+    /// RPT-015. La firma es valida y la clave existio; lo que ya no vale es que
+    /// firme por encima de su corte.
+    #[error("clave revocada: firma la secuencia {presentada} y su corte es {corte}")]
+    ClaveRevocada {
+        /// Secuencia del inventario presentado.
+        presentada: u64,
+        /// Corte anotado en el registro de revocaciones.
+        corte: u64,
+    },
+
     /// El inventario declara dos veces el mismo dispositivo.
     ///
     /// Un lector indulgente tomaria la primera o la ultima; ambas elecciones son
@@ -154,6 +174,18 @@ impl ClaveInventario {
     #[must_use]
     pub const fn dominio(&self) -> DominioClave {
         self.dominio
+    }
+
+    /// Clave de verificacion subyacente.
+    #[must_use]
+    pub const fn verificacion(&self) -> &ClaveVerificacionHibrida {
+        &self.clave
+    }
+
+    /// Identificador estable de esta clave.
+    #[must_use]
+    pub fn identificador(&self) -> IdentificadorClave {
+        IdentificadorClave::de(&self.clave)
     }
 }
 
@@ -275,6 +307,24 @@ impl Centinela {
             Self::SinEstablecer => Self::Establecido(secuencia),
         }
     }
+
+    /// Reinicia la marca de agua a la secuencia de corte de un certificado.
+    ///
+    /// # La unica via que baja el centinela
+    ///
+    /// RPT-015 §6.1, PA-33. Sin esta operacion, un atacante con la clave
+    /// operativa emite un inventario con secuencia `u64::MAX`, el agente lo
+    /// acepta —la firma es valida— y **ningun inventario legitimo puede ya
+    /// superarlo**: el inventario queda congelado para siempre, con un solo
+    /// mensaje, y revocar no lo arregla porque el centinela sigue arriba.
+    ///
+    /// Es segura porque exige un [`CertificadoVerificado`], que solo se
+    /// construye con la clave de recuperacion fuera de linea. Quien tuviera esa
+    /// clave no necesitaria este camino para nada.
+    #[must_use]
+    pub const fn reiniciar_por(self, certificado: &CertificadoVerificado) -> Self {
+        Self::Establecido(certificado.hasta_secuencia())
+    }
 }
 
 /// Inventario en orden canonico.
@@ -376,11 +426,25 @@ impl RaizVerificada {
         firma: &FirmaHibrida,
         clave: &ClaveInventario,
         centinela: Centinela,
+        revocaciones: &RegistroRevocaciones,
     ) -> Result<Self, ErrorInventario> {
         if clave.dominio != DominioClave::Cliente {
             return Err(ErrorInventario::DominioDeClaveIncorrecto {
                 encontrado: clave.dominio,
                 esperado: DominioClave::Cliente,
+            });
+        }
+
+        // Eslabon 6 (RPT-015). Va antes que la frescura y que la firma por el
+        // mismo motivo que el dominio: una clave revocada no debe llegar a gastar
+        // ciclos criptograficos.
+        let identificador = clave.identificador();
+        if !revocaciones.admite(&identificador, anclada.secuencia) {
+            return Err(ErrorInventario::ClaveRevocada {
+                presentada: anclada.secuencia,
+                corte: revocaciones
+                    .corte_de(&identificador)
+                    .unwrap_or(anclada.secuencia),
             });
         }
 
@@ -423,6 +487,7 @@ impl RaizVerificada {
             firma,
             clave,
             Centinela::Establecido(anclada.secuencia),
+            &RegistroRevocaciones::nuevo(),
         )?;
         Ok((
             verificada,

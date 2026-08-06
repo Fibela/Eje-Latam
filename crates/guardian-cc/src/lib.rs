@@ -21,6 +21,7 @@ pub mod disco;
 pub mod formato;
 pub mod inventario;
 pub mod proveedores;
+pub mod revocacion;
 
 use clasificacion::{Clasificacion, MotivoAmbiguedad};
 use thiserror::Error;
@@ -1075,7 +1076,9 @@ mod pruebas {
         Centinela, ClaveInventario, DominioClave, ErrorInventario, Inventario, MarcadoBruto,
         RaizAnclada, RaizVerificada, mensaje_de_raiz,
     };
-    use motor_pqc::firma_hibrida::{ClaveVerificacionHibrida, FirmaHibrida, generar_par};
+    use motor_pqc::firma_hibrida::{
+        ClaveFirmaHibrida, ClaveVerificacionHibrida, FirmaHibrida, generar_par,
+    };
 
     /// Generador determinista para pruebas reproducibles.
     ///
@@ -1134,6 +1137,7 @@ mod pruebas {
         firma: FirmaHibrida,
         clave: ClaveInventario,
         centinela: Centinela,
+        revocaciones: RegistroRevocaciones,
     }
 
     /// Marcados de prueba. Se pasan **desordenados** a proposito: el orden
@@ -1161,20 +1165,33 @@ mod pruebas {
         ]
     }
 
-    fn firmar_raiz(anclada: &RaizAnclada) -> (FirmaHibrida, ClaveVerificacionHibrida) {
-        let (firmante, verificadora) = generar_par(&mut GeneradorDeterminista::nuevo(0x45_4A_45));
+    /// Semilla del par operativo por defecto.
+    const SEMILLA_OPERATIVA: u64 = 0x45_4A_45;
+    /// Semilla del par sucesor, para las rotaciones.
+    const SEMILLA_SUCESORA: u64 = 0x53_55_43;
+
+    fn firmar_raiz_con(
+        anclada: &RaizAnclada,
+        semilla: u64,
+    ) -> (FirmaHibrida, ClaveVerificacionHibrida) {
+        let (firmante, verificadora) = generar_par(&mut GeneradorDeterminista::nuevo(semilla));
         let firma = motor_pqc::firma_hibrida::firmar(&firmante, &mensaje_de_raiz(anclada));
         (firma, verificadora)
     }
 
-    fn banco_con(dominio: DominioClave, secuencia: u64, centinela: Centinela) -> Banco {
+    fn banco_con_semilla(
+        dominio: DominioClave,
+        secuencia: u64,
+        centinela: Centinela,
+        semilla: u64,
+    ) -> Banco {
         let inventario =
             Inventario::construir(marcados_de_prueba()).expect("no hay direcciones repetidas");
         let anclada = RaizAnclada {
             raiz: inventario.raiz().expect("el inventario no esta vacio"),
             secuencia,
         };
-        let (firma, verificadora) = firmar_raiz(&anclada);
+        let (firma, verificadora) = firmar_raiz_con(&anclada, semilla);
 
         Banco {
             inventario,
@@ -1182,7 +1199,12 @@ mod pruebas {
             firma,
             clave: ClaveInventario::nueva(verificadora, dominio),
             centinela,
+            revocaciones: RegistroRevocaciones::nuevo(),
         }
+    }
+
+    fn banco_con(dominio: DominioClave, secuencia: u64, centinela: Centinela) -> Banco {
+        banco_con_semilla(dominio, secuencia, centinela, SEMILLA_OPERATIVA)
     }
 
     fn banco(dominio: DominioClave) -> Banco {
@@ -1191,7 +1213,13 @@ mod pruebas {
 
     impl Banco {
         fn raiz_verificada(&self) -> Result<RaizVerificada, ErrorInventario> {
-            RaizVerificada::verificar(self.anclada, &self.firma, &self.clave, self.centinela)
+            RaizVerificada::verificar(
+                self.anclada,
+                &self.firma,
+                &self.clave,
+                self.centinela,
+                &self.revocaciones,
+            )
         }
 
         /// Posicion canonica de una direccion en el inventario ordenado.
@@ -1292,6 +1320,7 @@ mod pruebas {
             &banco.firma,
             &banco.clave,
             banco.centinela,
+            &banco.revocaciones,
         );
 
         assert_eq!(resultado, Err(ErrorInventario::FirmaDeRaizInvalida));
@@ -1415,6 +1444,7 @@ mod pruebas {
             &vieja.firma,
             &vieja.clave,
             Centinela::Establecido(5),
+            &RegistroRevocaciones::nuevo(),
         );
 
         assert_eq!(resultado, Err(ErrorInventario::FirmaDeRaizInvalida));
@@ -1454,8 +1484,9 @@ mod pruebas {
         let banco = banco(DominioClave::Cliente);
         let bytes = bytes_en_disco(&banco);
 
-        let local = InventarioLocal::cargar(&bytes, &banco.clave, banco.centinela)
-            .expect("el fichero recien escrito debe cargar");
+        let local =
+            InventarioLocal::cargar(&bytes, &banco.clave, banco.centinela, &banco.revocaciones)
+                .expect("el fichero recien escrito debe cargar");
 
         assert_eq!(local.entradas(), 3);
         assert_eq!(local.secuencia(), banco.anclada.secuencia);
@@ -1487,8 +1518,13 @@ mod pruebas {
         // Ausencia legitima frente a fallo de verificacion: RPT-010 §4 obliga a
         // no confundirlos, y aqui es donde se decide.
         let banco = banco(DominioClave::Cliente);
-        let local = InventarioLocal::cargar(&bytes_en_disco(&banco), &banco.clave, banco.centinela)
-            .expect("carga");
+        let local = InventarioLocal::cargar(
+            &bytes_en_disco(&banco),
+            &banco.clave,
+            banco.centinela,
+            &banco.revocaciones,
+        )
+        .expect("carga");
 
         assert_eq!(local.marcado(&[0xFF; 6]), Ok(None));
     }
@@ -1630,7 +1666,8 @@ mod pruebas {
 
         assert!(analizar(&bytes).is_ok(), "el fichero sigue bien formado");
         assert_eq!(
-            InventarioLocal::cargar(&bytes, &banco.clave, banco.centinela).err(),
+            InventarioLocal::cargar(&bytes, &banco.clave, banco.centinela, &banco.revocaciones)
+                .err(),
             Some(ErrorCarga::Verificacion(
                 ErrorInventario::FirmaDeRaizInvalida
             ))
@@ -1643,7 +1680,13 @@ mod pruebas {
         let banco = banco_con(DominioClave::Cliente, 6, Centinela::Establecido(9));
 
         assert_eq!(
-            InventarioLocal::cargar(&bytes_en_disco(&banco), &banco.clave, banco.centinela).err(),
+            InventarioLocal::cargar(
+                &bytes_en_disco(&banco),
+                &banco.clave,
+                banco.centinela,
+                &banco.revocaciones
+            )
+            .err(),
             Some(ErrorCarga::Verificacion(
                 ErrorInventario::ReversionDetectada {
                     aceptada: 9,
@@ -1669,6 +1712,293 @@ mod pruebas {
         );
 
         assert_eq!(uno, otro, "construir reordena, asi que los bytes coinciden");
+    }
+
+    // -----------------------------------------------------------------------
+    // Revocacion — RPT-015, PA-33
+    // -----------------------------------------------------------------------
+
+    use revocacion::{
+        CertificadoRevocacion, CertificadoVerificado, ErrorRevocacion, IdentificadorClave,
+        RegistroRevocaciones, mensaje_de_certificado,
+    };
+
+    /// Par de recuperacion, distinto del operativo por semilla.
+    fn clave_de_recuperacion(dominio: DominioClave) -> (ClaveFirmaHibrida, ClaveInventario) {
+        let (firmante, verificadora) = generar_par(&mut GeneradorDeterminista::nuevo(0x52_45_43));
+        (firmante, ClaveInventario::nueva(verificadora, dominio))
+    }
+
+    /// Firma un certificado con la clave dada.
+    fn firmar_certificado(
+        certificado: &CertificadoRevocacion,
+        firmante: &ClaveFirmaHibrida,
+    ) -> FirmaHibrida {
+        motor_pqc::firma_hibrida::firmar(firmante, &mensaje_de_certificado(certificado))
+    }
+
+    /// Certificado que revoca la clave operativa del banco a partir del corte.
+    fn certificado_para(banco: &Banco, corte: u64) -> CertificadoRevocacion {
+        let (_, sucesora) = generar_par(&mut GeneradorDeterminista::nuevo(SEMILLA_SUCESORA));
+        CertificadoRevocacion {
+            revocada: banco.clave.identificador(),
+            hasta_secuencia: corte,
+            sucesora: IdentificadorClave::de(&sucesora),
+            emitido_en: AHORA,
+        }
+    }
+
+    #[test]
+    fn un_certificado_valido_verifica() {
+        let banco = banco(DominioClave::Cliente);
+        let (firmante, clave) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+        let certificado = certificado_para(&banco, 5);
+
+        let verificado = CertificadoVerificado::verificar(
+            certificado,
+            &firmar_certificado(&certificado, &firmante),
+            &clave,
+        )
+        .expect("la cadena esta completa");
+
+        assert_eq!(verificado.hasta_secuencia(), 5);
+        assert_eq!(verificado.revocada(), banco.clave.identificador());
+    }
+
+    #[test]
+    fn la_clave_operativa_no_puede_revocarse_a_si_misma() {
+        // Es el control central del §4: si la operativa pudiera firmar
+        // certificados, quien la roba se «autorrevocaria» a un corte alto, que es
+        // lo contrario de una revocacion.
+        let banco = banco(DominioClave::Cliente);
+        let (firmante, _) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+        let certificado = certificado_para(&banco, 5);
+
+        assert_eq!(
+            CertificadoVerificado::verificar(
+                certificado,
+                &firmar_certificado(&certificado, &firmante),
+                &banco.clave,
+            ),
+            Err(ErrorRevocacion::DominioDeClaveIncorrecto {
+                encontrado: DominioClave::Cliente,
+            })
+        );
+    }
+
+    #[test]
+    fn la_clave_de_premoscorp_tampoco_revoca() {
+        let banco = banco(DominioClave::Cliente);
+        let (firmante, clave) = clave_de_recuperacion(DominioClave::PremosCorp);
+        let certificado = certificado_para(&banco, 5);
+
+        assert_eq!(
+            CertificadoVerificado::verificar(
+                certificado,
+                &firmar_certificado(&certificado, &firmante),
+                &clave,
+            ),
+            Err(ErrorRevocacion::DominioDeClaveIncorrecto {
+                encontrado: DominioClave::PremosCorp,
+            })
+        );
+    }
+
+    #[test]
+    fn un_certificado_que_se_revoca_a_si_mismo_se_rechaza() {
+        // Declarar la misma clave como revocada y como sucesora dejaria al
+        // cliente sin autoridad ninguna sobre su inventario.
+        let banco = banco(DominioClave::Cliente);
+        let (firmante, clave) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+
+        let certificado = CertificadoRevocacion {
+            revocada: banco.clave.identificador(),
+            hasta_secuencia: 5,
+            sucesora: banco.clave.identificador(),
+            emitido_en: AHORA,
+        };
+
+        assert_eq!(
+            CertificadoVerificado::verificar(
+                certificado,
+                &firmar_certificado(&certificado, &firmante),
+                &clave,
+            ),
+            Err(ErrorRevocacion::SucesoraEsLaRevocada)
+        );
+    }
+
+    #[test]
+    fn alterar_el_certificado_invalida_su_firma() {
+        let banco = banco(DominioClave::Cliente);
+        let (firmante, clave) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+
+        let original = certificado_para(&banco, 5);
+        let firma = firmar_certificado(&original, &firmante);
+
+        // Subir el corte es la alteracion util: afloja la revocacion.
+        let mut alterado = original;
+        alterado.hasta_secuencia = u64::MAX;
+
+        assert_eq!(
+            CertificadoVerificado::verificar(alterado, &firma, &clave),
+            Err(ErrorRevocacion::FirmaInvalida)
+        );
+    }
+
+    // --- El sexto eslabon ---
+
+    #[test]
+    fn una_clave_revocada_no_firma_por_encima_de_su_corte() {
+        let mut banco = banco_con(DominioClave::Cliente, 9, Centinela::Establecido(7));
+        let (firmante, clave) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+        let certificado = certificado_para(&banco, 7);
+
+        let verificado = CertificadoVerificado::verificar(
+            certificado,
+            &firmar_certificado(&certificado, &firmante),
+            &clave,
+        )
+        .expect("certificado valido");
+
+        banco.revocaciones.anotar(&verificado);
+
+        assert_eq!(
+            banco.raiz_verificada(),
+            Err(ErrorInventario::ClaveRevocada {
+                presentada: 9,
+                corte: 7,
+            })
+        );
+    }
+
+    #[test]
+    fn una_clave_revocada_sigue_valiendo_por_debajo_del_corte() {
+        // El §3: revocar de golpe dejaria al agente sin inventario, y sin
+        // marcados los equipos criticos dejan de estar protegidos.
+        let mut banco = banco_con(DominioClave::Cliente, 5, Centinela::Establecido(5));
+        let (firmante, clave) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+        let certificado = certificado_para(&banco, 7);
+
+        let verificado = CertificadoVerificado::verificar(
+            certificado,
+            &firmar_certificado(&certificado, &firmante),
+            &clave,
+        )
+        .expect("certificado valido");
+
+        banco.revocaciones.anotar(&verificado);
+
+        assert!(
+            banco.raiz_verificada().is_ok(),
+            "un inventario anterior al corte debe seguir sirviendo"
+        );
+    }
+
+    #[test]
+    fn el_registro_conserva_el_corte_mas_bajo() {
+        // Una revocacion que se puede aflojar no es una revocacion.
+        let banco = banco(DominioClave::Cliente);
+        let (firmante, clave) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+        let mut registro = RegistroRevocaciones::nuevo();
+
+        for corte in [7, 20, 3, 15] {
+            let certificado = certificado_para(&banco, corte);
+            let verificado = CertificadoVerificado::verificar(
+                certificado,
+                &firmar_certificado(&certificado, &firmante),
+                &clave,
+            )
+            .expect("certificado valido");
+            registro.anotar(&verificado);
+        }
+
+        assert_eq!(registro.anotadas(), 1, "es la misma clave, no cuatro");
+        assert_eq!(registro.corte_de(&banco.clave.identificador()), Some(3));
+    }
+
+    #[test]
+    fn una_clave_no_revocada_firma_cualquier_secuencia() {
+        let registro = RegistroRevocaciones::nuevo();
+        let banco = banco(DominioClave::Cliente);
+
+        assert!(registro.admite(&banco.clave.identificador(), u64::MAX));
+    }
+
+    // --- PA-33: el bloqueo por saturacion de secuencia ---
+
+    #[test]
+    fn el_bloqueo_por_secuencia_maxima_se_recupera_con_el_certificado() {
+        // El ataque de un solo mensaje. Sin el reinicio del centinela, el
+        // atacante emite u64::MAX, pierde la clave al revocarse, y a cambio deja
+        // el inventario congelado de forma irreversible: peor que el compromiso.
+        let (firmante, clave_recuperacion) =
+            clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+
+        // 1. El atacante satura la secuencia y el centinela sube al maximo.
+        let saturado = banco_con(DominioClave::Cliente, u64::MAX, Centinela::Establecido(9));
+        assert!(saturado.raiz_verificada().is_ok(), "la firma es valida");
+        let centinela_saturado = saturado.centinela.avanzar(u64::MAX);
+        assert_eq!(centinela_saturado, Centinela::Establecido(u64::MAX));
+
+        // 2. Sin certificado, ningun inventario legitimo puede superarlo.
+        let legitimo = banco_con(DominioClave::Cliente, 10, centinela_saturado);
+        assert!(
+            matches!(
+                legitimo.raiz_verificada(),
+                Err(ErrorInventario::ReversionDetectada { .. })
+            ),
+            "el bloqueo debe ser real antes de comprobar que se sale de el"
+        );
+
+        // 3. El certificado corta en 9 y reinicia el centinela.
+        let certificado = certificado_para(&saturado, 9);
+        let verificado = CertificadoVerificado::verificar(
+            certificado,
+            &firmar_certificado(&certificado, &firmante),
+            &clave_recuperacion,
+        )
+        .expect("certificado valido");
+
+        let centinela = centinela_saturado.reiniciar_por(&verificado);
+        assert_eq!(centinela, Centinela::Establecido(9));
+
+        // 4. El sucesor vuelve a entrar. Firma con la clave NUEVA: la revocada ya
+        //    no admite nada por encima de 9, asi que sin rotar no se sale del
+        //    bloqueo.
+        let mut sucesor = banco_con_semilla(DominioClave::Cliente, 10, centinela, SEMILLA_SUCESORA);
+        sucesor.revocaciones.anotar(&verificado);
+        assert_eq!(
+            sucesor.clave.identificador(),
+            verificado.sucesora(),
+            "el banco sucesor debe usar la clave que el certificado nombra"
+        );
+
+        assert!(
+            sucesor.raiz_verificada().is_ok(),
+            "tras la revocacion el cliente debe recuperar el control"
+        );
+
+        // Y la clave vieja sigue sin poder emitir por encima de su corte.
+        let mut reintento = banco_con(DominioClave::Cliente, 10, centinela);
+        reintento.revocaciones.anotar(&verificado);
+        assert_eq!(
+            reintento.raiz_verificada(),
+            Err(ErrorInventario::ClaveRevocada {
+                presentada: 10,
+                corte: 9,
+            })
+        );
+    }
+
+    #[test]
+    fn el_centinela_no_baja_sin_certificado() {
+        // `avanzar` sigue siendo monotono; solo `reiniciar_por` baja, y exige un
+        // certificado verificado que no se puede fabricar.
+        assert_eq!(
+            Centinela::Establecido(u64::MAX).avanzar(1),
+            Centinela::Establecido(u64::MAX)
+        );
     }
 
     // -----------------------------------------------------------------------

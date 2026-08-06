@@ -461,6 +461,10 @@ Todo reporte incluye tabla de metadatos, sección de trazabilidad indicando qué
 | ~~PA-24~~ | ~~Productores de evidencia: inventario firmado~~ | ✅ Cerrado 5-ago-2026 — RPT-013. **Formato en disco, analizador defensivo y recorrido completo**. Huella y OUI siguen en PA-25 |
 | ~~PA-29~~ | ~~Acceso al sistema de ficheros, escritura atómica y fuzzing del analizador~~ | ✅ Cerrado 5-ago-2026 — RPT-014. **Guarda RAII, lectura acotada, orden canónico al leer y arnés determinista** |
 | PA-30 | Instalación de `cargo-fuzz`, construcción del objetivo, ejecución y corpus semilla | 🟡 Abierto — RPT-014 §8 |
+| ~~PA-31~~ | ~~Entrega del certificado de revocación a un agente sin red~~ | ✅ Cerrado 5-ago-2026 — RPT-015. **Viaja con el paquete de inventario; no se busca en servidor** |
+| ~~PA-32~~ | ~~Custodia de la clave de recuperación del cliente~~ | ✅ Cerrado 5-ago-2026 — RPT-015 §8.1. **2-de-3 fuera de línea**, con salvedad sobre la localidad de los fragmentos |
+| ~~PA-33~~ | ~~Enmienda de RPT-012: el centinela retrocede ante certificado de revocación válido~~ | ✅ Cerrado 5-ago-2026 — RPT-015 §6.1 y §10 |
+| PA-34 | Persistencia del registro de revocaciones en disco | 🟡 Abierto — RPT-015 §11 |
 | PA-27 | Reversión del inventario firmado y revocación de la clave del administrador | 🔵 **Parcial** 5-ago-2026 — RPT-012. Secuencia firmada y centinela; falta el ancla y la revocación |
 | PA-28 | Ancla de confianza para el centinela de frescura (TPM 2.0 o equivalente) | 🟡 Abierto — RPT-012 §7 |
 | PA-25 | Distribución de la base OUI en Local-First | 🟡 Abierto — RPT-010 §9 |
