@@ -1,0 +1,8 @@
+# Artefactos de cargo-fuzz. El corpus SI se versiona: es el conjunto de
+# entradas que ya han demostrado alcanzar rutas nuevas, y perderlo obliga a
+# redescubrirlas desde cero en cada maquina.
+target/
+corpus/*/.cur_input
+
+# Los casos que provocan fallo se versionan a proposito: son regresiones y deben
+# migrarse al arnes determinista de guardian-cc para que CI las vigile.

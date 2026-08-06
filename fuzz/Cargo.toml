@@ -1,0 +1,28 @@
+[package]
+name = "eje-latam-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+description = "Objetivos de fuzzing guiado por cobertura. NO forma parte del workspace."
+
+# Workspace propio a proposito. El workspace principal esta fijado a Rust estable
+# 1.85 y `cargo-fuzz` exige nightly; incluir este paquete alli obligaria a todo el
+# proyecto a compilar con nightly (RPT-014 §4).
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+guardian-cc = { path = "../crates/guardian-cc" }
+# `guardian-cc` no reexporta `motor-pqc`, y el objetivo necesita la longitud de
+# la firma para acotar la comparacion estructural.
+motor-pqc = { path = "../crates/motor-pqc" }
+
+[[bin]]
+name = "analizar"
+path = "fuzz_targets/analizar.rs"
+test = false
+doc = false
+bench = false

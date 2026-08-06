@@ -1671,6 +1671,182 @@ mod pruebas {
         assert_eq!(uno, otro, "construir reordena, asi que los bytes coinciden");
     }
 
+    // -----------------------------------------------------------------------
+    // Arnes de mutacion determinista — RPT-014, PA-29
+    // -----------------------------------------------------------------------
+    //
+    // ESTO NO ES FUZZING. Un mutador ciego con semilla fija explora un espacio
+    // minusculo comparado con la mutacion guiada por cobertura, y sobre todo NO
+    // CRECE: repite las mismas rutas en cada ejecucion. Vale como red de
+    // regresion y como guardia contra panicos evidentes. La afirmacion de que el
+    // analizador resiste entrada hostil la sostiene el objetivo de `cargo-fuzz`
+    // bajo nightly, no esto.
+
+    /// Comprueba las dos invariantes sobre una entrada arbitraria.
+    ///
+    /// 1. `analizar` no entra en panico. Se cumple por el mero hecho de volver:
+    ///    un panico aborta la prueba.
+    /// 2. Si acepta, la codificacion es **canonica**: reserializar devuelve los
+    ///    mismos bytes. Sin esta segunda, un analizador que normalizase en
+    ///    silencio pasaria por bueno, y con el la codificacion en disco dejaria
+    ///    de ser unica.
+    fn comprobar_invariantes_del_analizador(caso: &[u8]) {
+        if let Ok(fichero) = analizar(caso) {
+            let reserializado = serializar(
+                &fichero.inventario,
+                fichero.anclada.secuencia,
+                &fichero.firma,
+            );
+
+            // La comparacion se acota a la parte estructural, excluyendo la
+            // firma. Motivo: nada garantiza que `encode(decode(x))` devuelva los
+            // mismos bytes para una firma mutada que aun decodifique, y una
+            // normalizacion del blob criptografico haria fallar la prueba por un
+            // motivo ajeno al analizador. La canonicidad que importa aqui es la
+            // del inventario: orden, longitudes y campos.
+            // Resta comprobada: hoy `analizar` no puede aceptar nada mas corto
+            // que la firma, pero apoyarse en esa garantia convertiria un cambio
+            // futuro del analizador en un desbordamiento con forma de hallazgo.
+            let longitud_firma = motor_pqc::firma_hibrida::FirmaHibrida::longitud_serializada();
+            let Some(hasta) = caso.len().checked_sub(longitud_firma) else {
+                return;
+            };
+
+            assert_eq!(
+                reserializado.len(),
+                caso.len(),
+                "reserializar cambio la longitud de un fichero aceptado"
+            );
+            assert_eq!(
+                &reserializado[..hasta],
+                &caso[..hasta],
+                "el analizador acepto una codificacion no canonica de {} bytes",
+                caso.len()
+            );
+        }
+    }
+
+    /// Aplica una mutacion al caso, elegida de forma determinista.
+    fn mutar(caso: &mut Vec<u8>, generador: &mut GeneradorDeterminista) {
+        let operacion = generador.siguiente() % 6;
+
+        match operacion {
+            0..=2 if !caso.is_empty() => {
+                let indice = (generador.siguiente() as usize) % caso.len();
+                let byte = match operacion {
+                    0 => caso[indice] ^ (1u8 << (generador.siguiente() % 8)),
+                    1 => 0x00,
+                    _ => 0xFF,
+                };
+                caso[indice] = byte;
+            }
+            3 if !caso.is_empty() => {
+                // Truncado: el defecto mas comun en un corte de energia.
+                let longitud = (generador.siguiente() as usize) % caso.len();
+                caso.truncate(longitud);
+            }
+            4 => {
+                // Cola sobrante.
+                let cuantos = 1 + (generador.siguiente() % 64) as usize;
+                for _ in 0..cuantos {
+                    caso.push((generador.siguiente() >> 24) as u8);
+                }
+            }
+            _ => {
+                // El campo de numero de entradas, que es el que gobierna la
+                // reserva de memoria.
+                if caso.len() >= 22 {
+                    let valor = (generador.siguiente() as u32).to_be_bytes();
+                    caso[18..22].copy_from_slice(&valor);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn el_analizador_resiste_mutaciones_sobre_un_fichero_valido() {
+        let semilla = bytes_en_disco(&banco(DominioClave::Cliente));
+        let mut generador = GeneradorDeterminista::nuevo(0x45_4A_45_2D_49_4E_56);
+
+        // La semilla intacta debe seguir siendo canonica: si esta invariante no
+        // se cumpliera de partida, el resto del arnes no probaria nada.
+        comprobar_invariantes_del_analizador(&semilla);
+
+        for _ in 0..20_000 {
+            let mut caso = semilla.clone();
+            let cuantas = 1 + (generador.siguiente() % 4);
+            for _ in 0..cuantas {
+                mutar(&mut caso, &mut generador);
+            }
+            comprobar_invariantes_del_analizador(&caso);
+        }
+    }
+
+    #[test]
+    fn el_analizador_resiste_bytes_arbitrarios() {
+        // Sin semilla valida: casi todo se rechaza por magico o por longitud,
+        // pero es donde viven los desbordamientos de indice si el analizador
+        // confiara en que hay bytes.
+        let mut generador = GeneradorDeterminista::nuevo(0x42_41_53_55_52_41);
+
+        for _ in 0..5_000 {
+            let longitud = (generador.siguiente() % 96) as usize;
+            let caso: Vec<u8> = (0..longitud)
+                .map(|_| (generador.siguiente() >> 24) as u8)
+                .collect();
+            comprobar_invariantes_del_analizador(&caso);
+        }
+
+        // Y con cabecera valida seguida de basura, que llega mas adentro.
+        for _ in 0..5_000 {
+            let mut caso = Vec::from(*MAGICO);
+            caso.extend_from_slice(&1u16.to_be_bytes());
+            let longitud = (generador.siguiente() % 96) as usize;
+            for _ in 0..longitud {
+                caso.push((generador.siguiente() >> 24) as u8);
+            }
+            comprobar_invariantes_del_analizador(&caso);
+        }
+    }
+
+    #[test]
+    fn un_fichero_con_las_entradas_desordenadas_se_rechaza() {
+        // El orden canonico se comprueba al LEER, no solo al construir. Si el
+        // analizador reordenase en silencio, dos ficheros distintos darian el
+        // mismo inventario y la codificacion dejaria de ser unica.
+        let banco = banco(DominioClave::Cliente);
+        let mut bytes = bytes_en_disco(&banco);
+
+        // Intercambia las entradas 0 y 1, que estan en orden ascendente.
+        let (uno, dos) = (22, 22 + 19);
+        for desplazamiento in 0..19 {
+            bytes.swap(uno + desplazamiento, dos + desplazamiento);
+        }
+
+        assert_eq!(
+            analizar(&bytes).err(),
+            Some(ErrorFormato::EntradasDesordenadas { posicion: 1 })
+        );
+    }
+
+    #[test]
+    fn un_fichero_con_la_misma_direccion_dos_veces_se_rechaza_al_leer() {
+        // La comprobacion es estrictamente ascendente, asi que la repeticion
+        // cae por el mismo camino que el desorden.
+        let banco = banco(DominioClave::Cliente);
+        let mut bytes = bytes_en_disco(&banco);
+
+        let (uno, dos) = (22, 22 + 19);
+        for desplazamiento in 0..6 {
+            bytes[dos + desplazamiento] = bytes[uno + desplazamiento];
+        }
+
+        assert_eq!(
+            analizar(&bytes).err(),
+            Some(ErrorFormato::EntradasDesordenadas { posicion: 1 })
+        );
+    }
+
     #[test]
     fn un_dispositivo_declarado_dos_veces_se_rechaza() {
         // Sin este control, un lector indulgente elegiria entre dos entradas

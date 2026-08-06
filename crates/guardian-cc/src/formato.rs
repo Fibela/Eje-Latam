@@ -140,6 +140,19 @@ pub enum ErrorFormato {
     #[error("el inventario esta vacio")]
     InventarioVacio,
 
+    /// Las entradas no vienen en orden ascendente de direccion.
+    ///
+    /// El orden canonico se comprueba **al leer**, no solo al construir. Si el
+    /// analizador reordenase en silencio, dos ficheros distintos producirian el
+    /// mismo inventario y la codificacion en disco dejaria de ser unica —la misma
+    /// ambiguedad que cierran el rechazo de bytes sobrantes y
+    /// `deny_unknown_fields` en el contrato IPC—.
+    #[error("la entrada {posicion} rompe el orden ascendente de direcciones")]
+    EntradasDesordenadas {
+        /// Indice de la primera entrada fuera de orden.
+        posicion: usize,
+    },
+
     /// La firma no decodifica.
     #[error("la firma del fichero no decodifica")]
     FirmaMalformada,
@@ -289,12 +302,22 @@ pub fn analizar(bytes: &[u8]) -> Result<FicheroInventario, ErrorFormato> {
 
     let mut marcados = Vec::with_capacity(entradas);
     let mut desplazamiento = LONGITUD_CABECERA;
+    let mut anterior: Option<DireccionEnlace> = None;
 
-    for _ in 0..entradas {
+    for posicion in 0..entradas {
         let entrada = &bytes[desplazamiento..desplazamiento + LONGITUD_ENTRADA];
 
         let mut mac: DireccionEnlace = [0u8; 6];
         mac.copy_from_slice(&entrada[..6]);
+
+        // Estrictamente ascendente: cubre el desorden y, de paso, la direccion
+        // repetida, que `Inventario::construir` tambien rechaza.
+        if let Some(previa) = anterior {
+            if mac <= previa {
+                return Err(ErrorFormato::EntradasDesordenadas { posicion });
+            }
+        }
+        anterior = Some(mac);
 
         let codigo = entrada[6];
         let Some(clase) = clase_desde_codigo(codigo) else {
