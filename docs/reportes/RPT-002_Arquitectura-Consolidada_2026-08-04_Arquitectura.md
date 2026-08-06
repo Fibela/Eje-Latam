@@ -472,6 +472,8 @@ Todo reporte incluye tabla de metadatos, sección de trazabilidad indicando qué
 | PA-41 | Intervalo de consulta de alertas desde VIS-04 | 🟡 Abierto — RPT-019 §8 |
 | PA-42 | Salida de alertas fuera del equipo (syslog o equivalente) | 🟡 Abierto — RPT-019 §8 |
 | PA-43 | Manejadores de `consultar-alertas` y `obtener-condiciones` | 🟡 Abierto — RPT-019 §8 |
+| PA-44 | ~~Agente mínimo que recorra captura → veredicto~~ | ✅ Cerrado 5-ago-2026 — RPT-020. **Habilita PA-40** |
+| PA-45 | Declaración de segmentos por identificador de VLAN | 🟡 Abierto — RPT-020 §7 |
 | PA-38 | Almacén de observación partido: volátil con expulsión, pegajoso sin ella | 🟡 Abierto — RPT-018 §9 |
 | PA-39 | Privilegios de captura (`CAP_NET_RAW`) | 🟡 Abierto — RPT-018 §9 |
 | PA-27 | Reversión del inventario firmado y revocación de la clave del administrador | 🔵 **Parcial** 5-ago-2026 — RPT-012. Secuencia firmada y centinela; falta el ancla y la revocación |

@@ -374,6 +374,7 @@ version = "0.1.0"
 dependencies = [
  "boveda",
  "eje-almacen",
+ "eje-captura",
  "eje-red",
  "guardian-cc",
  "motor-pqc",

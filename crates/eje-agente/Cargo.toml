@@ -20,6 +20,7 @@ motor-pqc.workspace = true
 eje-almacen.workspace = true
 boveda.workspace = true
 eje-red.workspace = true
+eje-captura.workspace = true
 
 [lints]
 workspace = true

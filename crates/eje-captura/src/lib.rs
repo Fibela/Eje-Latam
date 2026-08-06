@@ -40,6 +40,8 @@
 #[cfg(target_os = "linux")]
 mod linux;
 
+pub mod transporte;
+
 use std::time::Duration;
 
 /// Direccion de capa de enlace.

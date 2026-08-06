@@ -189,6 +189,121 @@ fn la_perdida_es_visible() {
 }
 
 // ---------------------------------------------------------------------------
+// Extraccion de cabeceras — RPT-020
+// ---------------------------------------------------------------------------
+
+use crate::transporte::{Transporte, extraer};
+
+/// Trama Ethernet II con IPv4 y TCP, opcionalmente etiquetada.
+fn trama_ipv4_tcp(vlan: Option<u16>, puerto_destino: u16) -> Trama {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&[0xFF; 6]); // destino
+    bytes.extend_from_slice(&[0x00, 0x1B, 0x21, 0x00, 0x00, 0x01]); // origen
+
+    if let Some(identificador) = vlan {
+        bytes.extend_from_slice(&0x8100u16.to_be_bytes());
+        bytes.extend_from_slice(&identificador.to_be_bytes());
+    }
+    bytes.extend_from_slice(&0x0800u16.to_be_bytes());
+
+    // IPv4 con cabecera de 20 bytes y protocolo TCP.
+    let mut ip = vec![0u8; 20];
+    ip[0] = 0x45;
+    ip[9] = 6;
+    bytes.extend_from_slice(&ip);
+
+    bytes.extend_from_slice(&1234u16.to_be_bytes());
+    bytes.extend_from_slice(&puerto_destino.to_be_bytes());
+
+    let longitud = bytes.len();
+    trama_de(bytes, longitud)
+}
+
+#[test]
+fn se_extraen_direcciones_vlan_y_puertos() {
+    let extraida = extraer(&trama_ipv4_tcp(Some(40), 502)).expect("la trama es completa");
+
+    assert_eq!(extraida.origen, [0x00, 0x1B, 0x21, 0x00, 0x00, 0x01]);
+    assert_eq!(extraida.vlan, Some(40));
+    assert_eq!(
+        extraida.transporte,
+        Some(Transporte::Tcp {
+            origen: 1234,
+            destino: 502
+        })
+    );
+}
+
+#[test]
+fn una_trama_sin_etiqueta_no_declara_vlan() {
+    // En un puerto espejo sin etiquetar, el segmento tiene que venir de otra
+    // parte. `None` lo dice; inventar un cero lo ocultaria.
+    let extraida = extraer(&trama_ipv4_tcp(None, 502)).expect("la trama es completa");
+
+    assert_eq!(extraida.vlan, None);
+    assert!(extraida.transporte.is_some());
+}
+
+#[test]
+fn solo_los_doce_bits_bajos_son_el_identificador_de_vlan() {
+    // Los cuatro altos son prioridad y elegibilidad de descarte. Tomarlos por
+    // parte del identificador produciria segmentos inventados.
+    let mut bytes = trama_ipv4_tcp(Some(40), 502).bytes;
+    // Prioridad 7 y elegibilidad activa sobre la misma VLAN 40.
+    bytes[14] = 0xF0;
+    bytes[15] = 40;
+
+    let longitud = bytes.len();
+    let extraida = extraer(&trama_de(bytes, longitud)).expect("la trama es completa");
+    assert_eq!(extraida.vlan, Some(40));
+}
+
+#[test]
+fn una_trama_truncada_no_desborda_en_ningun_punto() {
+    // Recorte byte a byte sobre una trama valida. Es donde vive el panico a
+    // peticion de quien emita la trama.
+    let completa = trama_ipv4_tcp(Some(40), 502);
+
+    for longitud in 0..completa.bytes.len() {
+        let recortada = trama_de(completa.bytes[..longitud].to_vec(), longitud);
+        let _ = extraer(&recortada);
+    }
+}
+
+#[test]
+fn una_cabecera_ip_con_longitud_ilegal_no_se_interpreta() {
+    // Menos de cinco palabras es una cabecera malformada. Seguir adelante
+    // leeria puertos de un desplazamiento inventado.
+    let mut trama = trama_ipv4_tcp(None, 502);
+    trama.bytes[14] = 0x40; // version 4, longitud 0
+
+    let extraida = extraer(&trama).expect("el enlace sigue siendo legible");
+    assert_eq!(extraida.transporte, None);
+    assert_eq!(extraida.origen, [0x00, 0x1B, 0x21, 0x00, 0x00, 0x01]);
+}
+
+#[test]
+fn un_protocolo_distinto_de_tcp_o_udp_no_declara_puertos() {
+    let mut trama = trama_ipv4_tcp(None, 502);
+    trama.bytes[14 + 9] = 1; // ICMP
+
+    let extraida = extraer(&trama).expect("legible");
+    assert_eq!(extraida.transporte, None);
+}
+
+#[test]
+fn una_trama_sin_transporte_no_es_un_fallo() {
+    // No observar transporte y fallar al leer la trama son cosas distintas.
+    let mut bytes = vec![0u8; 14];
+    bytes[6..12].copy_from_slice(&[0x00, 0x1B, 0x21, 0x00, 0x00, 0x01]);
+    bytes[12..14].copy_from_slice(&0x86DDu16.to_be_bytes()); // IPv6, fuera de alcance
+
+    let extraida = extraer(&trama_de(bytes, 14)).expect("el enlace es legible");
+    assert_eq!(extraida.transporte, None);
+    assert_eq!(extraida.origen, [0x00, 0x1B, 0x21, 0x00, 0x00, 0x01]);
+}
+
+// ---------------------------------------------------------------------------
 // Plataformas sin soporte
 // ---------------------------------------------------------------------------
 
