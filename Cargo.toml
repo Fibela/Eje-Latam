@@ -8,6 +8,7 @@ members = [
     "crates/boveda",
     "crates/eje-red",
     "crates/eje-ipc",
+    "crates/eje-captura",
     "xtask",
 ]
 
@@ -29,6 +30,7 @@ boveda = { path = "crates/boveda" }
 eje-red = { path = "crates/eje-red" }
 guardian-cc = { path = "crates/guardian-cc" }
 motor-pqc = { path = "crates/motor-pqc" }
+eje-captura = { path = "crates/eje-captura" }
 
 thiserror = "2"
 tracing = "0.1"

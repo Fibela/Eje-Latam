@@ -1,0 +1,22 @@
+[package]
+name = "eje-captura"
+description = "Captura pasiva de trafico. Unico crate del workspace donde se admite `unsafe`."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+
+# Solo en Linux. En el resto de plataformas el crate compila y devuelve
+# `PlataformaNoSoportada`, para que `cargo test --workspace` siga funcionando en
+# las maquinas de desarrollo Windows.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[lints]
+workspace = true

@@ -21,6 +21,7 @@ pub mod clasificacion;
 pub mod disco;
 pub mod formato;
 pub mod inventario;
+pub mod observacion;
 pub mod proveedores;
 pub mod revocacion;
 
@@ -1713,6 +1714,213 @@ mod pruebas {
         );
 
         assert_eq!(uno, otro, "construir reordena, asi que los bytes coinciden");
+    }
+
+    // -----------------------------------------------------------------------
+    // Almacen de observacion — RPT-018 §6, PA-38
+    // -----------------------------------------------------------------------
+
+    use observacion::{AlmacenObservacion, CAPACIDAD_PEGAJOSA, CAPACIDAD_VOLATIL, Protocolo};
+
+    /// Direccion derivada de un indice, para llenar tablas.
+    fn mac_numero(numero: u32) -> DireccionEnlace {
+        let bytes = numero.to_be_bytes();
+        [0x02, 0x00, bytes[0], bytes[1], bytes[2], bytes[3]]
+    }
+
+    #[test]
+    fn la_expulsion_volatil_no_borra_la_marca_pegajosa() {
+        // El hallazgo de RPT-018 §6. Sin la particion, llenar la tabla con
+        // direcciones inventadas expulsaria al carro de telemedicina y volveria
+        // a ser contenible.
+        let mut almacen = AlmacenObservacion::nuevo();
+
+        almacen.observar(
+            MAC,
+            Some(Protocolo::Hl7),
+            DeclaracionSegmento::PuedeAlojarCriticos,
+        );
+
+        // El atacante rocia direcciones hasta desbordar la mitad volatil.
+        for numero in 0..(CAPACIDAD_VOLATIL as u32 * 2) {
+            almacen.observar(
+                mac_numero(numero),
+                None,
+                DeclaracionSegmento::SinDispositivosCriticos,
+            );
+        }
+
+        assert!(
+            almacen.volatiles() <= CAPACIDAD_VOLATIL,
+            "la mitad volatil debe estar acotada"
+        );
+
+        let historial = almacen
+            .historial(&MAC)
+            .expect("el pegajoso no esta saturado");
+        assert!(
+            historial.visto_en_segmento_critico,
+            "la marca pegajosa debe sobrevivir a la expulsion volatil"
+        );
+        assert_eq!(
+            historial.declaracion_efectiva(),
+            DeclaracionSegmento::PuedeAlojarCriticos
+        );
+    }
+
+    #[test]
+    fn el_rociado_de_direcciones_no_desemboca_en_contencion() {
+        // La comprobacion que importa: el efecto en el veredicto tras el ataque.
+        let mut almacen = AlmacenObservacion::nuevo();
+        almacen.observar(
+            MAC,
+            Some(Protocolo::Hl7),
+            DeclaracionSegmento::PuedeAlojarCriticos,
+        );
+        for numero in 0..(CAPACIDAD_VOLATIL as u32 * 2) {
+            almacen.observar(
+                mac_numero(numero),
+                None,
+                DeclaracionSegmento::SinDispositivosCriticos,
+            );
+        }
+
+        let proveedores = Proveedores {
+            inventario: &InventarioDe(Ok(None)),
+            segmento: &almacen,
+            oui: &OuiDe(Ok(Indicio::SinIndicio)),
+            huella: &almacen,
+        };
+
+        assert_ne!(
+            evaluar(
+                clasificar_con_proveedores(&proveedores, &MAC, AHORA),
+                PerfilSegmento::Corporativo
+            ),
+            Veredicto::Ejecutar,
+            "tras el rociado, el equipo clinico no puede volverse contenible"
+        );
+    }
+
+    #[test]
+    fn la_saturacion_del_pegajoso_bloquea_en_lugar_de_olvidar() {
+        // La pregunta que RPT-018 §6 no contestaba. Llenar la mitad pegajosa
+        // deja de blanquear un dispositivo y pasa a bloquear la contencion
+        // entera: el atacante gana una denegacion, no un permiso.
+        let mut almacen = AlmacenObservacion::nuevo();
+
+        for numero in 0..(CAPACIDAD_PEGAJOSA as u32 + 16) {
+            almacen.observar(
+                mac_numero(numero),
+                None,
+                DeclaracionSegmento::PuedeAlojarCriticos,
+            );
+        }
+
+        assert!(almacen.pegajoso_saturado());
+        assert!(
+            matches!(
+                almacen.historial(&MAC),
+                Err(ErrorProveedor::FuenteInaccesible { .. })
+            ),
+            "saturado, el proveedor de segmento debe fallar para todos"
+        );
+
+        // Y un fallo declarativo bloquea (RPT-010 §6).
+        let proveedores = Proveedores {
+            inventario: &InventarioDe(Ok(None)),
+            segmento: &almacen,
+            oui: &OuiDe(Ok(Indicio::SinIndicio)),
+            huella: &almacen,
+        };
+        assert_eq!(
+            clasificar_con_proveedores(&proveedores, &MAC, AHORA),
+            Clasificacion::Ambiguo {
+                motivo: MotivoAmbiguedad::EvidenciaNoVerificable
+            }
+        );
+    }
+
+    #[test]
+    fn un_dispositivo_no_observado_es_indeterminado_y_no_sin_indicio() {
+        // Acabar de aparecer no es haberse delatado. Colapsarlos leeria la
+        // ausencia de observacion como ausencia de riesgo.
+        let almacen = AlmacenObservacion::nuevo();
+
+        assert_eq!(almacen.indicio(&MAC), Ok(Indicio::Indeterminado));
+    }
+
+    #[test]
+    fn la_perdida_de_tramas_degrada_a_indeterminado() {
+        // RPT-018 §4: con perdida, la huella acumulada esta incompleta y no se
+        // recompone porque la perdida cese.
+        let mut almacen = AlmacenObservacion::nuevo();
+        almacen.observar(
+            MAC,
+            Some(Protocolo::Hl7),
+            DeclaracionSegmento::SinDispositivosCriticos,
+        );
+        assert_eq!(
+            almacen.indicio(&MAC),
+            Ok(Indicio::SugiereCriticidad(ClaseExcluida::SoporteVital))
+        );
+
+        almacen.anotar_perdida();
+        assert_eq!(almacen.indicio(&MAC), Ok(Indicio::Indeterminado));
+    }
+
+    #[test]
+    fn un_protocolo_observado_puede_no_sugerir_nada() {
+        // BACnet automatiza edificios: su fallo importa, pero no es soporte
+        // vital. Sirve para comprobar que el almacen distingue «observado» de
+        // «indicativo» en lugar de tratar toda observacion como sospecha.
+        let mut almacen = AlmacenObservacion::nuevo();
+        almacen.observar(
+            MAC,
+            Some(Protocolo::Bacnet),
+            DeclaracionSegmento::SinDispositivosCriticos,
+        );
+
+        assert_eq!(almacen.indicio(&MAC), Ok(Indicio::SinIndicio));
+        assert_eq!(Protocolo::Bacnet.sugiere(), None);
+    }
+
+    #[test]
+    fn los_protocolos_industriales_sugieren_seguridad_funcional() {
+        assert_eq!(
+            Protocolo::Modbus.sugiere(),
+            Some(ClaseExcluida::SeguridadFuncional)
+        );
+        assert_eq!(
+            Protocolo::Dnp3.sugiere(),
+            Some(ClaseExcluida::SeguridadFuncional)
+        );
+        assert_eq!(Protocolo::Hl7.sugiere(), Some(ClaseExcluida::SoporteVital));
+    }
+
+    #[test]
+    fn el_mismo_almacen_sirve_a_las_dos_fuentes() {
+        // RPT-018 §8.3 anticipaba que huella y segmento podrian dejar de ser
+        // independientes. Lo son: la VLAN se conoce por la misma observacion que
+        // el protocolo, y mantener dos tablas con las mismas direcciones es como
+        // se desincronizan.
+        let mut almacen = AlmacenObservacion::nuevo();
+        almacen.observar(
+            MAC,
+            Some(Protocolo::Modbus),
+            DeclaracionSegmento::PuedeAlojarCriticos,
+        );
+
+        assert_eq!(
+            almacen.indicio(&MAC),
+            Ok(Indicio::SugiereCriticidad(
+                ClaseExcluida::SeguridadFuncional
+            ))
+        );
+        assert_eq!(
+            almacen.historial(&MAC).expect("no saturado").actual,
+            DeclaracionSegmento::PuedeAlojarCriticos
+        );
     }
 
     // -----------------------------------------------------------------------
