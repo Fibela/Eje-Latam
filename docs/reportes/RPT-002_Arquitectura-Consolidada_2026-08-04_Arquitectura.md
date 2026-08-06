@@ -483,7 +483,9 @@ Todo reporte incluye tabla de metadatos, sección de trazabilidad indicando qué
 
 ### 12.1 Triaje
 
-De los 45 identificadores, **21 siguen abiertos o parciales**. La tabla los mezcla y eso se lee peor de lo que el estado justifica: un tablero largo de puntos honestos parece un producto incompleto, cuando la mayoría no impide desplegar nada.
+De los 45 identificadores, **22 siguen abiertos o parciales** — 18 abiertos y 4 a medias. La tabla los mezcla y eso se lee peor de lo que el estado justifica: un tablero largo de puntos honestos parece un producto incompleto, cuando la mayoría no impide desplegar nada.
+
+> Las cifras de este apartado se contrastan con `cargo xtask tablero`, que las **lee** del tablero en lugar de recordarlas. La primera versión de esta frase decía 21 y el comando la corrigió el día que se escribió: los recuentos a mano fallan aunque las listas que los acompañan estén bien.
 
 Tres categorías, y la distinción no es técnica sino de decisión.
 

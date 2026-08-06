@@ -11,6 +11,7 @@
 
 mod exclusion;
 mod guardian;
+mod tablero;
 mod vectores;
 
 #[cfg(test)]
@@ -37,6 +38,7 @@ fn main() -> ExitCode {
             let actualizar = argumentos.iter().any(|a| a == "--actualizar");
             ejecutar_vectores(actualizar)
         }
+        "tablero" => ejecutar_tablero(),
         "ayuda" | "--help" | "-h" => {
             ayuda();
             ExitCode::SUCCESS
@@ -56,7 +58,49 @@ fn ayuda() {
     println!(
         "    --actualizar                 Reescribe el anclaje (usar solo tras cambiar FUENTES.toml)"
     );
+    println!("  cargo xtask tablero            Recuento de puntos abiertos leido de RPT-002");
     println!("  cargo xtask ayuda              Muestra esta ayuda");
+}
+
+/// Imprime el recuento del tablero **leyendolo**, no de memoria.
+///
+/// El tablero se resumio a mano cuatro veces y las cuatro reintrodujo puntos ya
+/// cerrados. Un recuento derivado no puede equivocarse en eso.
+fn ejecutar_tablero() -> ExitCode {
+    let raiz = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap_or(Path::new("."));
+
+    let puntos = match tablero::desde_raiz(raiz) {
+        Ok(puntos) => puntos,
+        Err(motivo) => {
+            eprintln!("{ROJO}{motivo}{FIN}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let recuento = tablero::contar(&puntos);
+
+    println!("{GRIS}Tablero de RPT-002 §12{FIN}");
+    println!("  Identificadores : {}", recuento.total());
+    println!("  {VERDE}Cerrados{FIN}        : {}", recuento.cerrados);
+    println!("  Parciales       : {}", recuento.parciales);
+    println!("  Abiertos        : {}", recuento.abiertos);
+    println!(
+        "  Pendientes      : {} (parciales + abiertos)",
+        recuento.pendientes()
+    );
+    println!();
+
+    let pendientes: Vec<&str> = puntos
+        .iter()
+        .filter(|punto| punto.estado != tablero::Estado::Cerrado)
+        .map(|punto| punto.identificador.as_str())
+        .collect();
+
+    println!("{GRIS}Pendientes: {}{FIN}", pendientes.join(", "));
+
+    ExitCode::SUCCESS
 }
 
 fn ejecutar_vectores(actualizar: bool) -> ExitCode {
