@@ -468,7 +468,10 @@ Todo reporte incluye tabla de metadatos, sección de trazabilidad indicando qué
 | ~~PA-35~~ | ~~Cableado de la persistencia: rutas, momento de carga y arranque sin ficheros~~ | ✅ Cerrado 5-ago-2026 — RPT-017. **Borrar el inventario se detecta como supresión mediante el centinela** |
 | PA-36 | Vigilancia del directorio de datos en caliente | 🟡 Abierto — RPT-017 §9. **Pospuesto deliberadamente** hasta tener flujo de red |
 | PA-37 | Crate `eje-captura`: AF_PACKET de sólo lectura, frontera de `unsafe` | 🔵 **Parcial** 5-ago-2026 — RPT-018 §9. Crate y guardianes verificados; **`linux.rs` nunca se ha compilado** |
-| PA-40 | Compilar `linux.rs` (`--target x86_64-unknown-linux-gnu`) y ejecutarlo contra una interfaz | 🟡 Abierto — RPT-018 §10 |
+| PA-40 | ~~Compilar `linux.rs`~~ y ejecutarlo contra una interfaz | 🔵 **Parcial** — RPT-018 §10. Tipos validados con `--target x86_64-unknown-linux-gnu`; sin ejecutar |
+| PA-41 | Intervalo de consulta de alertas desde VIS-04 | 🟡 Abierto — RPT-019 §8 |
+| PA-42 | Salida de alertas fuera del equipo (syslog o equivalente) | 🟡 Abierto — RPT-019 §8 |
+| PA-43 | Manejadores de `consultar-alertas` y `obtener-condiciones` | 🟡 Abierto — RPT-019 §8 |
 | PA-38 | Almacén de observación partido: volátil con expulsión, pegajoso sin ella | 🟡 Abierto — RPT-018 §9 |
 | PA-39 | Privilegios de captura (`CAP_NET_RAW`) | 🟡 Abierto — RPT-018 §9 |
 | PA-27 | Reversión del inventario firmado y revocación de la clave del administrador | 🔵 **Parcial** 5-ago-2026 — RPT-012. Secuencia firmada y centinela; falta el ancla y la revocación |

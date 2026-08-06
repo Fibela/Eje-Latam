@@ -213,9 +213,11 @@ fn un_prefijo_malicioso_no_provoca_reserva() {
 // ---------------------------------------------------------------------------
 
 use crate::mensajes::{
-    CAMPOS_ESTADO_AGENTE, CAMPOS_ESTADO_BOVEDA, CAMPOS_NODO_INVENTARIO, CAMPOS_PETICION_CONSULTA,
-    CAMPOS_RESULTADO_CONSULTA, ClaseDispositivo, EstadoAgente, EstadoBoveda, NodoInventario,
-    PerfilSegmento, PeticionConsulta, Postura, ResultadoConsulta,
+    CAMPOS_CONDICIONES, CAMPOS_ESTADO_AGENTE, CAMPOS_ESTADO_BOVEDA, CAMPOS_NODO_INVENTARIO,
+    CAMPOS_PETICION_ALERTAS, CAMPOS_PETICION_CONSULTA, CAMPOS_RESULTADO_CONSULTA,
+    CAMPOS_SUCESO_ALERTA, ClaseAlerta, ClaseDispositivo, Condiciones, EstadoAgente, EstadoBoveda,
+    NodoInventario, PerfilSegmento, PeticionAlertas, PeticionConsulta, Postura, ResultadoConsulta,
+    SucesoAlerta,
 };
 
 /// Campo declarado en el manifiesto.
@@ -309,6 +311,9 @@ fn los_registros_coinciden_con_el_manifiesto() {
     comprobar_registro("EstadoBoveda", &CAMPOS_ESTADO_BOVEDA);
     comprobar_registro("PeticionConsulta", &CAMPOS_PETICION_CONSULTA);
     comprobar_registro("ResultadoConsulta", &CAMPOS_RESULTADO_CONSULTA);
+    comprobar_registro("PeticionAlertas", &CAMPOS_PETICION_ALERTAS);
+    comprobar_registro("SucesoAlerta", &CAMPOS_SUCESO_ALERTA);
+    comprobar_registro("Condiciones", &CAMPOS_CONDICIONES);
 }
 
 #[test]
@@ -367,6 +372,96 @@ fn las_constantes_estan_atadas_a_los_structs() {
     };
     let _ = (columnas, filas);
     assert_eq!(CAMPOS_RESULTADO_CONSULTA.len(), 2);
+
+    let PeticionAlertas { desde_asiento } = PeticionAlertas { desde_asiento: 0 };
+    let _ = desde_asiento;
+    assert_eq!(CAMPOS_PETICION_ALERTAS.len(), 1);
+
+    let SucesoAlerta {
+        asiento,
+        clase,
+        dispositivo,
+        detalle,
+    } = SucesoAlerta {
+        asiento: 1,
+        clase: ClaseAlerta::AmenazaIncontenible,
+        dispositivo: "00:11:22:33:44:55".to_owned(),
+        detalle: "prueba".to_owned(),
+    };
+    let _ = (asiento, clase, dispositivo, detalle);
+    assert_eq!(CAMPOS_SUCESO_ALERTA.len(), 4);
+
+    let Condiciones {
+        inventario_suprimido,
+        inventario_no_verifica,
+        observacion_saturada,
+        captura_con_perdida,
+    } = Condiciones {
+        inventario_suprimido: false,
+        inventario_no_verifica: false,
+        observacion_saturada: false,
+        captura_con_perdida: false,
+    };
+    let _ = (
+        inventario_suprimido,
+        inventario_no_verifica,
+        observacion_saturada,
+        captura_con_perdida,
+    );
+    assert_eq!(CAMPOS_CONDICIONES.len(), 4);
+}
+
+#[test]
+fn las_condiciones_distinguen_lo_degradado_de_lo_normal() {
+    let normal = Condiciones {
+        inventario_suprimido: false,
+        inventario_no_verifica: false,
+        observacion_saturada: false,
+        captura_con_perdida: false,
+    };
+    assert!(!normal.hay_degradacion());
+
+    // Cada condicion basta por si sola: no hay ninguna que sea «menos grave».
+    for degradada in [
+        Condiciones {
+            inventario_suprimido: true,
+            ..normal
+        },
+        Condiciones {
+            inventario_no_verifica: true,
+            ..normal
+        },
+        Condiciones {
+            observacion_saturada: true,
+            ..normal
+        },
+        Condiciones {
+            captura_con_perdida: true,
+            ..normal
+        },
+    ] {
+        assert!(degradada.hay_degradacion(), "{degradada:?}");
+    }
+}
+
+#[test]
+fn un_suceso_de_alerta_es_reversible() {
+    let alerta = SucesoAlerta {
+        asiento: 42,
+        clase: ClaseAlerta::AmenazaIncontenible,
+        dispositivo: "00:1B:21:00:00:01".to_owned(),
+        detalle: "soporte vital con actividad anomala".to_owned(),
+    };
+
+    let bruto = serde_json::to_string(&alerta).expect("serializa");
+    assert!(
+        bruto.contains("\"clase\":\"amenazaIncontenible\""),
+        "la clase viaja en camelCase: {bruto}"
+    );
+    assert_eq!(
+        serde_json::from_str::<SucesoAlerta>(&bruto).expect("deserializa"),
+        alerta
+    );
 }
 
 #[test]

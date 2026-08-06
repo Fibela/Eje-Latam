@@ -68,6 +68,27 @@ vista = "VIS-01"
 direccion = "consulta"
 descripcion = "Consulta SQL contra ALM-02. Nunca alcanza ALM-01 (RPT-002 §5)."
 
+# RPT-019. Los dos canales de alerta son CONSULTAS, no empuje.
+#
+# Anadir empuje seria la respuesta obvia y es la equivocada: significa que el
+# agente inicia comunicacion hacia el renderer, y eso es una CAPACIDAD nueva —no
+# un mensaje nuevo— en la direccion que RPT-004 §6.2 restringe. Ademas obligaria
+# a resolver entrega, orden y reintento sobre un transporte de peticion y
+# respuesta, y no compraria lo que parece: si el renderer no esta abierto, la
+# alerta se pierde igual. La durabilidad la da ALM-01, no el empuje.
+
+[[canal]]
+nombre = "consultar-alertas"
+vista = "VIS-04"
+direccion = "consulta"
+descripcion = "Sucesos de alerta anexados a ALM-01, desde un numero de asiento."
+
+[[canal]]
+nombre = "obtener-condiciones"
+vista = "VIS-04"
+direccion = "consulta"
+descripcion = "Estados degradados vigentes. A diferencia de las alertas, no se anexan: se consultan."
+
 # ---------------------------------------------------------------------------
 # CANALES PROHIBIDOS
 # ---------------------------------------------------------------------------
@@ -212,6 +233,64 @@ registro = "ResultadoConsulta"
 nombre = "filas"
 tipo = "lista<lista<texto>>"
 
+[[registro]]
+nombre = "PeticionAlertas"
+descripcion = "Punto del registro desde el que se piden las alertas."
+
+[[campo]]
+registro = "PeticionAlertas"
+nombre = "desdeAsiento"
+tipo = "entero"
+
+[[registro]]
+nombre = "SucesoAlerta"
+descripcion = "Suceso de alerta ya anexado a ALM-01. RPT-019 §2. Se llama Suceso y no Alerta porque VIS-04 ya tiene su propio tipo Alerta, que es algo que mostrar y no el registro de un hecho."
+
+[[campo]]
+registro = "SucesoAlerta"
+nombre = "asiento"
+tipo = "entero"
+
+[[campo]]
+registro = "SucesoAlerta"
+nombre = "clase"
+tipo = "enumerado"
+valores = "amenazaIncontenible"
+
+[[campo]]
+registro = "SucesoAlerta"
+nombre = "dispositivo"
+tipo = "texto"
+
+[[campo]]
+registro = "SucesoAlerta"
+nombre = "detalle"
+tipo = "texto"
+
+[[registro]]
+nombre = "Condiciones"
+descripcion = "Estados degradados vigentes. No son sucesos: son verdaderos hasta que alguien interviene."
+
+[[campo]]
+registro = "Condiciones"
+nombre = "inventarioSuprimido"
+tipo = "booleano"
+
+[[campo]]
+registro = "Condiciones"
+nombre = "inventarioNoVerifica"
+tipo = "booleano"
+
+[[campo]]
+registro = "Condiciones"
+nombre = "observacionSaturada"
+tipo = "booleano"
+
+[[campo]]
+registro = "Condiciones"
+nombre = "capturaConPerdida"
+tipo = "booleano"
+
 # --- Mensajes por canal ----------------------------------------------------
 #
 # Un canal sin peticion declarada no lleva carga util en esa direccion.
@@ -240,3 +319,18 @@ forma = "PeticionConsulta"
 canal = "consultar-sandbox"
 direccion = "respuesta"
 forma = "ResultadoConsulta"
+
+[[mensaje]]
+canal = "consultar-alertas"
+direccion = "peticion"
+forma = "PeticionAlertas"
+
+[[mensaje]]
+canal = "consultar-alertas"
+direccion = "respuesta"
+forma = "lista<SucesoAlerta>"
+
+[[mensaje]]
+canal = "obtener-condiciones"
+direccion = "respuesta"
+forma = "Condiciones"

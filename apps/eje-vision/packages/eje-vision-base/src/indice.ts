@@ -11,18 +11,24 @@
  */
 
 export type {
+  ClaseAlerta,
+  Condiciones,
   EstadoAgente,
   EstadoBoveda,
   NodoInventario,
   PuenteEje,
   ResultadoConsulta,
+  SucesoAlerta,
 } from "./ipc/puente.js";
 export {
+  CAMPOS_CONDICIONES,
   CAMPOS_ESTADO_AGENTE,
   CAMPOS_ESTADO_BOVEDA,
   CAMPOS_NODO_INVENTARIO,
+  CAMPOS_PETICION_ALERTAS,
   CAMPOS_PETICION_CONSULTA,
   CAMPOS_RESULTADO_CONSULTA,
+  CAMPOS_SUCESO_ALERTA,
   requiereAlertaCapacidad,
   UMBRAL_ALERTA_BOVEDA,
 } from "./ipc/puente.js";

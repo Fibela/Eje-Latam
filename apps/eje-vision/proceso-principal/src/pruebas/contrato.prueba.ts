@@ -21,11 +21,14 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  CAMPOS_CONDICIONES,
   CAMPOS_ESTADO_AGENTE,
   CAMPOS_ESTADO_BOVEDA,
   CAMPOS_NODO_INVENTARIO,
+  CAMPOS_PETICION_ALERTAS,
   CAMPOS_PETICION_CONSULTA,
   CAMPOS_RESULTADO_CONSULTA,
+  CAMPOS_SUCESO_ALERTA,
 } from "@eje/vision-base";
 import {
   CANALES_PERMITIDOS,
@@ -187,6 +190,9 @@ describe("PA-20 — paridad con contrato-ipc.toml", () => {
       ["EstadoBoveda", CAMPOS_ESTADO_BOVEDA],
       ["PeticionConsulta", CAMPOS_PETICION_CONSULTA],
       ["ResultadoConsulta", CAMPOS_RESULTADO_CONSULTA],
+      ["PeticionAlertas", CAMPOS_PETICION_ALERTAS],
+      ["SucesoAlerta", CAMPOS_SUCESO_ALERTA],
+      ["Condiciones", CAMPOS_CONDICIONES],
     ];
 
     for (const [nombre, implementados] of registros) {

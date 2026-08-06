@@ -159,3 +159,99 @@ pub const CAMPOS_RESULTADO_CONSULTA: [(&str, &str); 2] = [
     ("columnas", "lista<texto>"),
     ("filas", "lista<lista<texto>>"),
 ];
+
+// ---------------------------------------------------------------------------
+// Alertas — RPT-019
+// ---------------------------------------------------------------------------
+
+/// Clase de suceso de alerta.
+///
+/// # Por que hay una sola variante
+///
+/// De los tres centinelas de RPT-019 §1, **solo uno es un suceso**: los otros
+/// dos son condiciones y viajan en [`Condiciones`]. Anadir aqui variantes para
+/// ellos convertiria un estado persistente en una lluvia de sucesos repetidos.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ClaseAlerta {
+    /// Se detecto una amenaza sobre un dispositivo que no puede contenerse.
+    ///
+    /// Lo mas urgente que este producto puede comunicar: no existe accion
+    /// automatica posible y la unica respuesta es humana (RPT-010 §6.1).
+    AmenazaIncontenible,
+}
+
+/// Punto del registro desde el que se piden las alertas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PeticionAlertas {
+    /// Numero de asiento desde el que continuar, exclusivo.
+    pub desde_asiento: u64,
+}
+
+/// Suceso de alerta ya anexado a ALM-01.
+///
+/// Lleva su numero de asiento para que quien consulte pueda continuar desde
+/// donde lo dejo sin recibir lo mismo dos veces.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SucesoAlerta {
+    /// Asiento de ALM-01 que la contiene.
+    pub asiento: u64,
+    /// Que ocurrio.
+    pub clase: ClaseAlerta,
+    /// Dispositivo implicado.
+    pub dispositivo: String,
+    /// Contexto para el operador.
+    pub detalle: String,
+}
+
+/// Estados degradados vigentes.
+///
+/// # Condiciones, no sucesos
+///
+/// Son verdaderas hasta que alguien interviene, asi que no se anexan al
+/// registro: se consultan. Anotarlas repetidamente inundaria ALM-01 con la misma
+/// noticia (RPT-019 §2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Condiciones {
+    /// Habia inventario y ya no esta (RPT-017 §2).
+    pub inventario_suprimido: bool,
+    /// El inventario esta presente y no supera la verificacion.
+    pub inventario_no_verifica: bool,
+    /// La mitad pegajosa del almacen se lleno (RPT-018 §6).
+    pub observacion_saturada: bool,
+    /// La captura perdio tramas y la vista de la red esta incompleta.
+    pub captura_con_perdida: bool,
+}
+
+impl Condiciones {
+    /// Indica si alguna condicion degradada esta vigente.
+    #[must_use]
+    pub const fn hay_degradacion(&self) -> bool {
+        self.inventario_suprimido
+            || self.inventario_no_verifica
+            || self.observacion_saturada
+            || self.captura_con_perdida
+    }
+}
+
+/// Campos de [`PeticionAlertas`].
+pub const CAMPOS_PETICION_ALERTAS: [(&str, &str); 1] = [("desdeAsiento", "entero")];
+
+/// Campos de [`SucesoAlerta`].
+pub const CAMPOS_SUCESO_ALERTA: [(&str, &str); 4] = [
+    ("asiento", "entero"),
+    ("clase", "enumerado"),
+    ("dispositivo", "texto"),
+    ("detalle", "texto"),
+];
+
+/// Campos de [`Condiciones`].
+pub const CAMPOS_CONDICIONES: [(&str, &str); 4] = [
+    ("inventarioSuprimido", "booleano"),
+    ("inventarioNoVerifica", "booleano"),
+    ("observacionSaturada", "booleano"),
+    ("capturaConPerdida", "booleano"),
+];

@@ -83,17 +83,23 @@ pub enum Canal {
     ObtenerEstadoBoveda,
     /// VIS-01 — consulta SQL contra ALM-02.
     ConsultarSandbox,
+    /// VIS-04 — sucesos de alerta anexados a ALM-01.
+    ConsultarAlertas,
+    /// VIS-04 — estados degradados vigentes.
+    ObtenerCondiciones,
 }
 
 impl Canal {
     /// Todos los canales permitidos.
     ///
     /// El orden es estable y coincide con el de `contrato-ipc.toml`.
-    pub const TODOS: [Self; 4] = [
+    pub const TODOS: [Self; 6] = [
         Self::ObtenerEstadoAgente,
         Self::ObtenerInventario,
         Self::ObtenerEstadoBoveda,
         Self::ConsultarSandbox,
+        Self::ConsultarAlertas,
+        Self::ObtenerCondiciones,
     ];
 
     /// Identificador estable del canal, tal como viaja por el puente.
@@ -104,6 +110,8 @@ impl Canal {
             Self::ObtenerInventario => "obtener-inventario",
             Self::ObtenerEstadoBoveda => "obtener-estado-boveda",
             Self::ConsultarSandbox => "consultar-sandbox",
+            Self::ConsultarAlertas => "consultar-alertas",
+            Self::ObtenerCondiciones => "obtener-condiciones",
         }
     }
 

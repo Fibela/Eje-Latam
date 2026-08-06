@@ -23,6 +23,10 @@ export const CANALES_PERMITIDOS = [
   "obtener-inventario",
   "obtener-estado-boveda",
   "consultar-sandbox",
+  // RPT-019. Consultas, no suscripciones: el agente nunca inicia comunicación
+  // hacia el renderer.
+  "consultar-alertas",
+  "obtener-condiciones",
 ] as const;
 
 /** Canal admitido por el puente. */

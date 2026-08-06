@@ -56,6 +56,51 @@ export interface ResultadoConsulta {
 }
 
 /**
+ * Clase de suceso de alerta.
+ *
+ * Una sola variante a propósito: de los tres centinelas de RPT-019 §1, sólo uno
+ * es un suceso. Los otros dos son condiciones y viajan en {@link Condiciones}.
+ */
+export type ClaseAlerta = "amenazaIncontenible";
+
+/**
+ * Suceso de alerta ya anexado a ALM-01.
+ *
+ * Se llama `SucesoAlerta` y no `Alerta` porque VIS-04 ya tiene su propio tipo
+ * `Alerta`, y no son lo mismo: aquel es **algo que mostrar**, con severidad;
+ * este es **el registro de un hecho**. La colision de nombres fue el sintoma de
+ * que «alerta» era ambiguo entre las dos capas.
+ */
+export interface SucesoAlerta {
+  /** Asiento de ALM-01 que la contiene. */
+  readonly asiento: number;
+  /** Qué ocurrió. */
+  readonly clase: ClaseAlerta;
+  /** Dispositivo implicado. */
+  readonly dispositivo: string;
+  /** Contexto para el operador. */
+  readonly detalle: string;
+}
+
+/**
+ * Estados degradados vigentes.
+ *
+ * Son verdaderos hasta que alguien interviene, así que no se anexan al registro:
+ * se consultan. Anotarlos repetidamente inundaría ALM-01 con la misma noticia
+ * (RPT-019 §2).
+ */
+export interface Condiciones {
+  /** Había inventario y ya no está (RPT-017 §2). */
+  readonly inventarioSuprimido: boolean;
+  /** El inventario está presente y no supera la verificación. */
+  readonly inventarioNoVerifica: boolean;
+  /** La mitad pegajosa del almacén de observación se llenó (RPT-018 §6). */
+  readonly observacionSaturada: boolean;
+  /** La captura perdió tramas y la vista de la red está incompleta. */
+  readonly capturaConPerdida: boolean;
+}
+
+/**
  * API cerrada expuesta por el preload.
  *
  * Nótese que no existe ningún método que acepte un nombre de canal como dato.
@@ -77,6 +122,18 @@ export interface PuenteEje {
    * alcanzable desde la interfaz (RPT-002 §5).
    */
   consultarSandbox(sentencia: string): Promise<ResultadoConsulta>;
+
+  /**
+   * VIS-04 — sucesos de alerta desde un asiento, exclusivo.
+   *
+   * Es una **consulta**, no una suscripción. RPT-019 §4 descarta el empuje: el
+   * agente no inicia comunicación hacia el renderer, porque eso sería una
+   * capacidad nueva y no un mensaje nuevo.
+   */
+  consultarAlertas(desdeAsiento: number): Promise<readonly SucesoAlerta[]>;
+
+  /** VIS-04 — estados degradados vigentes. */
+  obtenerCondiciones(): Promise<Condiciones>;
 }
 
 /**
@@ -158,14 +215,35 @@ export const CAMPOS_RESULTADO_CONSULTA = [
   ["filas", "lista<lista<texto>>"],
 ] as const satisfies readonly (readonly [keyof ResultadoConsulta, string])[];
 
-// Comprobación de exhaustividad. Estas cuatro llamadas no producen código: si
-// una interfaz gana un campo y su tabla no lo declara, `tsc` falla aquí.
-// `PeticionConsulta` no tiene interfaz propia — es el argumento de
-// `consultarSandbox`— y por eso no figura.
+/** Campos de la petición de `consultar-alertas`. */
+export const CAMPOS_PETICION_ALERTAS = [["desdeAsiento", "entero"]] as const;
+
+/** Campos de [`SucesoAlerta`]. */
+export const CAMPOS_SUCESO_ALERTA = [
+  ["asiento", "entero"],
+  ["clase", "enumerado"],
+  ["dispositivo", "texto"],
+  ["detalle", "texto"],
+] as const satisfies readonly (readonly [keyof SucesoAlerta, string])[];
+
+/** Campos de [`Condiciones`]. */
+export const CAMPOS_CONDICIONES = [
+  ["inventarioSuprimido", "booleano"],
+  ["inventarioNoVerifica", "booleano"],
+  ["observacionSaturada", "booleano"],
+  ["capturaConPerdida", "booleano"],
+] as const satisfies readonly (readonly [keyof Condiciones, string])[];
+
+// Comprobación de exhaustividad. Estas llamadas no producen código: si una
+// interfaz gana un campo y su tabla no lo declara, `tsc` falla aquí.
+// `PeticionConsulta` y `PeticionAlertas` no tienen interfaz propia —son
+// argumentos de sus métodos— y por eso no figuran.
 exigirCompleto<Faltantes<EstadoAgente, typeof CAMPOS_ESTADO_AGENTE>>();
 exigirCompleto<Faltantes<NodoInventario, typeof CAMPOS_NODO_INVENTARIO>>();
 exigirCompleto<Faltantes<EstadoBoveda, typeof CAMPOS_ESTADO_BOVEDA>>();
 exigirCompleto<Faltantes<ResultadoConsulta, typeof CAMPOS_RESULTADO_CONSULTA>>();
+exigirCompleto<Faltantes<SucesoAlerta, typeof CAMPOS_SUCESO_ALERTA>>();
+exigirCompleto<Faltantes<Condiciones, typeof CAMPOS_CONDICIONES>>();
 
 /**
  * Indica si el estado de la Bóveda exige alerta en VIS-04.
