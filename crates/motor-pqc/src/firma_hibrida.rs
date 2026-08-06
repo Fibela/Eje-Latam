@@ -23,7 +23,7 @@ use ed25519_dalek::{
 };
 use ed25519_dalek::{Signer as _, Verifier as _};
 use ml_dsa::{
-    Generate as _, Keypair as _, MlDsa65, Signature as FirmaMlDsa, Signer as _,
+    EncodedSignature, Generate as _, Keypair as _, MlDsa65, Signature as FirmaMlDsa, Signer as _,
     SigningKey as PrivadaMlDsa, Verifier as _, VerifyingKey as PublicaMlDsa,
 };
 use rand_core::CryptoRng;
@@ -73,6 +73,48 @@ impl FirmaHibrida {
         let mut salida = self.poscuantica.encode().to_vec();
         salida.extend_from_slice(&self.clasica.to_bytes());
         salida
+    }
+
+    /// Longitud total de una firma serializada.
+    ///
+    /// Ambas componentes tienen longitud fija, así que la firma también. Se
+    /// deriva del tipo en lugar de escribirse a mano: una constante copiada se
+    /// desincroniza en silencio si el parámetro cambia.
+    #[must_use]
+    pub fn longitud_serializada() -> usize {
+        EncodedSignature::<MlDsa65>::default().len() + LONGITUD_FIRMA_CLASICA
+    }
+
+    /// Reconstruye una firma a partir de su serialización.
+    ///
+    /// # Errores
+    ///
+    /// Devuelve [`ErrorPqc::FirmaInvalida`] si la longitud no es exactamente
+    /// [`Self::longitud_serializada`] o si la componente poscuántica no decodifica.
+    /// Se exige longitud **exacta**: aceptar una entrada más larga y quedarse con
+    /// el prefijo dejaría bytes sin interpretar en un dato que llega de un fichero
+    /// que se asume manipulable.
+    pub fn desde_bytes(bytes: &[u8]) -> Result<Self, ErrorPqc> {
+        let longitud_pq = EncodedSignature::<MlDsa65>::default().len();
+
+        if bytes.len() != longitud_pq + LONGITUD_FIRMA_CLASICA {
+            return Err(ErrorPqc::FirmaInvalida);
+        }
+
+        let (parte_pq, parte_clasica) = bytes.split_at(longitud_pq);
+
+        let codificada =
+            EncodedSignature::<MlDsa65>::try_from(parte_pq).map_err(|_| ErrorPqc::FirmaInvalida)?;
+        let poscuantica =
+            FirmaMlDsa::<MlDsa65>::decode(&codificada).ok_or(ErrorPqc::FirmaInvalida)?;
+
+        let mut bruta = [0u8; LONGITUD_FIRMA_CLASICA];
+        bruta.copy_from_slice(parte_clasica);
+
+        Ok(Self {
+            poscuantica,
+            clasica: FirmaEd25519::from_bytes(&bruta),
+        })
     }
 }
 

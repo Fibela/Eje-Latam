@@ -15,7 +15,10 @@
 
 #![forbid(unsafe_code)]
 
+pub mod almacen;
 pub mod clasificacion;
+pub mod disco;
+pub mod formato;
 pub mod inventario;
 pub mod proveedores;
 
@@ -1430,6 +1433,242 @@ mod pruebas {
 
         assert_eq!(uno.raiz(), otro.raiz());
         assert_eq!(uno.marcados(), otro.marcados());
+    }
+
+    // -----------------------------------------------------------------------
+    // Formato en disco y extremo a extremo — RPT-013
+    // -----------------------------------------------------------------------
+
+    use almacen::{ErrorCarga, InventarioLocal};
+    use formato::{ENTRADAS_MAXIMAS, ErrorFormato, MAGICO, analizar, serializar};
+
+    /// Bytes tal como quedarian en disco, para el banco dado.
+    fn bytes_en_disco(banco: &Banco) -> Vec<u8> {
+        serializar(&banco.inventario, banco.anclada.secuencia, &banco.firma)
+    }
+
+    #[test]
+    fn el_recorrido_completo_de_fichero_a_veredicto() {
+        // La prueba que faltaba: cinco reportes de diseno ejercitados de extremo
+        // a extremo sobre un artefacto real.
+        let banco = banco(DominioClave::Cliente);
+        let bytes = bytes_en_disco(&banco);
+
+        let local = InventarioLocal::cargar(&bytes, &banco.clave, banco.centinela)
+            .expect("el fichero recien escrito debe cargar");
+
+        assert_eq!(local.entradas(), 3);
+        assert_eq!(local.secuencia(), banco.anclada.secuencia);
+
+        // De la MAC al veredicto, pasando por el proveedor.
+        let proveedores = Proveedores {
+            inventario: &local,
+            segmento: &SegmentoDe(Ok(segmento_limpio())),
+            oui: &OuiDe(Ok(Indicio::SinIndicio)),
+            huella: &HuellaDe(Ok(Indicio::SinIndicio)),
+        };
+
+        let veredicto = evaluar(
+            clasificar_con_proveedores(&proveedores, &MAC, AHORA),
+            PerfilSegmento::Corporativo,
+        );
+
+        assert_eq!(
+            veredicto,
+            Veredicto::Prohibida {
+                clase: ClaseExcluida::SoporteVital
+            }
+        );
+        assert!(veredicto.es_amenaza_incontenible());
+    }
+
+    #[test]
+    fn un_dispositivo_ausente_del_fichero_no_es_un_fallo() {
+        // Ausencia legitima frente a fallo de verificacion: RPT-010 §4 obliga a
+        // no confundirlos, y aqui es donde se decide.
+        let banco = banco(DominioClave::Cliente);
+        let local = InventarioLocal::cargar(&bytes_en_disco(&banco), &banco.clave, banco.centinela)
+            .expect("carga");
+
+        assert_eq!(local.marcado(&[0xFF; 6]), Ok(None));
+    }
+
+    #[test]
+    fn el_fichero_es_reversible() {
+        let banco = banco(DominioClave::Cliente);
+        let fichero = analizar(&bytes_en_disco(&banco)).expect("analiza");
+
+        assert_eq!(fichero.inventario, banco.inventario);
+        assert_eq!(fichero.anclada, banco.anclada);
+    }
+
+    #[test]
+    fn la_raiz_no_viaja_en_el_fichero_sino_que_se_recalcula() {
+        // Guardarla crearia una pregunta que no debe existir: si la raiz escrita
+        // y la recalculada discrepan, cual vale. Cualquier respuesta es
+        // explotable, asi que no se escribe.
+        let banco = banco(DominioClave::Cliente);
+        let bytes = bytes_en_disco(&banco);
+
+        assert!(
+            !bytes
+                .windows(32)
+                .any(|ventana| ventana == banco.anclada.raiz.bytes()),
+            "la raiz no debe aparecer literalmente en el fichero"
+        );
+
+        let fichero = analizar(&bytes).expect("analiza");
+        assert_eq!(
+            formato::raiz_recalculada(&fichero),
+            Some(banco.anclada.raiz)
+        );
+    }
+
+    // --- Analizador defensivo: el frente no autenticado ---
+
+    #[test]
+    fn un_fichero_vacio_o_minusculo_no_desborda() {
+        for longitud in 0..22 {
+            let resultado = analizar(&vec![0u8; longitud]).err();
+            assert!(
+                matches!(resultado, Some(ErrorFormato::Truncado { .. })),
+                "longitud {longitud} deberia dar truncado, dio {resultado:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn un_magico_ajeno_se_rechaza() {
+        let mut bytes = bytes_en_disco(&banco(DominioClave::Cliente));
+        bytes[0] = b'X';
+
+        assert_eq!(analizar(&bytes).err(), Some(ErrorFormato::MagicoAusente));
+    }
+
+    #[test]
+    fn una_version_futura_se_rechaza_en_lugar_de_interpretarse() {
+        // Interpretar un formato que no se conoce es adivinar sobre entrada
+        // hostil.
+        let mut bytes = bytes_en_disco(&banco(DominioClave::Cliente));
+        bytes[8..10].copy_from_slice(&9u16.to_be_bytes());
+
+        assert_eq!(
+            analizar(&bytes).err(),
+            Some(ErrorFormato::VersionDesconocida { encontrada: 9 })
+        );
+    }
+
+    #[test]
+    fn un_numero_de_entradas_absurdo_no_reserva_memoria() {
+        // El ataque clasico: veintidos bytes que declaran cuatro mil millones de
+        // entradas. Se acota ANTES de multiplicar o reservar.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(MAGICO);
+        bytes.extend_from_slice(&1u16.to_be_bytes());
+        bytes.extend_from_slice(&1u64.to_be_bytes());
+        bytes.extend_from_slice(&u32::MAX.to_be_bytes());
+
+        assert_eq!(
+            analizar(&bytes).err(),
+            Some(ErrorFormato::DemasiadasEntradas {
+                declaradas: u32::MAX as usize
+            })
+        );
+        assert!(ENTRADAS_MAXIMAS < u32::MAX as usize);
+    }
+
+    #[test]
+    fn un_fichero_truncado_se_detecta() {
+        let bytes = bytes_en_disco(&banco(DominioClave::Cliente));
+
+        for recorte in [1, 64, 1000] {
+            let cortado = &bytes[..bytes.len() - recorte];
+            assert!(
+                matches!(analizar(cortado).err(), Some(ErrorFormato::Truncado { .. })),
+                "recortar {recorte} bytes deberia dar truncado"
+            );
+        }
+    }
+
+    #[test]
+    fn los_bytes_sobrantes_se_rechazan() {
+        // Un fichero cuya cola no se interpreta admite dos lecturas: la del
+        // analizador y la de quien anadio los bytes.
+        let mut bytes = bytes_en_disco(&banco(DominioClave::Cliente));
+        bytes.extend_from_slice(b"cola");
+
+        assert_eq!(
+            analizar(&bytes).err(),
+            Some(ErrorFormato::BytesSobrantes { sobrantes: 4 })
+        );
+    }
+
+    #[test]
+    fn un_codigo_de_clase_desconocido_se_rechaza() {
+        // Aceptarlo como «no critico» seria dar al atacante una via de
+        // degradacion mediante un byte que el analizador no entiende.
+        let banco = banco(DominioClave::Cliente);
+        let mut bytes = bytes_en_disco(&banco);
+        bytes[22 + 6] = 200;
+
+        assert_eq!(
+            analizar(&bytes).err(),
+            Some(ErrorFormato::ClaseDesconocida { codigo: 200 })
+        );
+    }
+
+    #[test]
+    fn alterar_una_entrada_del_fichero_invalida_la_firma() {
+        // El fichero sigue bien formado; lo que falla es la criptografia. Las dos
+        // capas se distinguen en el tipo de error.
+        let banco = banco(DominioClave::Cliente);
+        let mut bytes = bytes_en_disco(&banco);
+
+        // Degradar la primera entrada a «no critico».
+        let posicion_clase = 22 + banco.posicion(&MAC) * 19 + 6;
+        bytes[posicion_clase] = 0;
+
+        assert!(analizar(&bytes).is_ok(), "el fichero sigue bien formado");
+        assert_eq!(
+            InventarioLocal::cargar(&bytes, &banco.clave, banco.centinela).err(),
+            Some(ErrorCarga::Verificacion(
+                ErrorInventario::FirmaDeRaizInvalida
+            ))
+        );
+    }
+
+    #[test]
+    fn un_fichero_revertido_no_carga() {
+        // PA-27 comprobado desde disco.
+        let banco = banco_con(DominioClave::Cliente, 6, Centinela::Establecido(9));
+
+        assert_eq!(
+            InventarioLocal::cargar(&bytes_en_disco(&banco), &banco.clave, banco.centinela).err(),
+            Some(ErrorCarga::Verificacion(
+                ErrorInventario::ReversionDetectada {
+                    aceptada: 9,
+                    presentada: 6
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn el_orden_en_disco_no_altera_el_resultado() {
+        // Dos ficheros con las entradas escritas en orden distinto deben
+        // producir el mismo inventario y la misma raiz.
+        let banco = banco(DominioClave::Cliente);
+        let uno = bytes_en_disco(&banco);
+
+        let mut invertido = banco.inventario.marcados().to_vec();
+        invertido.reverse();
+        let otro = serializar(
+            &Inventario::construir(invertido).expect("sin duplicados"),
+            banco.anclada.secuencia,
+            &banco.firma,
+        );
+
+        assert_eq!(uno, otro, "construir reordena, asi que los bytes coinciden");
     }
 
     #[test]

@@ -458,7 +458,8 @@ Todo reporte incluye tabla de metadatos, sección de trazabilidad indicando qué
 | ~~PA-21~~ | ~~Tipado de carga útil por canal del contrato IPC~~ | ✅ Cerrado 5-ago-2026 — RPT-007 |
 | PA-22 | Cobertura de fabricantes OT (Siemens, Moxa, Hirschmann): sin oráculo que no sea equipo físico | 🟡 Abierto — RPT-008 §8 |
 | ~~PA-23~~ | ~~Clasificación de dispositivo para la exclusión permanente~~ | ✅ Cerrado 5-ago-2026 — RPT-009. **Sin umbral configurable; la inferencia solo excluye** |
-| PA-24 | Productores de evidencia: huella pasiva, OUI, almacén de marcados firmados y su vigencia | 🔵 **Parcial** 5-ago-2026 — RPT-010 (contratos) y RPT-011 (verificación del inventario). Faltan los adaptadores concretos |
+| ~~PA-24~~ | ~~Productores de evidencia: inventario firmado~~ | ✅ Cerrado 5-ago-2026 — RPT-013. **Formato en disco, analizador defensivo y recorrido completo**. Huella y OUI siguen en PA-25 |
+| PA-29 | Acceso al sistema de ficheros, escritura atómica y fuzzing del analizador | 🟡 Abierto — RPT-013 §7 |
 | PA-27 | Reversión del inventario firmado y revocación de la clave del administrador | 🔵 **Parcial** 5-ago-2026 — RPT-012. Secuencia firmada y centinela; falta el ancla y la revocación |
 | PA-28 | Ancla de confianza para el centinela de frescura (TPM 2.0 o equivalente) | 🟡 Abierto — RPT-012 §7 |
 | PA-25 | Distribución de la base OUI en Local-First | 🟡 Abierto — RPT-010 §9 |
