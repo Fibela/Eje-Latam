@@ -474,12 +474,42 @@ Todo reporte incluye tabla de metadatos, sección de trazabilidad indicando qué
 | PA-43 | Manejadores de `consultar-alertas` y `obtener-condiciones` | 🟡 Abierto — RPT-019 §8 |
 | PA-44 | ~~Agente mínimo que recorra captura → veredicto~~ | ✅ Cerrado 5-ago-2026 — RPT-020. **Habilita PA-40** |
 | PA-45 | Declaración de segmentos por identificador de VLAN | 🟡 Abierto — RPT-020 §7 |
-| PA-38 | Almacén de observación partido: volátil con expulsión, pegajoso sin ella | 🟡 Abierto — RPT-018 §9 |
+| ~~PA-38~~ | ~~Almacén de observación partido: volátil con expulsión, pegajoso sin ella~~ | ✅ Cerrado 5-ago-2026 — RPT-018 §6. **La saturación bloquea en lugar de olvidar** |
 | PA-39 | Privilegios de captura (`CAP_NET_RAW`) | 🟡 Abierto — RPT-018 §9 |
 | PA-27 | Reversión del inventario firmado y revocación de la clave del administrador | 🔵 **Parcial** 5-ago-2026 — RPT-012. Secuencia firmada y centinela; falta el ancla y la revocación |
 | PA-28 | Ancla de confianza para el centinela de frescura (TPM 2.0 o equivalente) | 🟡 Abierto — RPT-012 §7 |
 | PA-25 | Distribución de la base OUI en Local-First | 🟡 Abierto — RPT-010 §9 |
-| PA-26 | Limpieza auditada de la ambigüedad pegajosa | 🟡 Abierto — RPT-010 §9 |
+| PA-26 | Limpieza auditada de la ambigüedad pegajosa | 🟡 Abierto — RPT-010 §9. **Requisito, no mejora**, desde RPT-018 §6 |
+
+### 12.1 Triaje
+
+De los 45 identificadores, **21 siguen abiertos o parciales**. La tabla los mezcla y eso se lee peor de lo que el estado justifica: un tablero largo de puntos honestos parece un producto incompleto, cuando la mayoría no impide desplegar nada.
+
+Tres categorías, y la distinción no es técnica sino de decisión.
+
+**🔴 Bloquean el despliegue.** Sin esto el binario es un prototipo observable, no un producto.
+
+| ID | Por qué bloquea |
+|---|---|
+| PA-45 | Toda VLAN etiquetada se trata igual, así que la clasificación por segmento —autoridad de todo el modelo desde RPT-009 §5— opera sobre una entrada que no significa nada |
+| PA-43 | Las alertas no llegan a nadie. Detectar y no comunicar equivale a no detectar |
+| PA-40 | El agente nunca ha leído una trama real |
+| PA-14 | **Cadena de firma de releases.** No se puede entregar a un cliente un agente sin firmar que además le pide confiar en firmas |
+| PA-12 | Sin empaquetador no hay nada que instalar |
+| PA-39 | Sin `CAP_NET_RAW` resuelto, el agente no captura en el sitio del cliente |
+
+**🟡 Deuda conocida, asumible con los ojos abiertos.** Empeoran el perfil de riesgo sin impedir que el producto funcione. Desplegar con estos abiertos es decisión de negocio, no fallo de ingeniería.
+
+PA-08, PA-13, PA-15, PA-18, PA-19, PA-25, PA-26, PA-27, PA-28, PA-30, PA-36, PA-37, PA-41, PA-42.
+
+De estos, **PA-26 y PA-28 son los que se degradan con el uso** —la mitad pegajosa crece sin límite y el centinela sigue siendo rebobinable—, así que su plazo no es indefinido aunque no bloqueen hoy.
+
+**🔵 Dependen de terceros.** La ingeniería está hecha; la tasa de avance es cero hasta que alguien externo actúe.
+
+| ID | Espera a |
+|---|---|
+| PA-09 | Descargar las imágenes virtuales de Cisco y Arista |
+| PA-22 | Comprar equipo OT de segunda mano |
 
 ---
 
