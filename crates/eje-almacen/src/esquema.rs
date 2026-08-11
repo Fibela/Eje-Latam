@@ -31,6 +31,18 @@ pub enum ClaseEvento {
     UsoEnGracia,
     /// Se sello un rango de asientos con una raiz Merkle.
     SelloEmitido,
+    /// La escritura a disco fallo durante un tramo y se restablecio.
+    ///
+    /// RPT-044, PA-69. **Se anexa al recuperar, no al fallar**, y esa es toda la
+    /// diferencia: un evento anexado durante el fallo iria al registro que no se
+    /// puede escribir, y moriria con el proceso igual que las alertas que
+    /// pretende explicar. Anadir bytes a un disco lleno ademas empeora el
+    /// siguiente intento.
+    ///
+    /// Al recuperar, en cambio, el disco funciona por definicion, y el asiento
+    /// puede describir el tramo entero: desde cuando, cuantas vueltas, cuantos
+    /// asientos estuvieron solo en memoria.
+    PersistenciaRestablecida,
 }
 
 impl ClaseEvento {
@@ -51,13 +63,14 @@ impl ClaseEvento {
             Self::BovedaDesbordada => "boveda-desbordada",
             Self::UsoEnGracia => "uso-en-gracia",
             Self::SelloEmitido => "sello-emitido",
+            Self::PersistenciaRestablecida => "persistencia-restablecida",
         }
     }
 
     /// Recupera la clase a partir de su identificador estable.
     #[must_use]
     pub fn desde_identificador(texto: &str) -> Option<Self> {
-        const TODAS: [ClaseEvento; 10] = [
+        const TODAS: [ClaseEvento; 11] = [
             ClaseEvento::ArranqueAgente,
             ClaseEvento::DeteccionAnomalia,
             ClaseEvento::OrdenContencion,
@@ -68,6 +81,7 @@ impl ClaseEvento {
             ClaseEvento::BovedaDesbordada,
             ClaseEvento::UsoEnGracia,
             ClaseEvento::SelloEmitido,
+            ClaseEvento::PersistenciaRestablecida,
         ];
         TODAS
             .into_iter()

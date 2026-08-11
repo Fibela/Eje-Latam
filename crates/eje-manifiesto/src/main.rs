@@ -1,0 +1,446 @@
+//! Emisor de manifiestos. **No se despliega en el sensor.**
+//!
+//! RPT-026, PA-48.
+//!
+//! ```text
+//! eje-manifiesto generar --semilla clave.sem --almacen datos-eje
+//! eje-manifiesto emitir  --semilla clave.sem --entrada parque.toml \
+//!                        --salida datos-eje/inventario.inv \
+//!                        [--anterior datos-eje/inventario.inv]
+//! ```
+//!
+//! # La frase de paso se lee de la entrada estandar y **se ve al teclearla**
+//!
+//! Ocultarla exige una dependencia mas para manejar el terminal, y traerla en el
+//! mismo paso que Argon2id, TOML y la aleatoriedad del sistema habria mezclado
+//! cuatro APIs sin verificar. Se anota como PA-53 y se avisa por pantalla, que es
+//! mejor que ocultarlo.
+//!
+//! Se lee de la entrada estandar y **no de una variable de entorno**: en varios
+//! sistemas el entorno de un proceso es legible por otros usuarios, y en casi
+//! todos acaba en el historial del intérprete.
+
+#![forbid(unsafe_code)]
+
+use std::io::Read as _;
+use std::path::{Path, PathBuf};
+
+use eje_manifiesto::entrada::Entrada;
+use eje_manifiesto::fragmento::{
+    analizar as analizar_fragmento, huella_de, reunir_verificando,
+    serializar as serializar_fragmento,
+};
+use eje_manifiesto::reposo_semilla::{LONGITUD_SAL, abrir, sellar};
+use eje_manifiesto::{Emisor, ErrorEmision};
+use guardian_cc::arranque::{RutasAlmacen, aprovisionar_clave};
+use guardian_cc::clave::analizar as analizar_clave;
+use guardian_cc::inventario::DominioClave;
+use guardian_cc::revocacion::{
+    Anotacion, ArchivoRevocaciones, CertificadoRevocacion, mensaje_de_certificado,
+};
+use motor_pqc::firma_hibrida::firmar;
+use motor_pqc::reparto::{CUSTODIOS, UMBRAL, repartir};
+use motor_pqc::reposo::LONGITUD_NONCE;
+use motor_pqc::secreto::Secreto;
+use motor_pqc::semilla::{LONGITUD_SEMILLA, SemillaFirma, derivar_par, derivar_verificacion};
+
+/// Fallos de la herramienta.
+#[derive(Debug, thiserror::Error)]
+enum ErrorHerramienta {
+    /// Argumentos incorrectos.
+    #[error(
+        "uso:\n  \
+         eje-manifiesto generar      --semilla <fichero> --almacen <directorio>\n  \
+         eje-manifiesto emitir       --semilla <fichero> --entrada <toml> --salida <inv> \
+         [--anterior <inv>]\n  \
+         eje-manifiesto recuperacion --fragmentos <prefijo> --almacen <directorio>\n  \
+         eje-manifiesto revocar      --fragmento-uno <frg> --fragmento-dos <frg> \
+         --almacen <directorio> --sucesora <pub> --corte <n>"
+    )]
+    Uso,
+
+    /// Un fragmento de la clave de recuperacion no es valido.
+    #[error(transparent)]
+    Fragmento(#[from] eje_manifiesto::fragmento::ErrorFragmento),
+
+    /// Fallo de entrada/salida.
+    #[error("{ruta}: {fuente}")]
+    Fichero {
+        /// Ruta implicada.
+        ruta: String,
+        /// Causa.
+        fuente: std::io::Error,
+    },
+
+    /// El sistema no pudo entregar aleatoriedad.
+    ///
+    /// **No hay respaldo.** Un generador de reserva escrito por nosotros seria
+    /// peor que fallar, porque produciria claves con la apariencia de buenas.
+    #[error("el sistema no entrego aleatoriedad; no se genera ninguna clave")]
+    SinAleatoriedad,
+
+    /// La semilla no se pudo abrir o sellar.
+    #[error(transparent)]
+    Semilla(#[from] eje_manifiesto::reposo_semilla::ErrorSemilla),
+
+    /// La entrada del administrador no es valida.
+    #[error(transparent)]
+    Entrada(#[from] eje_manifiesto::entrada::ErrorEntrada),
+
+    /// La emision fallo.
+    #[error(transparent)]
+    Emision(#[from] ErrorEmision),
+
+    /// El aprovisionamiento de la clave publica fallo.
+    #[error("no se pudo escribir la clave de verificacion: {detalle}")]
+    Aprovisionamiento {
+        /// Motivo.
+        detalle: String,
+    },
+}
+
+/// Lee bytes aleatorios del sistema.
+fn aleatorio<const N: usize>() -> Result<[u8; N], ErrorHerramienta> {
+    let mut bruto = [0u8; N];
+    getrandom::fill(&mut bruto).map_err(|_| ErrorHerramienta::SinAleatoriedad)?;
+    Ok(bruto)
+}
+
+fn leer(ruta: &Path) -> Result<Vec<u8>, ErrorHerramienta> {
+    std::fs::read(ruta).map_err(|fuente| ErrorHerramienta::Fichero {
+        ruta: ruta.display().to_string(),
+        fuente,
+    })
+}
+
+fn escribir(ruta: &Path, bytes: &[u8]) -> Result<(), ErrorHerramienta> {
+    std::fs::write(ruta, bytes).map_err(|fuente| ErrorHerramienta::Fichero {
+        ruta: ruta.display().to_string(),
+        fuente,
+    })
+}
+
+/// Pide la frase de paso por la entrada estandar.
+fn pedir_frase(motivo: &str) -> Result<Vec<u8>, ErrorHerramienta> {
+    eprintln!("Frase de paso ({motivo}).");
+    eprintln!("AVISO: se vera al teclearla; no la use delante de nadie (PA-53).");
+
+    let mut texto = String::new();
+    std::io::stdin()
+        .read_to_string(&mut texto)
+        .map_err(|fuente| ErrorHerramienta::Fichero {
+            ruta: "<entrada estandar>".to_owned(),
+            fuente,
+        })?;
+
+    Ok(texto.trim_end_matches(['\r', '\n']).as_bytes().to_vec())
+}
+
+/// Instante actual, en segundos desde la epoca.
+fn ahora() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |transcurrido| transcurrido.as_secs())
+}
+
+/// Opciones leidas de la linea de ordenes.
+#[derive(Default)]
+struct Opciones {
+    semilla: Option<PathBuf>,
+    almacen: Option<PathBuf>,
+    entrada: Option<PathBuf>,
+    salida: Option<PathBuf>,
+    anterior: Option<PathBuf>,
+    fragmentos: Option<PathBuf>,
+    fragmento_uno: Option<PathBuf>,
+    fragmento_dos: Option<PathBuf>,
+    sucesora: Option<PathBuf>,
+    corte: u64,
+}
+
+fn leer_opciones(argumentos: &[String]) -> Result<Opciones, ErrorHerramienta> {
+    let mut opciones = Opciones::default();
+    let mut indice = 0;
+
+    while indice < argumentos.len() {
+        let Some(valor) = argumentos.get(indice + 1) else {
+            return Err(ErrorHerramienta::Uso);
+        };
+        let ruta = Some(PathBuf::from(valor));
+
+        match argumentos[indice].as_str() {
+            "--semilla" => opciones.semilla = ruta,
+            "--almacen" => opciones.almacen = ruta,
+            "--entrada" => opciones.entrada = ruta,
+            "--salida" => opciones.salida = ruta,
+            "--anterior" => opciones.anterior = ruta,
+            "--fragmentos" => opciones.fragmentos = ruta,
+            "--fragmento-uno" => opciones.fragmento_uno = ruta,
+            "--fragmento-dos" => opciones.fragmento_dos = ruta,
+            "--sucesora" => opciones.sucesora = ruta,
+            "--corte" => opciones.corte = valor.parse().map_err(|_| ErrorHerramienta::Uso)?,
+            _ => return Err(ErrorHerramienta::Uso),
+        }
+
+        indice += 2;
+    }
+
+    Ok(opciones)
+}
+
+/// Crea una semilla nueva y aprovisiona la clave publica en el almacen.
+fn generar(opciones: &Opciones) -> Result<(), ErrorHerramienta> {
+    let (Some(ruta_semilla), Some(almacen)) = (&opciones.semilla, &opciones.almacen) else {
+        return Err(ErrorHerramienta::Uso);
+    };
+
+    // Negarse a sobrescribir. Una semilla pisada deja huerfano todo lo firmado
+    // con la anterior, y el agente lo leera como firma invalida: manipulacion.
+    if ruta_semilla.exists() {
+        return Err(ErrorHerramienta::Fichero {
+            ruta: ruta_semilla.display().to_string(),
+            fuente: std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "ya existe; sobrescribirla dejaria huerfano todo lo firmado",
+            ),
+        });
+    }
+
+    let frase = pedir_frase("nueva, para cifrar la semilla")?;
+
+    let semilla: SemillaFirma = Secreto::nuevo(aleatorio::<LONGITUD_SEMILLA>()?);
+    let emisor = Emisor::desde_semilla(Secreto::nuevo(*semilla.exponer()));
+
+    let sellada = sellar(
+        &semilla,
+        &frase,
+        aleatorio::<LONGITUD_SAL>()?,
+        aleatorio::<LONGITUD_NONCE>()?,
+    )?;
+
+    escribir(ruta_semilla, &sellada)?;
+
+    let rutas = RutasAlmacen::nuevo(almacen.clone());
+    std::fs::create_dir_all(rutas.directorio()).map_err(|fuente| ErrorHerramienta::Fichero {
+        ruta: rutas.directorio().display().to_string(),
+        fuente,
+    })?;
+
+    aprovisionar_clave(
+        &rutas.clave_operativa(),
+        emisor.verificacion(),
+        DominioClave::Cliente,
+    )
+    .map_err(|error| ErrorHerramienta::Aprovisionamiento {
+        detalle: error.to_string(),
+    })?;
+
+    println!("Semilla cifrada en   : {}", ruta_semilla.display());
+    println!(
+        "Clave aprovisionada  : {}",
+        rutas.clave_operativa().display()
+    );
+    println!();
+    println!("Falta la clave de recuperacion (RPT-015 §4). Sin ella no se pueden");
+    println!("leer certificados de revocacion, que es el unico remedio si esta");
+    println!("semilla se compromete.");
+
+    Ok(())
+}
+
+/// Emite un manifiesto firmado.
+fn emitir(opciones: &Opciones) -> Result<(), ErrorHerramienta> {
+    let (Some(ruta_semilla), Some(ruta_entrada), Some(salida)) =
+        (&opciones.semilla, &opciones.entrada, &opciones.salida)
+    else {
+        return Err(ErrorHerramienta::Uso);
+    };
+
+    let frase = pedir_frase("la de esta semilla")?;
+    let emisor = Emisor::desde_semilla(abrir(&leer(ruta_semilla)?, &frase)?);
+
+    let texto = String::from_utf8_lossy(&leer(ruta_entrada)?).into_owned();
+    let entrada = Entrada::analizar(&texto)?;
+
+    let instante = ahora();
+    let marcados = entrada.marcados(instante)?;
+    let segmentos = entrada.segmentos(instante)?;
+
+    // El anterior se pasa si existe. `secuencia_siguiente` lo VERIFICA antes de
+    // creerse su numero: un fichero editado no decide que se emite despues.
+    let anterior = match &opciones.anterior {
+        Some(ruta) if ruta.exists() => Some(leer(ruta)?),
+        _ => None,
+    };
+    let secuencia = emisor.secuencia_siguiente(anterior.as_deref())?;
+
+    let bytes = emisor.emitir(marcados, segmentos, secuencia)?;
+    escribir(salida, &bytes)?;
+
+    println!("Manifiesto emitido   : {}", salida.display());
+    println!("Secuencia            : {secuencia}");
+    println!("Marcados             : {}", entrada.marcado.len());
+    println!("Segmentos declarados : {}", entrada.segmento.len());
+    println!();
+    println!("El agente lo aceptara solo si su centinela esta por debajo de {secuencia}.");
+
+    Ok(())
+}
+
+/// Crea la clave de recuperacion y la reparte entre tres custodios.
+///
+/// # Por que es un comando aparte de `generar`
+///
+/// RPT-015 §4 separa las dos claves para que quien roba la operativa no pueda
+/// revocar. Producirlas en el mismo comando las dejaria juntas en la misma
+/// maquina y en el mismo instante, y **la separacion criptografica no sobrevive
+/// a una separacion operativa que nadie hace**.
+///
+/// El secreto nunca se escribe entero: solo salen los tres fragmentos.
+fn recuperacion(opciones: &Opciones) -> Result<(), ErrorHerramienta> {
+    let (Some(prefijo), Some(almacen)) = (&opciones.fragmentos, &opciones.almacen) else {
+        return Err(ErrorHerramienta::Uso);
+    };
+
+    let semilla: SemillaFirma = Secreto::nuevo(aleatorio::<LONGITUD_SEMILLA>()?);
+    let huella = huella_de(Secreto::nuevo(*semilla.exponer()));
+    let verificacion = derivar_verificacion(Secreto::nuevo(*semilla.exponer()));
+
+    let partes = repartir(&semilla, &aleatorio::<LONGITUD_SEMILLA>()?);
+
+    for parte in &partes {
+        let ruta = prefijo.with_extension(format!("{}.frg", parte.indice));
+
+        if ruta.exists() {
+            return Err(ErrorHerramienta::Fichero {
+                ruta: ruta.display().to_string(),
+                fuente: std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "ya existe; sobrescribir un fragmento inutiliza el reparto entero",
+                ),
+            });
+        }
+
+        escribir(&ruta, &serializar_fragmento(parte, &huella))?;
+        println!(
+            "Fragmento {} de {CUSTODIOS} : {}",
+            parte.indice,
+            ruta.display()
+        );
+    }
+
+    let rutas = RutasAlmacen::nuevo(almacen.clone());
+    std::fs::create_dir_all(rutas.directorio()).map_err(|fuente| ErrorHerramienta::Fichero {
+        ruta: rutas.directorio().display().to_string(),
+        fuente,
+    })?;
+
+    aprovisionar_clave(
+        &rutas.clave_recuperacion(),
+        &verificacion,
+        DominioClave::ClienteRecuperacion,
+    )
+    .map_err(|error| ErrorHerramienta::Aprovisionamiento {
+        detalle: error.to_string(),
+    })?;
+
+    println!(
+        "Clave aprovisionada  : {}",
+        rutas.clave_recuperacion().display()
+    );
+    println!();
+    println!("Hacen falta {UMBRAL} de {CUSTODIOS} fragmentos para reconstruir. Reparta los");
+    println!("tres AHORA y borre los tres de esta maquina: juntos son la clave.");
+    println!();
+    println!("RPT-015 §8.1: si los tres custodios son de la misma organizacion, el");
+    println!("umbral real frente a un interno es menor que {UMBRAL}-de-{CUSTODIOS}.");
+
+    Ok(())
+}
+
+/// Emite un certificado de revocacion firmado con la clave de recuperacion.
+fn revocar(opciones: &Opciones) -> Result<(), ErrorHerramienta> {
+    let (Some(uno), Some(otro), Some(almacen), Some(sucesora)) = (
+        &opciones.fragmento_uno,
+        &opciones.fragmento_dos,
+        &opciones.almacen,
+        &opciones.sucesora,
+    ) else {
+        return Err(ErrorHerramienta::Uso);
+    };
+
+    let semilla = reunir_verificando(
+        &analizar_fragmento(&leer(uno)?)?,
+        &analizar_fragmento(&leer(otro)?)?,
+    )?;
+
+    let rutas = RutasAlmacen::nuevo(almacen.clone());
+    let revocada = analizar_clave(&leer(&rutas.clave_operativa())?, DominioClave::Cliente)
+        .map_err(|error| ErrorHerramienta::Aprovisionamiento {
+            detalle: error.to_string(),
+        })?;
+    let nueva = analizar_clave(&leer(sucesora)?, DominioClave::Cliente).map_err(|error| {
+        ErrorHerramienta::Aprovisionamiento {
+            detalle: error.to_string(),
+        }
+    })?;
+
+    let certificado = CertificadoRevocacion {
+        revocada: revocada.identificador(),
+        hasta_secuencia: opciones.corte,
+        sucesora: nueva.identificador(),
+        emitido_en: ahora(),
+    };
+
+    let (firmante, verificacion) = derivar_par(semilla);
+    let firma = firmar(&firmante, &mensaje_de_certificado(&certificado));
+
+    // Se anexa al registro existente en lugar de sustituirlo. Reescribirlo
+    // borraria revocaciones anteriores, y una revocacion que desaparece es
+    // exactamente lo que RPT-015 impide que ocurra en silencio.
+    let clave_lectora = guardian_cc::inventario::ClaveInventario::nueva(
+        verificacion,
+        DominioClave::ClienteRecuperacion,
+    );
+
+    let mut archivo = match std::fs::read(rutas.revocaciones()) {
+        Ok(bytes) => ArchivoRevocaciones::analizar(&bytes, &clave_lectora).map_err(|error| {
+            ErrorHerramienta::Aprovisionamiento {
+                detalle: format!("el registro existente no verifica: {error}"),
+            }
+        })?,
+        Err(_) => ArchivoRevocaciones::nuevo(),
+    };
+
+    archivo.anotar(Anotacion { certificado, firma });
+    escribir(&rutas.revocaciones(), &archivo.serializar())?;
+
+    println!("Certificado emitido  : {}", rutas.revocaciones().display());
+    println!("Corte de secuencia   : {}", opciones.corte);
+    println!("Anotaciones en total : {}", archivo.anotaciones().len());
+    println!();
+    println!("El agente dejara de aceptar lo que la clave anterior firme POR ENCIMA");
+    println!(
+        "de {}. Lo de por debajo sigue valiendo (RPT-015 §3).",
+        opciones.corte
+    );
+
+    Ok(())
+}
+
+fn main() -> Result<(), ErrorHerramienta> {
+    let argumentos: Vec<String> = std::env::args().skip(1).collect();
+    let Some((orden, resto)) = argumentos.split_first() else {
+        return Err(ErrorHerramienta::Uso);
+    };
+
+    let opciones = leer_opciones(resto)?;
+
+    match orden.as_str() {
+        "generar" => generar(&opciones),
+        "emitir" => emitir(&opciones),
+        "recuperacion" => recuperacion(&opciones),
+        "revocar" => revocar(&opciones),
+        _ => Err(ErrorHerramienta::Uso),
+    }
+}

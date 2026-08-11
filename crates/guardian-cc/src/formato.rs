@@ -18,6 +18,7 @@
 //! | version      u16 BE                               |
 //! | secuencia    u64 BE                               |
 //! | entradas     u32 BE   numero de marcados          |
+//! | segmentos    u16 BE   numero de declaraciones     |
 //! +--------------------------------------------------+
 //! | por cada marcado, 19 bytes de ancho fijo:         |
 //! |   mac            6 bytes                          |
@@ -25,9 +26,24 @@
 //! |   emitido_en     u64 BE                           |
 //! |   vigencia_dias  u32 BE                           |
 //! +--------------------------------------------------+
+//! | por cada segmento, 15 bytes de ancho fijo:        |
+//! |   vlan           u16 BE  1..=4094                 |
+//! |   naturaleza     u8    escalar cerrado, 0 invalido|
+//! |   emitido_en     u64 BE                           |
+//! |   vigencia_dias  u32 BE                           |
+//! +--------------------------------------------------+
 //! | firma        longitud fija, ML-DSA-65 + Ed25519   |
 //! +--------------------------------------------------+
 //! ```
+//!
+//! # Que cubre la firma
+//!
+//! La firma no se calcula sobre estos bytes sino sobre el mensaje canonico de
+//! [`mensaje_de_raiz`](crate::inventario::mensaje_de_raiz), que ancla **la raiz
+//! Merkle de los marcados, el resumen de la tabla de segmentos y la secuencia**.
+//! Los dos bloques quedan cubiertos por caminos distintos pero equivalentes:
+//! alterar un marcado cambia la raiz, alterar una declaracion cambia el resumen,
+//! y en ambos casos la firma deja de verificar (RPT-022 §2).
 //!
 //! # Tres decisiones que merecen justificacion
 //!
@@ -61,18 +77,30 @@ use motor_pqc::firma_hibrida::FirmaHibrida;
 use crate::ClaseExcluida;
 use crate::inventario::{ErrorInventario, Inventario, MarcadoBruto, RaizAnclada};
 use crate::proveedores::DireccionEnlace;
+use crate::vlan::{
+    DeclaracionVlan, ErrorVlan, NaturalezaSegmento, TablaVlan, VLAN_MAXIMA, VLAN_MINIMA,
+    VLANS_MAXIMAS,
+};
 
 /// Numero magico que abre todo fichero de inventario.
 pub const MAGICO: &[u8; 8] = b"EJE-INV1";
 
 /// Version del formato que este modulo entiende.
-pub const VERSION: u16 = 1;
+///
+/// La `2` incorpora el bloque de declaraciones de segmento (RPT-022, PA-45).
+/// Subirla deja obsoletos todos los inventarios en version 1, que es exactamente
+/// lo que [`ErrorFormato::FormatoObsoleto`] existe para que **no** se lea como un
+/// ataque.
+pub const VERSION: u16 = 2;
 
-/// Bytes de cabecera: magico, version, secuencia y numero de entradas.
-const LONGITUD_CABECERA: usize = 8 + 2 + 8 + 4;
+/// Bytes de cabecera: magico, version, secuencia, entradas y segmentos.
+const LONGITUD_CABECERA: usize = 8 + 2 + 8 + 4 + 2;
 
 /// Bytes de una entrada: mac, clase, emision y vigencia.
 const LONGITUD_ENTRADA: usize = 6 + 1 + 8 + 4;
+
+/// Bytes de una declaracion de segmento: vlan, naturaleza, emision y vigencia.
+const LONGITUD_SEGMENTO: usize = 2 + 1 + 8 + 4;
 
 /// Cota superior del fichero completo, en bytes.
 ///
@@ -83,6 +111,36 @@ pub const LONGITUD_MAXIMA: usize = 8 * 1024 * 1024;
 
 /// Numero maximo de entradas admitido.
 pub const ENTRADAS_MAXIMAS: usize = 200_000;
+
+/// Primera secuencia que un fichero **no** puede declarar.
+///
+/// # Por que hay techo
+///
+/// PA-33 describe el ataque de un solo mensaje: quien tenga la clave operativa
+/// emite un inventario con secuencia `u64::MAX`, el agente lo acepta —la firma es
+/// valida— y **ningun inventario legitimo puede ya superarlo**. El parque queda
+/// congelado para siempre y revocar no lo arregla, porque el centinela sigue
+/// arriba.
+///
+/// `Centinela::reiniciar_por` era la salida, y sigue existiendo. Pero es una
+/// recuperacion: exige la clave de recuperacion fuera de linea y un humano. Es
+/// mejor que el ataque no llegue a ocurrir.
+///
+/// Cuatro mil millones de emisiones son varios ordenes de magnitud mas de las que
+/// un parque genera en la vida del producto. Por encima de eso no hay
+/// crecimiento: hay una senal.
+///
+/// # Donde se comprueba, y donde no
+///
+/// Aqui, en el analizador de fichero, **antes** de tocar criptografia. Es el
+/// camino por el que llega todo inventario real, asi que cierra el ataque en la
+/// puerta.
+///
+/// No se comprueba en `RaizVerificada::verificar`, que es el paso en memoria.
+/// Quien construya una `RaizAnclada` desde otra fuente —hoy nadie fuera de las
+/// pruebas— se lo salta. Queda escrito para que no se confunda una defensa de
+/// perimetro con un invariante del tipo.
+pub const TECHO_SECUENCIA: u64 = 1 << 32;
 
 /// Defectos de estructura detectables **antes** de cualquier comprobacion
 /// criptografica.
@@ -99,7 +157,31 @@ pub enum ErrorFormato {
     #[error("el fichero no es un inventario de Eje-Latam")]
     MagicoAusente,
 
-    /// La version del formato no es la esperada.
+    /// El fichero usa una version **anterior** del formato.
+    ///
+    /// # Por que no es lo mismo que no verificar
+    ///
+    /// Un inventario de formato anterior es un fichero legitimo que el
+    /// administrador emitio cuando el agente entendia otra version. Tratarlo
+    /// como manipulacion —que es lo que hacia la version anterior de este
+    /// analizador— convertiria **cada actualizacion rutinaria del agente en una
+    /// alerta maxima de ataque**, y eso ensena al operador a ignorar esa alerta
+    /// justo antes de que sea real.
+    ///
+    /// La accion correcta es pedir reemision, no dar la voz de alarma.
+    #[error(
+        "formato en version {encontrada}; este binario emite la {VERSION}. Reemitir el inventario"
+    )]
+    FormatoObsoleto {
+        /// Version leida del fichero.
+        encontrada: u16,
+    },
+
+    /// El fichero usa una version **posterior** o desconocida del formato.
+    ///
+    /// Se rechaza sin interpretar: adivinar la disposicion de campos que no se
+    /// conocen es exactamente lo que un analizador de entrada hostil no debe
+    /// hacer.
     #[error("version de formato {encontrada}; este binario entiende la {VERSION}")]
     VersionDesconocida {
         /// Version leida del fichero.
@@ -122,9 +204,27 @@ pub enum ErrorFormato {
         sobrantes: usize,
     },
 
+    /// La secuencia declarada alcanza o supera [`TECHO_SECUENCIA`].
+    ///
+    /// Se rechaza como **malformacion**, no como politica: un fichero asi no
+    /// puede proceder de un uso legitimo, y aceptarlo es el bloqueo permanente
+    /// de PA-33.
+    #[error("secuencia {declarada} en el techo o por encima ({TECHO_SECUENCIA}); ver PA-33")]
+    SecuenciaFueraDeRango {
+        /// Secuencia leida de la cabecera.
+        declarada: u64,
+    },
+
     /// El numero de entradas declarado excede el limite.
     #[error("se declaran {declaradas} entradas; el maximo es {ENTRADAS_MAXIMAS}")]
     DemasiadasEntradas {
+        /// Numero declarado en la cabecera.
+        declaradas: usize,
+    },
+
+    /// El numero de declaraciones de segmento excede el espacio declarable.
+    #[error("se declaran {declaradas} segmentos; el maximo es {VLANS_MAXIMAS}")]
+    DemasiadosSegmentos {
         /// Numero declarado en la cabecera.
         declaradas: usize,
     },
@@ -135,6 +235,38 @@ pub enum ErrorFormato {
         /// Codigo leido.
         codigo: u8,
     },
+
+    /// Un codigo de naturaleza de segmento no corresponde a ninguna variante.
+    ///
+    /// El `0` cae aqui a proposito: un bloque de ceros no debe analizarse como
+    /// una tabla de declaraciones validas.
+    #[error("codigo de naturaleza de segmento {codigo} desconocido")]
+    NaturalezaDesconocida {
+        /// Codigo leido.
+        codigo: u8,
+    },
+
+    /// Un identificador de VLAN queda fuera del rango declarable.
+    #[error("la vlan {vlan} esta fuera del rango declarable {VLAN_MINIMA}..={VLAN_MAXIMA}")]
+    VlanFueraDeRango {
+        /// Identificador leido.
+        vlan: u16,
+    },
+
+    /// Las declaraciones no vienen en orden ascendente de VLAN.
+    ///
+    /// Mismo motivo que [`Self::EntradasDesordenadas`]: reordenar en silencio
+    /// haria que dos ficheros distintos produjeran la misma tabla, y con ella el
+    /// mismo resumen firmado.
+    #[error("la declaracion {posicion} rompe el orden ascendente de vlans")]
+    SegmentosDesordenados {
+        /// Indice de la primera declaracion fuera de orden.
+        posicion: usize,
+    },
+
+    /// Defecto detectado al construir la tabla de segmentos.
+    #[error(transparent)]
+    Vlan(#[from] ErrorVlan),
 
     /// Un inventario sin entradas no tiene raiz y no significa nada.
     #[error("el inventario esta vacio")]
@@ -174,7 +306,13 @@ pub enum ErrorFormato {
 pub struct FicheroInventario {
     /// Inventario en orden canonico.
     pub inventario: Inventario,
-    /// Raiz recalculada y secuencia leida.
+    /// Tabla de segmentos en orden canonico, **sin verificar**.
+    ///
+    /// Que este bien formada no significa que sea la que el administrador firmo.
+    /// Eso lo decide
+    /// [`TablaVlanVerificada::verificar_e_instanciar`](crate::vlan::TablaVlanVerificada::verificar_e_instanciar).
+    pub vlans: TablaVlan,
+    /// Raiz recalculada, resumen de segmentos recalculado y secuencia leida.
     pub anclada: RaizAnclada,
     /// Firma que acompana al fichero.
     pub firma: FirmaHibrida,
@@ -201,25 +339,45 @@ const fn codigo_de_clase(clase: Option<ClaseExcluida>) -> u8 {
     }
 }
 
-/// Serializa un inventario y su firma al formato en disco.
+/// Serializa un inventario, su tabla de segmentos y su firma al formato en
+/// disco.
 ///
-/// La raiz no se escribe: se recalcula al leer.
+/// Ni la raiz ni el resumen de la tabla se escriben: ambos se recalculan al leer,
+/// por el motivo del §«La raiz **no** se almacena».
 #[must_use]
-pub fn serializar(inventario: &Inventario, secuencia: u64, firma: &FirmaHibrida) -> Vec<u8> {
+pub fn serializar(
+    inventario: &Inventario,
+    vlans: &TablaVlan,
+    secuencia: u64,
+    firma: &FirmaHibrida,
+) -> Vec<u8> {
     let marcados = inventario.marcados();
-    let mut salida =
-        Vec::with_capacity(LONGITUD_CABECERA + marcados.len() * LONGITUD_ENTRADA + 4096);
+    let declaraciones = vlans.declaraciones();
+    let mut salida = Vec::with_capacity(
+        LONGITUD_CABECERA
+            + marcados.len() * LONGITUD_ENTRADA
+            + declaraciones.len() * LONGITUD_SEGMENTO
+            + 4096,
+    );
 
     salida.extend_from_slice(MAGICO);
     salida.extend_from_slice(&VERSION.to_be_bytes());
     salida.extend_from_slice(&secuencia.to_be_bytes());
     salida.extend_from_slice(&(marcados.len() as u32).to_be_bytes());
+    salida.extend_from_slice(&(declaraciones.len() as u16).to_be_bytes());
 
     for marcado in marcados {
         salida.extend_from_slice(&marcado.mac);
         salida.push(codigo_de_clase(marcado.clase));
         salida.extend_from_slice(&marcado.emitido_en.to_be_bytes());
         salida.extend_from_slice(&marcado.vigencia_dias.to_be_bytes());
+    }
+
+    for declaracion in declaraciones {
+        salida.extend_from_slice(&declaracion.vlan.to_be_bytes());
+        salida.push(declaracion.naturaleza.codigo());
+        salida.extend_from_slice(&declaracion.emitido_en.to_be_bytes());
+        salida.extend_from_slice(&declaracion.vigencia_dias.to_be_bytes());
     }
 
     salida.extend_from_slice(&firma.a_bytes());
@@ -256,26 +414,55 @@ pub fn analizar(bytes: &[u8]) -> Result<FicheroInventario, ErrorFormato> {
         return Err(ErrorFormato::MagicoAusente);
     }
 
+    // Las dos direcciones no significan lo mismo. Un fichero anterior es
+    // legitimo y caduco; uno posterior es ilegible. Colapsarlos hacia
+    // «desconocida» hacia que una actualizacion pareciera un ataque.
     let version = u16::from_be_bytes([bytes[8], bytes[9]]);
-    if version != VERSION {
-        return Err(ErrorFormato::VersionDesconocida {
-            encontrada: version,
-        });
+    match version.cmp(&VERSION) {
+        std::cmp::Ordering::Less => {
+            return Err(ErrorFormato::FormatoObsoleto {
+                encontrada: version,
+            });
+        }
+        std::cmp::Ordering::Greater => {
+            return Err(ErrorFormato::VersionDesconocida {
+                encontrada: version,
+            });
+        }
+        std::cmp::Ordering::Equal => {}
     }
 
     let mut secuencia_bruta = [0u8; 8];
     secuencia_bruta.copy_from_slice(&bytes[10..18]);
     let secuencia = u64::from_be_bytes(secuencia_bruta);
 
+    // El techo se comprueba aqui, antes de la firma. Si se comprobara despues,
+    // un inventario saturado y correctamente firmado seria «valido pero
+    // rechazado», y esa distincion invita a que alguien la relaje.
+    if secuencia >= TECHO_SECUENCIA {
+        return Err(ErrorFormato::SecuenciaFueraDeRango {
+            declarada: secuencia,
+        });
+    }
+
     let mut entradas_brutas = [0u8; 4];
     entradas_brutas.copy_from_slice(&bytes[18..22]);
     let entradas = u32::from_be_bytes(entradas_brutas) as usize;
 
-    // Se acota el numero declarado ANTES de multiplicar o reservar. Sin esto, un
-    // fichero de veintidos bytes puede declarar cuatro mil millones de entradas.
+    let segmentos = u16::from_be_bytes([bytes[22], bytes[23]]) as usize;
+
+    // Se acotan los dos numeros declarados ANTES de multiplicar o reservar. Sin
+    // esto, un fichero de veinticuatro bytes puede declarar cuatro mil millones
+    // de entradas.
     if entradas > ENTRADAS_MAXIMAS {
         return Err(ErrorFormato::DemasiadasEntradas {
             declaradas: entradas,
+        });
+    }
+
+    if segmentos > VLANS_MAXIMAS {
+        return Err(ErrorFormato::DemasiadosSegmentos {
+            declaradas: segmentos,
         });
     }
 
@@ -283,9 +470,16 @@ pub fn analizar(bytes: &[u8]) -> Result<FicheroInventario, ErrorFormato> {
         return Err(ErrorFormato::InventarioVacio);
     }
 
+    // Una tabla de segmentos vacia SI es legitima: un cliente puede no haber
+    // declarado ninguna VLAN todavia. Su resumen esta definido y queda firmado
+    // igual, asi que borrar el bloque entero tampoco pasa desapercibido.
+
     // El ancho fijo permite conocer el tamano exacto sin recorrer nada.
     let longitud_firma = FirmaHibrida::longitud_serializada();
-    let esperados = LONGITUD_CABECERA + entradas * LONGITUD_ENTRADA + longitud_firma;
+    let esperados = LONGITUD_CABECERA
+        + entradas * LONGITUD_ENTRADA
+        + segmentos * LONGITUD_SEGMENTO
+        + longitud_firma;
 
     if bytes.len() < esperados {
         return Err(ErrorFormato::Truncado {
@@ -340,6 +534,46 @@ pub fn analizar(bytes: &[u8]) -> Result<FicheroInventario, ErrorFormato> {
         desplazamiento += LONGITUD_ENTRADA;
     }
 
+    let mut declaraciones = Vec::with_capacity(segmentos);
+    let mut vlan_anterior: Option<u16> = None;
+
+    for posicion in 0..segmentos {
+        let registro = &bytes[desplazamiento..desplazamiento + LONGITUD_SEGMENTO];
+
+        let vlan = u16::from_be_bytes([registro[0], registro[1]]);
+
+        if !(VLAN_MINIMA..=VLAN_MAXIMA).contains(&vlan) {
+            return Err(ErrorFormato::VlanFueraDeRango { vlan });
+        }
+
+        if let Some(previa) = vlan_anterior {
+            if vlan <= previa {
+                return Err(ErrorFormato::SegmentosDesordenados { posicion });
+            }
+        }
+        vlan_anterior = Some(vlan);
+
+        let codigo = registro[2];
+        let Some(naturaleza) = NaturalezaSegmento::desde_codigo(codigo) else {
+            return Err(ErrorFormato::NaturalezaDesconocida { codigo });
+        };
+
+        let mut emision = [0u8; 8];
+        emision.copy_from_slice(&registro[3..11]);
+
+        let mut vigencia = [0u8; 4];
+        vigencia.copy_from_slice(&registro[11..15]);
+
+        declaraciones.push(DeclaracionVlan {
+            vlan,
+            naturaleza,
+            emitido_en: u64::from_be_bytes(emision),
+            vigencia_dias: u32::from_be_bytes(vigencia),
+        });
+
+        desplazamiento += LONGITUD_SEGMENTO;
+    }
+
     let firma = FirmaHibrida::desde_bytes(&bytes[desplazamiento..])
         .map_err(|_| ErrorFormato::FirmaMalformada)?;
 
@@ -348,9 +582,17 @@ pub fn analizar(bytes: &[u8]) -> Result<FicheroInventario, ErrorFormato> {
     let inventario = Inventario::construir(marcados)?;
     let raiz = inventario.raiz().ok_or(ErrorFormato::InventarioVacio)?;
 
+    let vlans = TablaVlan::construir(declaraciones)?;
+    let resumen_vlans = vlans.resumen();
+
     Ok(FicheroInventario {
         inventario,
-        anclada: RaizAnclada { raiz, secuencia },
+        vlans,
+        anclada: RaizAnclada {
+            raiz,
+            vlans: resumen_vlans,
+            secuencia,
+        },
         firma,
     })
 }

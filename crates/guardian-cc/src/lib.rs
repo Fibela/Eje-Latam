@@ -18,12 +18,14 @@
 pub mod almacen;
 pub mod arranque;
 pub mod clasificacion;
+pub mod clave;
 pub mod disco;
 pub mod formato;
 pub mod inventario;
 pub mod observacion;
 pub mod proveedores;
 pub mod revocacion;
+pub mod vlan;
 
 use clasificacion::{Clasificacion, MotivoAmbiguedad};
 use thiserror::Error;
@@ -1081,6 +1083,10 @@ mod pruebas {
     use motor_pqc::firma_hibrida::{
         ClaveFirmaHibrida, ClaveVerificacionHibrida, FirmaHibrida, generar_par,
     };
+    use vlan::{
+        DeclaracionVlan, ErrorVlan, NaturalezaSegmento, TablaVlan, TablaVlanVerificada,
+        VLAN_MAXIMA, VLAN_MINIMA,
+    };
 
     /// Generador determinista para pruebas reproducibles.
     ///
@@ -1135,11 +1141,35 @@ mod pruebas {
     /// fabricar un `MarcadoVerificado`, que es justamente el punto.
     struct Banco {
         inventario: Inventario,
+        vlans: TablaVlan,
         anclada: RaizAnclada,
         firma: FirmaHibrida,
         clave: ClaveInventario,
         centinela: Centinela,
         revocaciones: RegistroRevocaciones,
+    }
+
+    /// VLAN clinica del banco: declarada como capaz de alojar criticos.
+    const VLAN_CLINICA: u16 = 40;
+    /// VLAN administrativa del banco: declarada limpia.
+    const VLAN_LIMPIA: u16 = 10;
+
+    /// Tabla de segmentos de prueba. Se pasa **desordenada** a proposito.
+    fn segmentos_de_prueba() -> Vec<DeclaracionVlan> {
+        vec![
+            DeclaracionVlan {
+                vlan: VLAN_CLINICA,
+                naturaleza: NaturalezaSegmento::PuedeAlojarCriticos,
+                emitido_en: AHORA,
+                vigencia_dias: 365,
+            },
+            DeclaracionVlan {
+                vlan: VLAN_LIMPIA,
+                naturaleza: NaturalezaSegmento::SinDispositivosCriticos,
+                emitido_en: AHORA,
+                vigencia_dias: 365,
+            },
+        ]
     }
 
     /// Marcados de prueba. Se pasan **desordenados** a proposito: el orden
@@ -1189,14 +1219,17 @@ mod pruebas {
     ) -> Banco {
         let inventario =
             Inventario::construir(marcados_de_prueba()).expect("no hay direcciones repetidas");
+        let vlans = TablaVlan::construir(segmentos_de_prueba()).expect("no hay vlans repetidas");
         let anclada = RaizAnclada {
             raiz: inventario.raiz().expect("el inventario no esta vacio"),
+            vlans: vlans.resumen(),
             secuencia,
         };
         let (firma, verificadora) = firmar_raiz_con(&anclada, semilla);
 
         Banco {
             inventario,
+            vlans,
             anclada,
             firma,
             clave: ClaveInventario::nueva(verificadora, dominio),
@@ -1317,6 +1350,7 @@ mod pruebas {
         let resultado = RaizVerificada::verificar(
             RaizAnclada {
                 raiz: raiz_mutilada,
+                vlans: banco.anclada.vlans,
                 secuencia: banco.anclada.secuencia,
             },
             &banco.firma,
@@ -1427,8 +1461,17 @@ mod pruebas {
         // Firmar la raiz por un lado y la secuencia por otro permitiria
         // recombinar la raiz vieja con la secuencia nueva.
         let raiz = Resumen::desde_bytes([9u8; 32]);
-        let uno = mensaje_de_raiz(&RaizAnclada { raiz, secuencia: 1 });
-        let dos = mensaje_de_raiz(&RaizAnclada { raiz, secuencia: 2 });
+        let vlans = TablaVlan::vacia().resumen();
+        let uno = mensaje_de_raiz(&RaizAnclada {
+            raiz,
+            vlans,
+            secuencia: 1,
+        });
+        let dos = mensaje_de_raiz(&RaizAnclada {
+            raiz,
+            vlans,
+            secuencia: 2,
+        });
 
         assert_ne!(uno, dos);
     }
@@ -1441,6 +1484,7 @@ mod pruebas {
         let resultado = RaizVerificada::verificar(
             RaizAnclada {
                 raiz: vieja.anclada.raiz,
+                vlans: vieja.anclada.vlans,
                 secuencia: 12,
             },
             &vieja.firma,
@@ -1474,9 +1518,29 @@ mod pruebas {
     use almacen::{ErrorCarga, InventarioLocal};
     use formato::{ENTRADAS_MAXIMAS, ErrorFormato, MAGICO, analizar, serializar};
 
+    /// Longitud de la cabecera del fichero: magico, version, secuencia,
+    /// entradas y segmentos.
+    ///
+    /// Las pruebas que parchean bytes concretos la necesitan. Se declara una vez
+    /// aqui porque estaba escrita a mano en tres sitios, y al ampliar la
+    /// cabecera en la version 2 esos tres numeros habrian quedado apuntando al
+    /// campo equivocado con las pruebas todavia en verde.
+    const CABECERA: usize = 24;
+
+    /// Longitud de una entrada de marcado.
+    const ENTRADA: usize = 19;
+
+    /// Longitud de un registro de declaracion de segmento.
+    const SEGMENTO: usize = 15;
+
     /// Bytes tal como quedarian en disco, para el banco dado.
     fn bytes_en_disco(banco: &Banco) -> Vec<u8> {
-        serializar(&banco.inventario, banco.anclada.secuencia, &banco.firma)
+        serializar(
+            &banco.inventario,
+            &banco.vlans,
+            banco.anclada.secuencia,
+            &banco.firma,
+        )
     }
 
     #[test]
@@ -1555,18 +1619,31 @@ mod pruebas {
             "la raiz no debe aparecer literalmente en el fichero"
         );
 
+        // Mismo argumento para el resumen de segmentos: si viajara escrito, un
+        // fichero con la tabla alterada y el resumen viejo plantearia la misma
+        // pregunta sin respuesta segura.
+        assert!(
+            !bytes
+                .windows(32)
+                .any(|ventana| ventana == banco.anclada.vlans.bytes()),
+            "el resumen de segmentos tampoco debe aparecer literalmente"
+        );
+
         let fichero = analizar(&bytes).expect("analiza");
         assert_eq!(
             formato::raiz_recalculada(&fichero),
             Some(banco.anclada.raiz)
         );
+        assert_eq!(fichero.anclada.vlans, banco.vlans.resumen());
     }
 
     // --- Analizador defensivo: el frente no autenticado ---
 
     #[test]
     fn un_fichero_vacio_o_minusculo_no_desborda() {
-        for longitud in 0..22 {
+        // 24 es la cabecera de la version 2: magico, version, secuencia,
+        // entradas y segmentos.
+        for longitud in 0..24 {
             let resultado = analizar(&vec![0u8; longitud]).err();
             assert!(
                 matches!(resultado, Some(ErrorFormato::Truncado { .. })),
@@ -1598,13 +1675,18 @@ mod pruebas {
 
     #[test]
     fn un_numero_de_entradas_absurdo_no_reserva_memoria() {
-        // El ataque clasico: veintidos bytes que declaran cuatro mil millones de
+        // El ataque clasico: una cabecera que declara cuatro mil millones de
         // entradas. Se acota ANTES de multiplicar o reservar.
+        //
+        // La version se toma de `formato::VERSION` y no se escribe a mano: con
+        // un literal, subir la version convertiria esta prueba en una
+        // comprobacion de obsolescencia sin que nadie lo notara.
         let mut bytes = Vec::new();
         bytes.extend_from_slice(MAGICO);
-        bytes.extend_from_slice(&1u16.to_be_bytes());
+        bytes.extend_from_slice(&formato::VERSION.to_be_bytes());
         bytes.extend_from_slice(&1u64.to_be_bytes());
         bytes.extend_from_slice(&u32::MAX.to_be_bytes());
+        bytes.extend_from_slice(&0u16.to_be_bytes());
 
         assert_eq!(
             analizar(&bytes).err(),
@@ -1613,6 +1695,27 @@ mod pruebas {
             })
         );
         assert!(ENTRADAS_MAXIMAS < u32::MAX as usize);
+    }
+
+    #[test]
+    fn un_numero_de_segmentos_absurdo_no_reserva_memoria() {
+        // El mismo ataque por el campo nuevo. Que el contador sea `u16` acota el
+        // dano por si solo, pero apoyarse en el ancho del entero deja la
+        // proteccion a merced de un cambio de tipo futuro.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(MAGICO);
+        bytes.extend_from_slice(&formato::VERSION.to_be_bytes());
+        bytes.extend_from_slice(&1u64.to_be_bytes());
+        bytes.extend_from_slice(&1u32.to_be_bytes());
+        bytes.extend_from_slice(&u16::MAX.to_be_bytes());
+
+        assert_eq!(
+            analizar(&bytes).err(),
+            Some(ErrorFormato::DemasiadosSegmentos {
+                declaradas: u16::MAX as usize
+            })
+        );
+        assert!(vlan::VLANS_MAXIMAS < u16::MAX as usize);
     }
 
     #[test]
@@ -1647,7 +1750,7 @@ mod pruebas {
         // degradacion mediante un byte que el analizador no entiende.
         let banco = banco(DominioClave::Cliente);
         let mut bytes = bytes_en_disco(&banco);
-        bytes[22 + 6] = 200;
+        bytes[CABECERA + 6] = 200;
 
         assert_eq!(
             analizar(&bytes).err(),
@@ -1663,7 +1766,7 @@ mod pruebas {
         let mut bytes = bytes_en_disco(&banco);
 
         // Degradar la primera entrada a «no critico».
-        let posicion_clase = 22 + banco.posicion(&MAC) * 19 + 6;
+        let posicion_clase = CABECERA + banco.posicion(&MAC) * ENTRADA + 6;
         bytes[posicion_clase] = 0;
 
         assert!(analizar(&bytes).is_ok(), "el fichero sigue bien formado");
@@ -1707,8 +1810,12 @@ mod pruebas {
 
         let mut invertido = banco.inventario.marcados().to_vec();
         invertido.reverse();
+        let mut segmentos_invertidos = banco.vlans.declaraciones().to_vec();
+        segmentos_invertidos.reverse();
+
         let otro = serializar(
             &Inventario::construir(invertido).expect("sin duplicados"),
+            &TablaVlan::construir(segmentos_invertidos).expect("sin vlans repetidas"),
             banco.anclada.secuencia,
             &banco.firma,
         );
@@ -2424,7 +2531,7 @@ mod pruebas {
         let (estado, centinela) = arrancar(
             &almacen.rutas,
             &banco.clave,
-            &clave_recuperacion_de_prueba(),
+            Some(&clave_recuperacion_de_prueba()),
         )
         .expect("un almacen vacio debe dejar arrancar");
 
@@ -2452,7 +2559,7 @@ mod pruebas {
         let (estado, _) = arrancar(
             &almacen.rutas,
             &banco.clave,
-            &clave_recuperacion_de_prueba(),
+            Some(&clave_recuperacion_de_prueba()),
         )
         .expect("el agente debe arrancar igual");
 
@@ -2488,7 +2595,7 @@ mod pruebas {
         let (estado, _) = arrancar(
             &almacen.rutas,
             &banco.clave,
-            &clave_recuperacion_de_prueba(),
+            Some(&clave_recuperacion_de_prueba()),
         )
         .expect("arranque");
 
@@ -2521,7 +2628,7 @@ mod pruebas {
         let (estado, _) = arrancar(
             &almacen.rutas,
             &banco.clave,
-            &clave_recuperacion_de_prueba(),
+            Some(&clave_recuperacion_de_prueba()),
         )
         .expect("arranque");
 
@@ -2550,20 +2657,780 @@ mod pruebas {
         aceptar_inventario(&almacen.rutas, &bytes, 7).expect("aceptar");
 
         // Degradar la primera entrada a «no critico», como en RPT-013.
-        let posicion_clase = 22 + banco.posicion(&MAC) * 19 + 6;
+        let posicion_clase = CABECERA + banco.posicion(&MAC) * ENTRADA + 6;
         bytes[posicion_clase] = 0;
         std::fs::write(almacen.rutas.inventario(), &bytes).expect("el atacante reescribe");
 
         let (estado, _) = arrancar(
             &almacen.rutas,
             &banco.clave,
-            &clave_recuperacion_de_prueba(),
+            Some(&clave_recuperacion_de_prueba()),
         )
         .expect("el agente arranca igual");
 
         assert!(matches!(estado, EstadoArranque::NoVerifica { .. }));
         assert!(!estado.admite_contencion_automatica());
         assert!(estado.exige_alerta());
+    }
+
+    #[test]
+    fn un_formato_anterior_no_se_confunde_con_manipulacion() {
+        // El defecto que este estado existe para deshacer: con la comprobacion
+        // anterior, subir VERSION convertia CADA actualizacion rutinaria del
+        // agente en una alerta maxima de ataque, en todos los sitios a la vez.
+        //
+        // La fatiga de alertas que eso produce cuesta mas que reemitir: un
+        // operador que aprendio a ignorar esta alerta la ignorara tambien el dia
+        // que sea cierta.
+        let almacen = AlmacenDePrueba::nuevo("formato-obsoleto");
+        let banco = banco(DominioClave::Cliente);
+
+        let mut bytes = bytes_en_disco(&banco);
+        aceptar_inventario(&almacen.rutas, &bytes, 7).expect("aceptar");
+
+        // El fichero se emitio con la version anterior del formato.
+        bytes[8..10].copy_from_slice(&(formato::VERSION - 1).to_be_bytes());
+        std::fs::write(almacen.rutas.inventario(), &bytes).expect("reescribir");
+
+        let (estado, _) = arrancar(
+            &almacen.rutas,
+            &banco.clave,
+            Some(&clave_recuperacion_de_prueba()),
+        )
+        .expect("el agente arranca igual");
+
+        assert!(matches!(estado, EstadoArranque::FormatoObsoleto { .. }));
+        assert!(
+            estado.exige_alerta(),
+            "hay que avisar: nadie mas va a recordar que toca reemitir"
+        );
+        assert!(
+            !estado.es_manipulacion(),
+            "pero NO es un ataque, y presentarlo como tal produce fatiga de alertas"
+        );
+    }
+
+    #[test]
+    fn un_formato_obsoleto_protege_como_el_primer_arranque() {
+        // Sin marcados legibles, la clasificacion resuelve por segmento. No hay
+        // razon para bloquear tambien la contencion donde el administrador ya
+        // declaro que no hay criticos.
+        let almacen = AlmacenDePrueba::nuevo("obsoleto-protege");
+        let banco = banco(DominioClave::Cliente);
+
+        let mut bytes = bytes_en_disco(&banco);
+        aceptar_inventario(&almacen.rutas, &bytes, 7).expect("aceptar");
+        bytes[8..10].copy_from_slice(&(formato::VERSION - 1).to_be_bytes());
+        std::fs::write(almacen.rutas.inventario(), &bytes).expect("reescribir");
+
+        let (estado, _) = arrancar(
+            &almacen.rutas,
+            &banco.clave,
+            Some(&clave_recuperacion_de_prueba()),
+        )
+        .expect("arranque");
+
+        assert!(estado.admite_contencion_automatica());
+        assert_eq!(
+            estado.marcado(&MAC),
+            Ok(None),
+            "sin marcados legibles, pero ausencia legitima y no error"
+        );
+
+        // Y en un segmento que admite criticos sigue sin contenerse.
+        let proveedores = Proveedores {
+            inventario: &estado,
+            segmento: &SegmentoDe(Ok(HistorialSegmento {
+                actual: DeclaracionSegmento::PuedeAlojarCriticos,
+                visto_en_segmento_critico: false,
+            })),
+            oui: &OuiDe(Ok(Indicio::SinIndicio)),
+            huella: &HuellaDe(Ok(Indicio::SinIndicio)),
+        };
+
+        assert_ne!(
+            evaluar(
+                clasificar_con_proveedores(&proveedores, &MAC, AHORA),
+                PerfilSegmento::Corporativo
+            ),
+            Veredicto::Ejecutar
+        );
+    }
+
+    #[test]
+    fn una_version_posterior_sigue_siendo_desconocida() {
+        // La distincion es en las dos direcciones: hacia atras es caducidad,
+        // hacia delante es un formato que no se puede interpretar.
+        let banco = banco(DominioClave::Cliente);
+        let mut bytes = bytes_en_disco(&banco);
+        bytes[8..10].copy_from_slice(&(formato::VERSION + 1).to_be_bytes());
+
+        assert_eq!(
+            analizar(&bytes).err(),
+            Some(ErrorFormato::VersionDesconocida {
+                encontrada: formato::VERSION + 1
+            })
+        );
+    }
+
+    #[test]
+    fn una_version_anterior_es_obsoleta_y_no_desconocida() {
+        let banco = banco(DominioClave::Cliente);
+        let mut bytes = bytes_en_disco(&banco);
+        bytes[8..10].copy_from_slice(&(formato::VERSION - 1).to_be_bytes());
+
+        assert_eq!(
+            analizar(&bytes).err(),
+            Some(ErrorFormato::FormatoObsoleto {
+                encontrada: formato::VERSION - 1
+            })
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Clave aprovisionada — RPT-024, PA-49
+    // -----------------------------------------------------------------------
+
+    use arranque::{aprovisionar_clave, arrancar_con_almacen, cargar_clave};
+    use clave::{
+        ErrorClave, MAGICO_CLAVE, VERSION_CLAVE, analizar as analizar_clave, longitud_fichero,
+        serializar as serializar_clave,
+    };
+
+    /// Aprovisiona el par de claves del banco en el almacen de prueba.
+    fn aprovisionar_claves(almacen: &AlmacenDePrueba, banco: &Banco) {
+        aprovisionar_clave(
+            &almacen.rutas.clave_operativa(),
+            banco.clave.verificacion(),
+            DominioClave::Cliente,
+        )
+        .expect("aprovisionar operativa");
+
+        aprovisionar_clave(
+            &almacen.rutas.clave_recuperacion(),
+            clave_recuperacion_de_prueba().verificacion(),
+            DominioClave::ClienteRecuperacion,
+        )
+        .expect("aprovisionar recuperacion");
+    }
+
+    #[test]
+    fn el_fichero_de_clave_es_reversible() {
+        let banco = banco(DominioClave::Cliente);
+        let bytes = serializar_clave(banco.clave.verificacion(), DominioClave::Cliente);
+
+        assert_eq!(bytes.len(), longitud_fichero());
+
+        let leida = analizar_clave(&bytes, DominioClave::Cliente).expect("debe analizar");
+
+        assert_eq!(leida.dominio(), DominioClave::Cliente);
+        assert_eq!(
+            leida.verificacion().a_bytes(),
+            banco.clave.verificacion().a_bytes()
+        );
+        assert_eq!(leida.identificador(), banco.clave.identificador());
+    }
+
+    #[test]
+    fn el_dominio_viaja_en_el_fichero_y_no_en_la_ruta() {
+        // Es lo que sostiene la separacion de RPT-011 §4. Si el dominio se
+        // dedujera de la ruta, colocar el fichero de recuperacion donde va el
+        // operativo dejaria que la clave de emergencia firmara inventarios
+        // corrientes.
+        let recuperacion = clave_recuperacion_de_prueba();
+        let bytes = serializar_clave(
+            recuperacion.verificacion(),
+            DominioClave::ClienteRecuperacion,
+        );
+
+        assert_eq!(
+            analizar_clave(&bytes, DominioClave::Cliente).err(),
+            Some(ErrorClave::DominioInesperado {
+                encontrado: DominioClave::ClienteRecuperacion,
+                esperado: DominioClave::Cliente,
+            }),
+            "se rechaza por lo que ES, no por donde esta"
+        );
+    }
+
+    #[test]
+    fn el_analizador_de_clave_resiste_entrada_hostil() {
+        let banco = banco(DominioClave::Cliente);
+        let valido = serializar_clave(banco.clave.verificacion(), DominioClave::Cliente);
+
+        // Longitudes cortas: ninguna debe desbordar.
+        for longitud in 0..40 {
+            assert!(analizar_clave(&vec![0u8; longitud], DominioClave::Cliente).is_err());
+        }
+
+        let mut ajeno = valido.clone();
+        ajeno[0] = b'X';
+        assert_eq!(
+            analizar_clave(&ajeno, DominioClave::Cliente).err(),
+            Some(ErrorClave::MagicoAusente)
+        );
+
+        let mut futuro = valido.clone();
+        futuro[8..10].copy_from_slice(&(VERSION_CLAVE + 1).to_be_bytes());
+        assert_eq!(
+            analizar_clave(&futuro, DominioClave::Cliente).err(),
+            Some(ErrorClave::VersionDesconocida {
+                encontrada: VERSION_CLAVE + 1
+            })
+        );
+
+        // El cero de dominio no se interpreta: un fichero de ceros no es clave.
+        let mut sin_dominio = valido.clone();
+        sin_dominio[10] = 0;
+        assert_eq!(
+            analizar_clave(&sin_dominio, DominioClave::Cliente).err(),
+            Some(ErrorClave::DominioDesconocido { codigo: 0 })
+        );
+
+        // Cola sobrante: dos lecturas del mismo fichero.
+        let mut con_cola = valido.clone();
+        con_cola.extend_from_slice(b"cola");
+        assert!(matches!(
+            analizar_clave(&con_cola, DominioClave::Cliente),
+            Err(ErrorClave::LongitudIncorrecta { .. })
+        ));
+
+        // Material alterado. Un byte cambiado en la componente clasica puede
+        // dar un punto invalido —y entonces se rechaza— o un punto valido, y
+        // entonces es OTRA clave. Lo que no puede pasar es que se lea como la
+        // misma: la aserción es sobre el identificador, no sobre el error.
+        let mut alterada = valido.clone();
+        let ultimo = alterada.len() - 1;
+        alterada[ultimo] ^= 0xFF;
+
+        if let Ok(leida) = analizar_clave(&alterada, DominioClave::Cliente) {
+            assert_ne!(
+                leida.identificador(),
+                banco.clave.identificador(),
+                "un byte alterado no puede producir la misma clave"
+            );
+        }
+
+        assert_eq!(&valido[..8], MAGICO_CLAVE);
+    }
+
+    #[test]
+    fn el_agente_carga_su_propia_clave_y_verifica_el_inventario() {
+        // PA-49 completo. Antes de esto `arrancar` exigia dos claves que nadie
+        // le daba, asi que el sensor operaba en primer arranque permanente y un
+        // manifiesto firmado no servia de nada.
+        let almacen = AlmacenDePrueba::nuevo("clave-aprovisionada");
+        let banco = banco(DominioClave::Cliente);
+
+        aprovisionar_claves(&almacen, &banco);
+        aceptar_inventario(&almacen.rutas, &bytes_en_disco(&banco), 7).expect("aceptar");
+
+        let (estado, _) = arrancar_con_almacen(&almacen.rutas).expect("arranque");
+
+        assert!(matches!(estado, EstadoArranque::Operativo(_)));
+        assert!(!estado.exige_alerta());
+        assert_eq!(
+            estado
+                .marcado(&MAC)
+                .expect("verifica")
+                .expect("la mac figura")
+                .clase(),
+            Some(ClaseExcluida::SoporteVital),
+            "el marcado llega verificado desde disco, sin clave pasada a mano"
+        );
+    }
+
+    #[test]
+    fn sin_clave_no_se_finge_una_instalacion_completa() {
+        // Colapsarlo en `PrimerArranque` diria que la instalacion esta lista
+        // cuando le falta la mitad, y el administrador no se enteraria hasta
+        // emitir un manifiesto que el agente ignora en silencio.
+        let almacen = AlmacenDePrueba::nuevo("sin-clave");
+
+        let (estado, _) = arrancar_con_almacen(&almacen.rutas).expect("arranque");
+
+        assert!(matches!(estado, EstadoArranque::SinClaveAprovisionada));
+        assert!(
+            estado.exige_alerta(),
+            "hay que avisar de que falta la mitad"
+        );
+        assert!(!estado.es_manipulacion(), "pero no es un ataque");
+        assert!(
+            estado.admite_contencion_automatica(),
+            "sin marcados, la clasificacion resuelve por segmento"
+        );
+        assert_eq!(estado.marcado(&MAC), Ok(None));
+    }
+
+    #[test]
+    fn borrar_la_clave_despues_de_aprovisionar_es_supresion() {
+        // El centinela sigue siendo el testigo. Si alguna vez se acepto un
+        // inventario, hubo clave; que ya no este no es una instalacion a medias.
+        let almacen = AlmacenDePrueba::nuevo("clave-borrada");
+        let banco = banco(DominioClave::Cliente);
+
+        aprovisionar_claves(&almacen, &banco);
+        aceptar_inventario(&almacen.rutas, &bytes_en_disco(&banco), 7).expect("aceptar");
+        std::fs::remove_file(almacen.rutas.clave_operativa()).expect("borrar la clave");
+
+        let (estado, _) = arrancar_con_almacen(&almacen.rutas).expect("arranque");
+
+        assert!(matches!(
+            estado,
+            EstadoArranque::Supresion {
+                secuencia_conocida: 7
+            }
+        ));
+        assert!(estado.es_manipulacion());
+        assert!(
+            !estado.admite_contencion_automatica(),
+            "borrar la clave no puede volver contenible a un equipo protegido"
+        );
+    }
+
+    #[test]
+    fn una_clave_corrupta_no_se_degrada_a_ausente() {
+        // Mismo argumento que el centinela corrupto: corromper el fichero seria
+        // una via para simular el estado que exime de verificar.
+        let almacen = AlmacenDePrueba::nuevo("clave-corrupta");
+        let banco = banco(DominioClave::Cliente);
+
+        aprovisionar_claves(&almacen, &banco);
+        std::fs::write(almacen.rutas.clave_operativa(), b"no soy una clave").expect("corromper");
+
+        assert!(
+            arrancar_con_almacen(&almacen.rutas).is_err(),
+            "no se degrada a SinClaveAprovisionada"
+        );
+    }
+
+    #[test]
+    fn sin_clave_de_recuperacion_no_se_lee_ninguna_revocacion() {
+        // Un borrador de `arrancar_con_almacen` sustituia la clave ausente por
+        // la operativa envuelta en el dominio de recuperacion. Era un agujero:
+        // quien tuviera la privada operativa habria podido forjar un certificado
+        // que verificase y bajar el centinela con `reiniciar_por`.
+        let almacen = AlmacenDePrueba::nuevo("sin-recuperacion");
+        let banco = banco(DominioClave::Cliente);
+
+        aprovisionar_clave(
+            &almacen.rutas.clave_operativa(),
+            banco.clave.verificacion(),
+            DominioClave::Cliente,
+        )
+        .expect("aprovisionar operativa");
+
+        std::fs::write(
+            almacen.rutas.revocaciones(),
+            ArchivoRevocaciones::nuevo().serializar(),
+        )
+        .expect("escribir");
+
+        let registro = arranque::cargar_revocaciones(&almacen.rutas, None).expect("cargar");
+
+        assert_eq!(
+            registro,
+            RegistroRevocaciones::default(),
+            "sin clave de recuperacion el registro queda vacio, no se cree nada"
+        );
+
+        assert!(
+            cargar_clave(
+                &almacen.rutas.clave_recuperacion(),
+                DominioClave::ClienteRecuperacion
+            )
+            .expect("no es un fallo de disco")
+            .is_none(),
+            "y su ausencia no impide arrancar"
+        );
+
+        assert!(arrancar_con_almacen(&almacen.rutas).is_ok());
+    }
+
+    // -----------------------------------------------------------------------
+    // Declaracion firmada de segmentos — RPT-022, PA-45
+    // -----------------------------------------------------------------------
+
+    /// Desplazamiento del primer registro de segmento en el fichero.
+    fn inicio_de_segmentos(banco: &Banco) -> usize {
+        CABECERA + banco.inventario.marcados().len() * ENTRADA
+    }
+
+    #[test]
+    fn las_naturalezas_de_segmento_coinciden_con_el_manifiesto() {
+        let declaradas = valores_bajo(&manifiesto(), "[[naturaleza_segmento]]", "nombre");
+        let implementadas: Vec<String> = NaturalezaSegmento::TODAS
+            .iter()
+            .map(|naturaleza| naturaleza.identificador().to_owned())
+            .collect();
+
+        assert_eq!(
+            declaradas, implementadas,
+            "las naturalezas de segmento divergen del manifiesto.\n  \
+             manifiesto: {declaradas:?}\n  \
+             codigo    : {implementadas:?}"
+        );
+    }
+
+    #[test]
+    fn no_existe_codigo_para_la_ausencia_de_declaracion() {
+        // «No declarado» se representa con la AUSENCIA de registro. Si tuviera
+        // codigo propio, el mismo estado tendria dos representaciones y volveria
+        // la ambiguedad que el resto del formato cierra.
+        assert_eq!(NaturalezaSegmento::TODAS.len(), 2);
+
+        for codigo in 0u8..=255 {
+            let naturaleza = NaturalezaSegmento::desde_codigo(codigo);
+
+            if let Some(naturaleza) = naturaleza {
+                assert_eq!(naturaleza.codigo(), codigo, "el codigo es reversible");
+                assert_ne!(
+                    naturaleza.a_declaracion(),
+                    DeclaracionSegmento::NoDeclarado,
+                    "ninguna naturaleza codificable significa «no declarado»"
+                );
+            }
+        }
+
+        assert_eq!(
+            NaturalezaSegmento::desde_codigo(0),
+            None,
+            "el cero queda reservado: un bloque de ceros no es una tabla valida"
+        );
+    }
+
+    #[test]
+    fn alterar_una_declaracion_de_segmento_invalida_la_firma() {
+        // El nucleo de PA-45. Si la tabla viviera fuera del manifiesto firmado,
+        // esta edicion de un byte —declarar limpia la VLAN clinica— volveria
+        // contenible a todo equipo sin marcado de ese segmento.
+        let banco = banco(DominioClave::Cliente);
+        let mut bytes = bytes_en_disco(&banco);
+
+        // La VLAN 40 es la clinica y va segunda en orden ascendente.
+        let posicion = inicio_de_segmentos(&banco) + SEGMENTO + 2;
+        assert_eq!(
+            bytes[posicion],
+            NaturalezaSegmento::PuedeAlojarCriticos.codigo()
+        );
+        bytes[posicion] = NaturalezaSegmento::SinDispositivosCriticos.codigo();
+
+        assert!(
+            analizar(&bytes).is_ok(),
+            "el fichero sigue estructuralmente bien formado"
+        );
+        assert_eq!(
+            InventarioLocal::cargar(&bytes, &banco.clave, banco.centinela, &banco.revocaciones)
+                .err(),
+            Some(ErrorCarga::Verificacion(
+                ErrorInventario::FirmaDeRaizInvalida
+            )),
+            "pero la firma cubre el resumen de la tabla, asi que deja de verificar"
+        );
+    }
+
+    #[test]
+    fn borrar_el_bloque_de_segmentos_entero_tampoco_pasa_desapercibido() {
+        // La proteccion no puede depender de que el bloque exista: hay que
+        // distinguir «tabla vacia» de «tabla borrada». Por eso el numero de
+        // declaraciones se absorbe ANTES que las declaraciones.
+        let banco = banco(DominioClave::Cliente);
+        let inicio = inicio_de_segmentos(&banco);
+        let cuantos = banco.vlans.declaraciones().len();
+
+        let mut mutilado = bytes_en_disco(&banco);
+        mutilado[CABECERA - 2..CABECERA].copy_from_slice(&0u16.to_be_bytes());
+        mutilado.drain(inicio..inicio + cuantos * SEGMENTO);
+
+        let fichero = analizar(&mutilado).expect("sigue bien formado: una tabla vacia es legitima");
+        assert!(fichero.vlans.declaraciones().is_empty());
+        assert_ne!(
+            fichero.anclada.vlans, banco.anclada.vlans,
+            "el resumen de la tabla vacia no es el de la tabla con contenido"
+        );
+
+        assert_eq!(
+            InventarioLocal::cargar(
+                &mutilado,
+                &banco.clave,
+                banco.centinela,
+                &banco.revocaciones
+            )
+            .err(),
+            Some(ErrorCarga::Verificacion(
+                ErrorInventario::FirmaDeRaizInvalida
+            ))
+        );
+    }
+
+    #[test]
+    fn una_tabla_vacia_no_comparte_resumen_con_ninguna_otra() {
+        let vacia = TablaVlan::vacia();
+        let una = TablaVlan::construir(vec![DeclaracionVlan {
+            vlan: VLAN_LIMPIA,
+            naturaleza: NaturalezaSegmento::SinDispositivosCriticos,
+            emitido_en: AHORA,
+            vigencia_dias: 365,
+        }])
+        .expect("una sola");
+
+        assert_ne!(vacia.resumen(), una.resumen());
+        assert_ne!(una.resumen(), banco(DominioClave::Cliente).vlans.resumen());
+    }
+
+    #[test]
+    fn el_orden_de_entrada_no_altera_el_resumen_de_la_tabla() {
+        let mut invertidas = segmentos_de_prueba();
+        invertidas.reverse();
+
+        assert_eq!(
+            TablaVlan::construir(segmentos_de_prueba())
+                .expect("sin repetidas")
+                .resumen(),
+            TablaVlan::construir(invertidas)
+                .expect("sin repetidas")
+                .resumen()
+        );
+    }
+
+    #[test]
+    fn una_vlan_declarada_dos_veces_se_rechaza() {
+        // Elegir la primera o la ultima es arbitrario, y una de las dos
+        // elecciones favorece a quien anade un segundo registro «limpio».
+        let repetida = vec![
+            DeclaracionVlan {
+                vlan: VLAN_CLINICA,
+                naturaleza: NaturalezaSegmento::PuedeAlojarCriticos,
+                emitido_en: AHORA,
+                vigencia_dias: 365,
+            },
+            DeclaracionVlan {
+                vlan: VLAN_CLINICA,
+                naturaleza: NaturalezaSegmento::SinDispositivosCriticos,
+                emitido_en: AHORA,
+                vigencia_dias: 365,
+            },
+        ];
+
+        assert_eq!(
+            TablaVlan::construir(repetida).err(),
+            Some(ErrorVlan::VlanDuplicada { vlan: VLAN_CLINICA })
+        );
+    }
+
+    #[test]
+    fn la_vlan_cero_y_la_reservada_no_son_declarables() {
+        // El VID 0 significa «etiquetado solo por prioridad, sin pertenencia a
+        // VLAN», y `eje-captura` lo entrega como Some(0). Declararlo limpio
+        // concederia contencion a cualquiera que emita tramas con prioridad.
+        for vlan in [0, VLAN_MAXIMA + 1, 0xFFFF] {
+            assert_eq!(
+                TablaVlan::construir(vec![DeclaracionVlan {
+                    vlan,
+                    naturaleza: NaturalezaSegmento::SinDispositivosCriticos,
+                    emitido_en: AHORA,
+                    vigencia_dias: 365,
+                }])
+                .err(),
+                Some(ErrorVlan::VlanFueraDeRango { vlan }),
+                "la vlan {vlan} no debe ser declarable"
+            );
+        }
+
+        assert_eq!(VLAN_MINIMA, 1);
+    }
+
+    #[test]
+    fn un_codigo_de_naturaleza_desconocido_se_rechaza_al_leer() {
+        // Incluido el cero: aceptarlo dejaria que un bloque de relleno se
+        // analizase como declaraciones validas.
+        let banco = banco(DominioClave::Cliente);
+
+        for codigo in [0u8, 3, 200] {
+            let mut bytes = bytes_en_disco(&banco);
+            bytes[inicio_de_segmentos(&banco) + 2] = codigo;
+
+            assert_eq!(
+                analizar(&bytes).err(),
+                Some(ErrorFormato::NaturalezaDesconocida { codigo }),
+                "el codigo {codigo} no debe interpretarse"
+            );
+        }
+    }
+
+    #[test]
+    fn una_vlan_fuera_de_rango_en_disco_se_rechaza() {
+        let banco = banco(DominioClave::Cliente);
+        let mut bytes = bytes_en_disco(&banco);
+        let inicio = inicio_de_segmentos(&banco);
+        bytes[inicio..inicio + 2].copy_from_slice(&0u16.to_be_bytes());
+
+        assert_eq!(
+            analizar(&bytes).err(),
+            Some(ErrorFormato::VlanFueraDeRango { vlan: 0 })
+        );
+    }
+
+    #[test]
+    fn los_segmentos_desordenados_en_disco_se_rechazan() {
+        // Mismo motivo que las entradas: reordenar en silencio haria que dos
+        // ficheros distintos produjeran el mismo resumen firmado.
+        let banco = banco(DominioClave::Cliente);
+        let mut bytes = bytes_en_disco(&banco);
+        let inicio = inicio_de_segmentos(&banco);
+
+        let uno: Vec<u8> = bytes[inicio..inicio + SEGMENTO].to_vec();
+        let dos: Vec<u8> = bytes[inicio + SEGMENTO..inicio + 2 * SEGMENTO].to_vec();
+
+        bytes[inicio..inicio + SEGMENTO].copy_from_slice(&dos);
+        bytes[inicio + SEGMENTO..inicio + 2 * SEGMENTO].copy_from_slice(&uno);
+
+        assert_eq!(
+            analizar(&bytes).err(),
+            Some(ErrorFormato::SegmentosDesordenados { posicion: 1 })
+        );
+    }
+
+    #[test]
+    fn solo_una_declaracion_firmada_vigente_declara_limpio_un_segmento() {
+        // El recorrido que PA-45 abre: de la etiqueta VLAN observada a una
+        // declaracion que un humano firmo.
+        let almacen = AlmacenDePrueba::nuevo("segmentos-firmados");
+        let banco = banco(DominioClave::Cliente);
+        let bytes = bytes_en_disco(&banco);
+        aceptar_inventario(&almacen.rutas, &bytes, 7).expect("aceptar");
+
+        let (estado, _) = arrancar(
+            &almacen.rutas,
+            &banco.clave,
+            Some(&clave_recuperacion_de_prueba()),
+        )
+        .expect("arranque");
+
+        assert!(matches!(estado, EstadoArranque::Operativo(_)));
+
+        assert_eq!(
+            estado.declaracion_para(Some(VLAN_LIMPIA), AHORA),
+            DeclaracionSegmento::SinDispositivosCriticos
+        );
+        assert_eq!(
+            estado.declaracion_para(Some(VLAN_CLINICA), AHORA),
+            DeclaracionSegmento::PuedeAlojarCriticos
+        );
+        assert_eq!(
+            estado.declaracion_para(Some(999), AHORA),
+            DeclaracionSegmento::NoDeclarado,
+            "una vlan sin registro no esta declarada"
+        );
+        assert_eq!(
+            estado.declaracion_para(None, AHORA),
+            DeclaracionSegmento::NoDeclarado,
+            "una trama sin etiqueta no hereda la declaracion de nadie"
+        );
+    }
+
+    #[test]
+    fn una_declaracion_caducada_deja_de_declarar_limpio() {
+        // La declaracion peligrosa es «este segmento esta limpio», y es la que
+        // envejece mal: nadie reemite el manifiesto el dia que se conecta un
+        // carro de telemedicina a la VLAN administrativa.
+        let tabla = TablaVlan::construir(segmentos_de_prueba()).expect("sin repetidas");
+        let declaracion = tabla
+            .declaracion_de(VLAN_LIMPIA)
+            .copied()
+            .expect("la vlan figura");
+
+        assert!(declaracion.vigente_en(AHORA));
+        assert!(!declaracion.vigente_en(AHORA + 366 * 86_400));
+
+        // Y un reloj atrasado tambien caduca, en lugar de extender la vigencia.
+        assert!(!declaracion.vigente_en(AHORA - 1));
+    }
+
+    #[test]
+    fn sin_manifiesto_verificado_ningun_segmento_esta_declarado() {
+        // Los cuatro estados no operativos coinciden aqui, y no por comodidad:
+        // sin manifiesto nadie ha firmado que ningun segmento este limpio.
+        for estado in [
+            EstadoArranque::PrimerArranque,
+            EstadoArranque::FormatoObsoleto { encontrada: 1 },
+            EstadoArranque::Supresion {
+                secuencia_conocida: 7,
+            },
+            EstadoArranque::NoVerifica {
+                detalle: "prueba".to_owned(),
+            },
+        ] {
+            assert_eq!(
+                estado.declaracion_para(Some(VLAN_LIMPIA), AHORA),
+                DeclaracionSegmento::NoDeclarado,
+                "sin manifiesto no se puede declarar limpio nada"
+            );
+            assert!(
+                estado
+                    .declaracion_para(Some(VLAN_LIMPIA), AHORA)
+                    .admite_criticos(),
+                "y el lado seguro es admitir criticos"
+            );
+        }
+    }
+
+    #[test]
+    fn una_tabla_ajena_no_se_puede_hacer_pasar_por_verificada() {
+        // `TablaVlanVerificada` no tiene mas constructor que este. Sin la
+        // comprobacion, cualquier modulo futuro podria cargar la tabla de un
+        // fichero de configuracion y presentarla como firmada.
+        let banco = banco(DominioClave::Cliente);
+        let raiz = banco.raiz_verificada().expect("la raiz verifica");
+
+        let ajena = TablaVlan::construir(vec![DeclaracionVlan {
+            vlan: VLAN_CLINICA,
+            naturaleza: NaturalezaSegmento::SinDispositivosCriticos,
+            emitido_en: AHORA,
+            vigencia_dias: 365,
+        }])
+        .expect("una sola");
+
+        assert_eq!(
+            TablaVlanVerificada::verificar_e_instanciar(ajena, &raiz).err(),
+            Some(ErrorVlan::TablaAjenaAlManifiesto)
+        );
+
+        assert!(
+            TablaVlanVerificada::verificar_e_instanciar(banco.vlans.clone(), &raiz).is_ok(),
+            "la tabla del propio manifiesto si"
+        );
+    }
+
+    #[test]
+    fn solo_la_manipulacion_es_manipulacion() {
+        // Barrido de los cinco estados. Si alguien anade uno nuevo y olvida
+        // clasificarlo, esta prueba no lo ve — pero el `match` de
+        // `es_manipulacion` deja de compilar si el enum crece, que es la mitad
+        // que si esta cubierta.
+        let manipulaciones = [
+            EstadoArranque::Supresion {
+                secuencia_conocida: 7,
+            },
+            EstadoArranque::NoVerifica {
+                detalle: "prueba".to_owned(),
+            },
+        ];
+        for estado in manipulaciones {
+            assert!(estado.es_manipulacion(), "{}", estado.exige_alerta());
+            assert!(estado.exige_alerta());
+        }
+
+        let benignos = [
+            EstadoArranque::PrimerArranque,
+            EstadoArranque::FormatoObsoleto { encontrada: 0 },
+        ];
+        for estado in benignos {
+            assert!(!estado.es_manipulacion());
+        }
+
+        assert!(!EstadoArranque::PrimerArranque.exige_alerta());
+        assert!(EstadoArranque::FormatoObsoleto { encontrada: 0 }.exige_alerta());
     }
 
     #[test]
@@ -2584,7 +3451,7 @@ mod pruebas {
         let (estado, centinela) = arrancar(
             &almacen.rutas,
             &banco.clave,
-            &clave_recuperacion_de_prueba(),
+            Some(&clave_recuperacion_de_prueba()),
         )
         .expect("rearranque");
 
@@ -2660,6 +3527,7 @@ mod pruebas {
         if let Ok(fichero) = analizar(caso) {
             let reserializado = serializar(
                 &fichero.inventario,
+                &fichero.vlans,
                 fichero.anclada.secuencia,
                 &fichero.firma,
             );
@@ -2719,11 +3587,15 @@ mod pruebas {
                 }
             }
             _ => {
-                // El campo de numero de entradas, que es el que gobierna la
-                // reserva de memoria.
-                if caso.len() >= 22 {
+                // Los dos contadores de la cabecera, que son los que gobiernan
+                // la reserva de memoria. El de segmentos entra aqui desde la
+                // version 2: dejarlo fuera habria mantenido el arnes en verde
+                // sobre el campo mas nuevo y menos ejercitado.
+                if caso.len() >= CABECERA {
                     let valor = (generador.siguiente() as u32).to_be_bytes();
                     caso[18..22].copy_from_slice(&valor);
+                    let segmentos = (generador.siguiente() as u16).to_be_bytes();
+                    caso[22..24].copy_from_slice(&segmentos);
                 }
             }
         }
@@ -2846,7 +3718,7 @@ mod pruebas {
         let mut bytes = bytes_en_disco(&banco);
 
         // Intercambia las entradas 0 y 1, que estan en orden ascendente.
-        let (uno, dos) = (22, 22 + 19);
+        let (uno, dos) = (CABECERA, CABECERA + ENTRADA);
         for desplazamiento in 0..19 {
             bytes.swap(uno + desplazamiento, dos + desplazamiento);
         }
@@ -2864,7 +3736,7 @@ mod pruebas {
         let banco = banco(DominioClave::Cliente);
         let mut bytes = bytes_en_disco(&banco);
 
-        let (uno, dos) = (22, 22 + 19);
+        let (uno, dos) = (CABECERA, CABECERA + ENTRADA);
         for desplazamiento in 0..6 {
             bytes[dos + desplazamiento] = bytes[uno + desplazamiento];
         }
@@ -2933,6 +3805,7 @@ mod pruebas {
         assert_ne!(
             mensaje_de_raiz(&RaizAnclada {
                 raiz: raiz_falsa,
+                vlans: TablaVlan::vacia().resumen(),
                 secuencia: 1
             }),
             raiz_falsa.bytes().to_vec()

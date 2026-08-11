@@ -9,7 +9,8 @@
 // es el comportamiento deseado.
 #![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
 
-use crate::cadena::RegistroEvidencia;
+use crate::ErrorAlmacen;
+use crate::cadena::{Asiento, RegistroEvidencia};
 use crate::esquema::ClaseEvento;
 use crate::merkle::{
     PasoPrueba, PruebaInclusion, hoja, nodo, prueba_inclusion, raiz, verificar_inclusion,
@@ -20,7 +21,7 @@ use crate::{BaseDestino, ClaseOperacion, autorizar};
 fn registro_de_ejemplo(cantidad: u64) -> RegistroEvidencia {
     let mut registro = RegistroEvidencia::nuevo();
     for indice in 0..cantidad {
-        registro.anexar(
+        let _ = registro.anexar(
             1_754_000_000_000 + indice as i64,
             ClaseEvento::DeteccionAnomalia,
             &format!("plc-linea-{indice}"),
@@ -301,7 +302,7 @@ fn la_raiz_cambia_si_cambia_cualquier_asiento() {
         } else {
             "trafico fuera de perfil"
         };
-        distinto.anexar(
+        let _ = distinto.anexar(
             1_754_000_000_000 + indice as i64,
             ClaseEvento::DeteccionAnomalia,
             &format!("plc-linea-{indice}"),
@@ -417,4 +418,211 @@ fn la_autorizacion_es_independiente_del_encadenamiento() {
     // Son capas independientes y ambas deben sostenerse por separado.
     assert!(autorizar(BaseDestino::RegistroEvidencia, ClaseOperacion::Modificacion).is_err());
     assert!(autorizar(BaseDestino::RegistroEvidencia, ClaseOperacion::Anexado).is_ok());
+}
+
+// ---------------------------------------------------------------------------
+// Techo del formato — RPT-039, PA-72
+// ---------------------------------------------------------------------------
+
+#[test]
+fn el_registro_se_niega_a_pasar_del_maximo_en_lugar_de_volverse_ilegible() {
+    // El defecto que PA-72 cierra. `ASIENTOS_MAXIMOS` solo se comprobaba al
+    // LEER, asi que un agente que superaba el techo seguia anexando, escribia el
+    // fichero entero, y el arranque siguiente no podia releerlo. Un registro
+    // ilegible se lee como violacion, de modo que el agente apartaba el fichero
+    // acusando de manipulacion a nadie: solo habia trabajado demasiado tiempo.
+    //
+    // Se rellena con asientos crudos a proposito: construirlos por `anexar`
+    // costaria medio millon de SHA-256 y esta prueba tardaria mas que toda la
+    // suite. Lo que se comprueba aqui es la cota, no el encadenado, que ya tiene
+    // las suyas.
+    let mut registro = RegistroEvidencia::nuevo();
+    for numero in 1..=crate::persistencia::ASIENTOS_MAXIMOS as u64 {
+        registro.anexar_crudo_para_pruebas(Asiento {
+            numero,
+            instante_utc: 0,
+            clase: ClaseEvento::ArranqueAgente,
+            nodo: String::new(),
+            detalle: String::new(),
+            resumen_anterior: Resumen::GENESIS,
+            resumen_propio: Resumen::GENESIS,
+        });
+    }
+
+    assert!(registro.saturado());
+    assert!(
+        matches!(
+            registro.anexar(0, ClaseEvento::DeteccionAnomalia, "n", "d"),
+            Err(ErrorAlmacen::CapacidadExcedida { .. })
+        ),
+        "por encima del techo hay que negarse, no seguir y volverse ilegible"
+    );
+}
+
+#[test]
+fn un_registro_normal_no_esta_saturado() {
+    let mut registro = RegistroEvidencia::nuevo();
+    assert!(!registro.saturado());
+    assert!(
+        registro
+            .anexar(0, ClaseEvento::ArranqueAgente, "n", "d")
+            .is_ok()
+    );
+    assert!(!registro.saturado());
+}
+
+// ---------------------------------------------------------------------------
+// Segmentacion — RPT-040, PA-59
+// ---------------------------------------------------------------------------
+
+use crate::persistencia::{ErrorPersistencia, analizar, serializar};
+
+/// Registro con `cuantas` anotaciones, empezando donde se diga.
+fn segmento(base: u64, genesis: Resumen, cuantas: u64) -> RegistroEvidencia {
+    let mut registro = RegistroEvidencia::continuando(base, genesis);
+    for indice in 0..cuantas {
+        registro
+            .anexar(
+                1_000 + indice as i64,
+                ClaseEvento::DeteccionAnomalia,
+                "nodo",
+                "detalle",
+            )
+            .expect("cabe");
+    }
+    registro
+}
+
+#[test]
+fn un_segmento_que_no_empieza_en_uno_numera_desde_su_base() {
+    // La numeracion deja de ser posicional. Si `anexar` siguiera derivandola de
+    // la longitud, el segundo segmento reutilizaria los numeros del primero y
+    // borrar evidencia volveria a salir gratis (RPT-029 §4).
+    let primero = segmento(1, Resumen::GENESIS, 3);
+    let segundo = segmento(4, primero.extremo(), 2);
+
+    assert_eq!(segundo.asientos()[0].numero, 4);
+    assert_eq!(segundo.asientos()[1].numero, 5);
+    assert_eq!(segundo.ultimo_numero(), 5);
+    assert!(segundo.verificar_cadena().is_ok());
+}
+
+#[test]
+fn un_segmento_vacio_declara_el_ultimo_del_anterior() {
+    // Es la propiedad de la que cuelga toda la rotacion de RPT-040 §1: un
+    // segmento recien abierto no dice «no hay nada», dice «lo ultimo que consta
+    // es el asiento N», y por eso el ancla del anterior lo valida sin cambiar.
+    let primero = segmento(1, Resumen::GENESIS, 4);
+    let vacio = RegistroEvidencia::continuando(5, primero.extremo());
+
+    assert!(vacio.vacio());
+    assert_eq!(vacio.ultimo_numero(), 4);
+    assert_eq!(vacio.extremo(), primero.extremo());
+}
+
+#[test]
+fn la_cadena_de_un_segmento_arranca_en_su_genesis_y_no_en_el_absoluto() {
+    // Comparar contra `Resumen::GENESIS` haria que TODO segmento rotado se
+    // leyera como cadena rota, es decir: rotar produciria una acusacion de
+    // manipulacion en cada arranque posterior.
+    let primero = segmento(1, Resumen::GENESIS, 3);
+    let segundo = segmento(4, primero.extremo(), 3);
+
+    assert!(segundo.verificar_cadena().is_ok());
+    assert_eq!(segundo.asientos()[0].resumen_anterior, primero.extremo());
+}
+
+#[test]
+fn alterar_un_segmento_archivado_rompe_su_enlace_con_el_siguiente() {
+    // Lo que sustituye al ancla en los archivados. Cada segmento sigue
+    // verificando consigo mismo —la cadena se reconstruye al cargar— pero la
+    // frontera deja de cuadrar, y eso es lo que nadie puede falsificar sin tener
+    // tambien el segmento siguiente.
+    let primero = segmento(1, Resumen::GENESIS, 3);
+    let segundo = segmento(4, primero.extremo(), 2);
+    assert!(segundo.continua_a(&primero));
+
+    // El atacante rehace el segmento archivado con un detalle distinto.
+    let mut alterado = RegistroEvidencia::nuevo();
+    for indice in 0..3u64 {
+        alterado
+            .anexar(
+                1_000 + indice as i64,
+                ClaseEvento::DeteccionAnomalia,
+                "nodo",
+                if indice == 2 { "otra cosa" } else { "detalle" },
+            )
+            .expect("cabe");
+    }
+
+    assert!(
+        alterado.verificar_cadena().is_ok(),
+        "consigo mismo cuadra: la cadena se reconstruye"
+    );
+    assert!(
+        !segundo.continua_a(&alterado),
+        "pero la frontera con el siguiente no"
+    );
+}
+
+#[test]
+fn un_segmento_va_y_vuelve_del_disco_con_su_base_y_su_genesis() {
+    let primero = segmento(1, Resumen::GENESIS, 2);
+    let segundo = segmento(3, primero.extremo(), 2);
+
+    let recuperado = analizar(&serializar(&segundo)).expect("verifica");
+
+    assert_eq!(recuperado.base(), 3);
+    assert_eq!(recuperado.genesis(), primero.extremo());
+    assert_eq!(recuperado.extremo(), segundo.extremo());
+    assert!(recuperado.continua_a(&primero));
+}
+
+#[test]
+fn un_fichero_de_la_version_anterior_se_lee_como_el_primer_segmento() {
+    // Es evidencia real de un cliente. Rechazarlo por «version desconocida» lo
+    // convertiria en ViolacionDetectada y el agente acusaria de manipulacion a
+    // quien solo actualizo el ejecutable (RPT-040 §2).
+    let registro = segmento(1, Resumen::GENESIS, 3);
+    let v2 = serializar(&registro);
+
+    // La v1 es la misma carga sin los campos de base y genesis.
+    let mut v1 = Vec::new();
+    v1.extend_from_slice(&v2[..8]);
+    v1.extend_from_slice(&1u16.to_be_bytes());
+    v1.extend_from_slice(&v2[50..]);
+
+    let recuperado = analizar(&v1).expect("la version 1 se interpreta, no se rechaza");
+
+    assert_eq!(recuperado.base(), 1);
+    assert_eq!(recuperado.genesis(), Resumen::GENESIS);
+    assert_eq!(recuperado.longitud(), 3);
+    assert_eq!(recuperado.extremo(), registro.extremo());
+}
+
+#[test]
+fn una_base_cero_se_rechaza_en_la_puerta() {
+    // Con base cero, el `ultimo_numero` de un segmento vacio se calcularia sobre
+    // `0 - 1`. Es aritmetica que conviene no dejar entrar en lugar de acotarla
+    // treinta llamadas mas adentro.
+    let mut bytes = serializar(&segmento(1, Resumen::GENESIS, 1));
+    bytes[10..18].copy_from_slice(&0u64.to_be_bytes());
+
+    assert!(matches!(
+        analizar(&bytes),
+        Err(ErrorPersistencia::BaseInvalida)
+    ));
+}
+
+#[test]
+fn una_version_posterior_a_la_conocida_se_sigue_rechazando() {
+    // Leer la v1 es interpretar algo que se entiende. Leer una v3 seria adivinar,
+    // y adivinar sobre evidencia es peor que declarar que no se puede.
+    let mut bytes = serializar(&segmento(1, Resumen::GENESIS, 1));
+    bytes[8..10].copy_from_slice(&3u16.to_be_bytes());
+
+    assert!(matches!(
+        analizar(&bytes),
+        Err(ErrorPersistencia::VersionDesconocida { encontrada: 3 })
+    ));
 }

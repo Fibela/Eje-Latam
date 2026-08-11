@@ -59,20 +59,61 @@ impl Recuento {
     }
 }
 
-/// Extrae el identificador `PA-nn` de una fila, si lo lleva.
+/// Extrae el identificador `PA-nn` —con sufijo de particion si lo lleva— de una
+/// fila.
 ///
 /// Tolera el tachado de Markdown —`~~PA-07~~`— porque el tablero lo usa para los
 /// cerrados y quitarlo obligaria a reescribir filas que ya estan bien.
+///
+/// # El sufijo forma parte del identificador
+///
+/// La primera version se detenia en los digitos, asi que `PA-14`, `PA-14a` y
+/// `PA-14c` colapsaban en un solo identificador. Combinado con la
+/// deduplicacion de [`leer`] —que conserva la primera aparicion— el efecto era
+/// que **la fila cerrada del punto partido se comia a sus hijos abiertos**.
+///
+/// No es un defecto cosmetico: RPT-021 partio PA-14 precisamente para separar
+/// lo que bloquea el despliegue de lo que no, y el comando escondia el
+/// bloqueante resultante. Es el mismo fallo que el comando existe para impedir,
+/// un nivel mas abajo.
+///
+/// # Por que se lee la celda y no una subcadena
+///
+/// El primer intento buscaba `PA-` en cualquier punto de la fila y tomaba la
+/// letra siguiente como sufijo si no continuaba una palabra. **No funciona**, y
+/// la razon merece quedar escrita: en `PA-14a |` la letra va seguida de espacio,
+/// y en `PA-40y algo` tambien. Desde una subcadena los dos casos son
+/// indistinguibles, asi que ninguna heuristica sobre los caracteres vecinos los
+/// separa. La regla no era afinable: era imposible.
+///
+/// Lo que si los separa es **donde** estan. El identificador es la primera
+/// celda de la fila, no un texto que aparezca en cualquier sitio. Leerla entera
+/// y exigir que sea exactamente un identificador resuelve el caso y, de paso,
+/// quita la dependencia del orden de aparicion: una fila cerrada que menciona
+/// otro punto en su tercera columna ya no necesita que `find` acierte.
 fn identificador_de(fila: &str) -> Option<String> {
-    let posicion = fila.find("PA-")?;
-    let resto = &fila[posicion + 3..];
-    let digitos: String = resto.chars().take_while(char::is_ascii_digit).collect();
+    let celda = fila
+        .split('|')
+        .map(str::trim)
+        .find(|celda| !celda.is_empty())?;
 
+    let limpia = celda.replace("~~", "").replace('*', "");
+    let resto = limpia.trim().strip_prefix("PA-")?;
+
+    let digitos: String = resto.chars().take_while(char::is_ascii_digit).collect();
     if digitos.is_empty() {
         return None;
     }
 
-    Some(format!("PA-{digitos}"))
+    // El sufijo de particion es una sola letra minuscula. Cualquier otra cosa
+    // significa que la celda no es un identificador, y entonces no se inventa
+    // ninguno: un punto fantasma no se cierra nunca, porque no existe.
+    let sufijo = &resto[digitos.len()..];
+    if sufijo.len() > 1 || sufijo.chars().any(|letra| !letra.is_ascii_lowercase()) {
+        return None;
+    }
+
+    Some(format!("PA-{digitos}{sufijo}"))
 }
 
 /// Lee el tablero de un contenido de RPT-002.
@@ -201,6 +242,106 @@ texto suelto que no es fila
 
         assert_eq!(puntos.len(), 1);
         assert_eq!(puntos[0].estado, Estado::Cerrado);
+    }
+
+    #[test]
+    fn un_punto_partido_no_se_come_a_sus_hijos() {
+        // La regresion. RPT-021 partio PA-14 en tres para separar lo que bloquea
+        // el despliegue de lo que no; con el identificador truncado en los
+        // digitos, la fila cerrada del padre absorbia a los hijos por
+        // deduplicacion y el bloqueante desaparecia del recuento.
+        let partido = "\
+| ~~PA-14~~ | ~~Cadena de firma~~ | ✅ **Partido** — eran tres puntos con un numero |
+| PA-14a | Firma de release | 🔴 Abierto, bloquea despliegue |
+| PA-14c | Atestacion PQC | 🟡 Abierto. Post-MVP |
+";
+        let puntos = leer(partido);
+
+        assert_eq!(puntos.len(), 3, "los tres deben contarse por separado");
+        assert_eq!(puntos[0].identificador, "PA-14");
+        assert_eq!(puntos[1].identificador, "PA-14a");
+        assert_eq!(puntos[2].identificador, "PA-14c");
+
+        let recuento = contar(&puntos);
+        assert_eq!(recuento.cerrados, 1);
+        assert_eq!(
+            recuento.pendientes(),
+            2,
+            "el bloqueante no puede esconderse"
+        );
+    }
+
+    #[test]
+    fn una_celda_que_no_es_un_identificador_no_inventa_uno() {
+        // La direccion contraria del defecto anterior. Un punto fantasma es
+        // peor que uno perdido: nadie lo cierra nunca porque no existe.
+        //
+        // La primera version de esta prueba esperaba `Some("PA-40")` para
+        // `PA-40y algo`, y fallo. Tenia razon en fallar: pedia distinguir la
+        // `y` de `PA-40y algo` de la `a` de `PA-14a |`, y desde una subcadena
+        // ambas son «minuscula seguida de espacio». La expectativa era
+        // irrealizable, no el parser.
+        assert_eq!(
+            identificador_de("| PA-40y algo | x | 🟡 |"),
+            None,
+            "la celda entera no es un identificador, asi que no hay ninguno"
+        );
+        assert_eq!(
+            identificador_de("| PA-40A | x | 🟡 |"),
+            None,
+            "la mayuscula no es sufijo de particion"
+        );
+        assert_eq!(identificador_de("| ID | Punto | Estado |"), None);
+        assert_eq!(identificador_de("|---|---|---|"), None);
+    }
+
+    #[test]
+    fn el_identificador_sobrevive_al_adorno_de_markdown() {
+        assert_eq!(
+            identificador_de("| PA-14a | x | 🟡 |"),
+            Some("PA-14a".to_owned())
+        );
+        assert_eq!(
+            identificador_de("| ~~PA-14~~ | x | ✅ |"),
+            Some("PA-14".to_owned()),
+            "el tachado no debe leerse como sufijo"
+        );
+        assert_eq!(
+            identificador_de("| **PA-48** | x | 🔴 |"),
+            Some("PA-48".to_owned()),
+            "la negrita tampoco"
+        );
+    }
+
+    #[test]
+    fn una_mencion_en_otra_columna_no_desplaza_al_identificador() {
+        // Antes esto dependia de que `find` diera con la primera aparicion.
+        // Ahora es estructural: el identificador es la primera celda y punto.
+        assert_eq!(
+            identificador_de("| PA-48 | El mecanismo de PA-45 existe sin usuarios | 🔴 |"),
+            Some("PA-48".to_owned())
+        );
+    }
+
+    #[test]
+    fn el_tablero_real_distingue_el_punto_partido_de_sus_hijos() {
+        // Contra el fichero de verdad. Si alguien restaura el truncado, aqui se
+        // ve sobre el tablero que importa y no sobre una muestra.
+        let raiz = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask cuelga de la raiz");
+        let puntos = desde_raiz(raiz).expect("el tablero debe existir");
+
+        let identificadores: Vec<&str> = puntos
+            .iter()
+            .map(|punto| punto.identificador.as_str())
+            .collect();
+
+        assert!(identificadores.contains(&"PA-14"), "el padre partido");
+        assert!(
+            identificadores.contains(&"PA-14a"),
+            "y el hijo que bloquea el despliegue, que es el que se perdia"
+        );
     }
 
     #[test]

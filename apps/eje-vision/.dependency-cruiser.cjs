@@ -100,7 +100,20 @@ module.exports = {
         path: [BASE, EMPRESARIAL, PROCESO_PRINCIPAL],
         pathNot: "(^|/)pruebas/",
       },
-      to: { dependencyTypes: ["npm-dev"] },
+      to: {
+        dependencyTypes: ["npm-dev"],
+        // Electron es la unica devDependency que el codigo de produccion puede
+        // importar, y la excepcion es real, no una comodidad: el empaquetador
+        // incrusta el runtime de Electron en el instalador. Declararlo en
+        // `dependencies` haria que ademas se copiara dentro de `node_modules`
+        // del artefacto — unos 200 MB duplicados — y es el motivo por el que
+        // todo proyecto de Electron lo lleva en `devDependencies`.
+        //
+        // La excepcion se acota por NOMBRE. Ampliarla a un patron dejaria pasar
+        // la siguiente devDependency por descuido, que es justo lo que esta
+        // regla existe para impedir.
+        pathNot: "node_modules/electron/",
+      },
     },
     {
       name: "sin-modulos-no-resueltos",

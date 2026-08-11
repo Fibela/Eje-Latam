@@ -30,6 +30,44 @@
 # Un canal es una ampliacion de la superficie de ataque del proceso privilegiado.
 # No debe poder anadirse sin que tres revisiones lo vean.
 
+# ---------------------------------------------------------------------------
+# FORMA DE LA PETICION Y DE LA RESPUESTA — RPT-035, PA-41
+# ---------------------------------------------------------------------------
+#
+# Este bloque faltaba. El manifiesto declaraba QUE canales existen y QUE campos
+# lleva cada carga, pero no COMO viaja el nombre del canal por el cable. Mientras
+# no hubo transporte no se noto; al escribir el servicio, cada extremo habria
+# tenido que inventarlo, que es exactamente lo que este fichero existe para
+# impedir.
+#
+# Dentro del marco de longitud, la peticion es:
+#
+#   [u16 BE longitud_nombre][nombre][carga]
+#
+# Y la respuesta:
+#
+#   [u8 codigo][resto]
+#
+# El nombre va prefijado en longitud y no delimitado por un separador: un
+# separador obliga a decidir que pasa si aparece dentro del nombre, y esa
+# decision no deberia existir.
+
+[peticion]
+# Bytes del prefijo que declara la longitud del nombre de canal.
+prefijo_nombre = 2
+# Cota del nombre. Ningun identificador declarado se acerca, y la cota existe
+# para que un prefijo absurdo no provoque una reserva absurda.
+nombre_maximo = 64
+
+[respuesta]
+# Primer byte de la respuesta. El cero es la respuesta valida; el uno es un
+# rechazo con motivo en texto.
+#
+# Se declaran los dos a proposito: un canal que responde bytes vacios ante un
+# rechazo seria indistinguible de uno que responde una lista vacia.
+codigo_respuesta = 0
+codigo_rechazo = 1
+
 [marco]
 # Longitud maxima de un marco, en bytes. Acota el consumo del proceso principal
 # ante un renderer comprometido (RPT-004 §6.2).
@@ -267,6 +305,28 @@ registro = "SucesoAlerta"
 nombre = "detalle"
 tipo = "texto"
 
+# Anadido en RPT-041 (PA-74). La respuesta era un array desnudo, y con la
+# segmentacion de PA-59 paso a ser una vista parcial con apariencia de
+# exhaustividad: quien pedia desde el cero recibia el segmento activo sin saber
+# que habia asientos archivados antes.
+#
+# `primerDisponible` es lo mas antiguo que SOBREVIVE EN DISCO, no lo que este
+# canal alcanza. Se lee del directorio en cada consulta y no se cachea: un valor
+# cacheado seguiria diciendo 1 despues de que alguien borrara el segmento 1, que
+# es justo el caso en el que la cifra importa.
+[[registro]]
+nombre = "RespuestaAlertas"
+
+[[campo]]
+registro = "RespuestaAlertas"
+nombre = "primerDisponible"
+tipo = "entero"
+
+[[campo]]
+registro = "RespuestaAlertas"
+nombre = "sucesos"
+tipo = "lista"
+
 [[registro]]
 nombre = "Condiciones"
 descripcion = "Estados degradados vigentes. No son sucesos: son verdaderos hasta que alguien interviene."
@@ -289,6 +349,56 @@ tipo = "booleano"
 [[campo]]
 registro = "Condiciones"
 nombre = "capturaConPerdida"
+tipo = "booleano"
+
+# Anadido en RPT-028 (PA-43). Al cablear los manejadores aparecio que DOS
+# estados de arranque que exigen alerta no tenian por donde llegar al operador:
+# `FormatoObsoleto` (RPT-022, actualizacion rutinaria que caduco el inventario)
+# y `SinClaveAprovisionada` (RPT-024, instalacion a medias). Ninguno es un suceso
+# —no ocurren, SON— y ninguno cabia en las cuatro condiciones anteriores.
+#
+# Es la distincion que la Fase 1 de PA-45 creo: `exige_alerta() &&
+# !es_manipulacion()`. Se separa de las otras cuatro porque su remedio es una
+# accion administrativa, no una respuesta a incidente, y mezclarlas produce la
+# fatiga de alertas que aquel reporte existia para evitar.
+[[campo]]
+registro = "Condiciones"
+nombre = "accionAdministrativa"
+tipo = "booleano"
+
+# Anadido en RPT-032 (PA-42). La alerta sale por syslog hacia el SIEM del
+# cliente, y si el colector no responde hay que decirlo: un canal de alertas
+# caido y uno silencioso son indistinguibles desde fuera (RPT-006 §4).
+#
+# ESTA CONDICION NO SE EMITE POR SYSLOG. Es la unica que no puede: emitirla
+# exigiria el canal que acaba de fallar. Viaja solo por aqui.
+[[campo]]
+registro = "Condiciones"
+nombre = "salidaNoDisponible"
+tipo = "booleano"
+
+# Anadido en RPT-039 (PA-72). `anexar` no comprobaba el techo del formato: al
+# superar ASIENTOS_MAXIMOS se seguia anexando en memoria y el fichero resultante
+# NO se podia releer, con lo que el arranque siguiente lo apartaba acusando de
+# manipulacion a nadie.
+#
+# Es la unica condicion que significa "este sensor ya no registra amenazas". Las
+# otras seis dicen que algo se ve peor; esta dice que la libreta se acabo.
+[[campo]]
+registro = "Condiciones"
+nombre = "registroSaturado"
+tipo = "booleano"
+
+# Anadido en RPT-044 (PA-69). Una alerta anexada cuya escritura fallo existe y
+# esta completa en memoria; lo que no esta es su durabilidad. `main.rs` lo
+# imprimia y VIS-04 no tenia por donde enterarse.
+#
+# Se apaga sola cuando el disco vuelve, asi que NO basta: la constancia duradera
+# es el asiento `persistencia-restablecida`, que se anexa al recuperar y describe
+# el tramo entero.
+[[campo]]
+registro = "Condiciones"
+nombre = "evidenciaEnRiesgo"
 tipo = "booleano"
 
 # --- Mensajes por canal ----------------------------------------------------
@@ -325,10 +435,13 @@ canal = "consultar-alertas"
 direccion = "peticion"
 forma = "PeticionAlertas"
 
+# RPT-041 (PA-74): dejo de ser `lista<SucesoAlerta>`. Un array desnudo no puede
+# decir donde empieza lo que entrega, y tras la segmentacion de PA-59 eso lo
+# convirtio en una vista parcial con apariencia de exhaustividad.
 [[mensaje]]
 canal = "consultar-alertas"
 direccion = "respuesta"
-forma = "lista<SucesoAlerta>"
+forma = "RespuestaAlertas"
 
 [[mensaje]]
 canal = "obtener-condiciones"

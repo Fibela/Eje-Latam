@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   CAMPOS_CONDICIONES,
+  CAMPOS_RESPUESTA_ALERTAS,
   CAMPOS_ESTADO_AGENTE,
   CAMPOS_ESTADO_BOVEDA,
   CAMPOS_NODO_INVENTARIO,
@@ -52,6 +53,87 @@ function manifiesto(): string {
         "contrato-ipc.toml es la fuente de verdad del puente y debe estar versionado.",
     );
   }
+}
+
+/**
+ * Fuente de `puente.ts`, que es donde vive el contrato de la interfaz.
+ *
+ * Tres niveles: `pruebas` → `dist` → `proceso-principal` → `eje-vision`. El
+ * manifiesto necesita cinco porque vive en la raíz del repositorio.
+ *
+ * Se ancla en `import.meta.url` y **no** en `process.cwd()`: el directorio de
+ * trabajo depende de desde dónde se invoque npm, y esa fragilidad ya nos costó
+ * una verificación de TypeScript que no llegó a ejecutarse.
+ */
+function fuenteDelPuente(): string {
+  const aqui = dirname(fileURLToPath(import.meta.url));
+  const ruta = join(
+    aqui,
+    "..",
+    "..",
+    "..",
+    "packages",
+    "eje-vision-base",
+    "src",
+    "ipc",
+    "puente.ts",
+  );
+  try {
+    return readFileSync(ruta, "utf8");
+  } catch (error) {
+    throw new Error(`no se pudo leer ${ruta}: ${String(error)}`);
+  }
+}
+
+/**
+ * Respuesta declarada de cada canal, leída del manifiesto.
+ *
+ * Sólo se recogen los bloques `direccion = "respuesta"`: la petición viaja por
+ * los argumentos del método y se comprueba aparte.
+ */
+function respuestasDeclaradas(): Map<string, string> {
+  const formas = new Map<string, string>();
+  for (const bloque of manifiesto().split("[[mensaje]]").slice(1)) {
+    const canal = /canal\s*=\s*"([^"]+)"/.exec(bloque)?.[1];
+    const direccion = /direccion\s*=\s*"([^"]+)"/.exec(bloque)?.[1];
+    const forma = /forma\s*=\s*"([^"]+)"/.exec(bloque)?.[1];
+    if (canal && forma && direccion === "respuesta") {
+      formas.set(canal, forma);
+    }
+  }
+  return formas;
+}
+
+/** `consultar-alertas` → `consultarAlertas`. */
+function metodoDe(canal: string): string {
+  return canal.replace(/-([a-z])/g, (_, letra: string) => letra.toUpperCase());
+}
+
+/** `lista<X>` → `readonly X[]`; `X` → `X`. */
+function tipoDe(forma: string): string {
+  const interior = /^lista<(.+)>$/.exec(forma)?.[1];
+  return interior === undefined ? forma : `readonly ${interior}[]`;
+}
+
+/** Tipo devuelto por cada método de `PuenteEje`, leído del fuente. */
+function retornosDelPuente(): Map<string, string> {
+  const fuente = fuenteDelPuente();
+  const cuerpo = /export interface PuenteEje \{([\s\S]*?)\n\}/.exec(fuente)?.[1];
+  assert.ok(cuerpo, "no se encontro la interfaz PuenteEje en puente.ts");
+
+  const retornos = new Map<string, string>();
+  for (const linea of cuerpo.split("\n")) {
+    // Los grupos de captura son `string | undefined` con
+    // `noUncheckedIndexedAccess`, y la lente tiene razón: una línea que no sea
+    // una firma no debe colarse como método sin nombre.
+    const [, metodo, retorno] = /^\s*(\w+)\s*\([^)]*\)\s*:\s*Promise<(.+)>;\s*$/.exec(
+      linea,
+    ) ?? [];
+    if (metodo !== undefined && retorno !== undefined) {
+      retornos.set(metodo, retorno.trim());
+    }
+  }
+  return retornos;
 }
 
 /**
@@ -193,6 +275,7 @@ describe("PA-20 — paridad con contrato-ipc.toml", () => {
       ["PeticionAlertas", CAMPOS_PETICION_ALERTAS],
       ["SucesoAlerta", CAMPOS_SUCESO_ALERTA],
       ["Condiciones", CAMPOS_CONDICIONES],
+      ["RespuestaAlertas", CAMPOS_RESPUESTA_ALERTAS],
     ];
 
     for (const [nombre, implementados] of registros) {
@@ -225,6 +308,65 @@ describe("PA-20 — paridad con contrato-ipc.toml", () => {
         `el canal '${canal}' no declara ningun mensaje en el manifiesto`,
       );
     }
+  });
+
+  // PA-75. Las pruebas de arriba comprueban que los ESQUEMAS coinciden; ninguna
+  // comprobaba que el contrato del puente USE el registro declarado.
+  //
+  // El caso real: `RespuestaAlertas` se declaró en el manifiesto y en `puente.ts`
+  // con sus campos, las dos pruebas de paridad pasaron, y la firma seguía
+  // diciendo `Promise<readonly SucesoAlerta[]>`. El tipo existía y no lo usaba
+  // nadie — el patrón que más veces ha aparecido en este proyecto.
+  it("cada método del puente devuelve la forma que el manifiesto declara", () => {
+    const declaradas = respuestasDeclaradas();
+    const retornos = retornosDelPuente();
+
+    assert.ok(retornos.size > 0, "no se leyó ninguna firma de PuenteEje");
+
+    for (const canal of CANALES_PERMITIDOS) {
+      const forma = declaradas.get(canal);
+      assert.ok(forma, `el canal '${canal}' no declara respuesta en el manifiesto`);
+
+      const metodo = metodoDe(canal);
+      const devuelve = retornos.get(metodo);
+      assert.ok(
+        devuelve,
+        `PuenteEje no declara el método '${metodo}' para el canal '${canal}'`,
+      );
+
+      assert.equal(
+        devuelve,
+        tipoDe(forma),
+        `el canal '${canal}' declara responder '${forma}' y ` +
+          `PuenteEje.${metodo} devuelve 'Promise<${devuelve}>'.\n` +
+          "Declarar un registro no lo cablea: la firma tiene que usarlo.",
+      );
+    }
+  });
+
+  // La barrera de arriba pasa. Que pase no demuestra que sirva: la divergencia
+  // real (`lista<SucesoAlerta>` en el manifiesto contra `RespuestaAlertas` en la
+  // firma) ya estaba corregida cuando se escribió, así que **nunca la vio**.
+  //
+  // Es la misma disciplina de `probar-frontera.mjs`: un guardián que jamás se ha
+  // puesto en rojo es un guardián sin probar. Aquí se ejercita la traducción y
+  // la comparación con datos fabricados, incluida la divergencia concreta que se
+  // nos escapó hoy.
+  it("la traducción de canal y forma detecta la divergencia que se nos escapó", () => {
+    assert.equal(metodoDe("consultar-alertas"), "consultarAlertas");
+    assert.equal(metodoDe("obtener-estado-boveda"), "obtenerEstadoBoveda");
+    assert.equal(metodoDe("obtenerCondiciones"), "obtenerCondiciones");
+
+    assert.equal(tipoDe("RespuestaAlertas"), "RespuestaAlertas");
+    assert.equal(tipoDe("lista<SucesoAlerta>"), "readonly SucesoAlerta[]");
+    assert.equal(tipoDe("lista<NodoInventario>"), "readonly NodoInventario[]");
+
+    // El caso de hoy: el manifiesto decía lista y la firma devolvía el objeto.
+    assert.notEqual(
+      tipoDe("lista<SucesoAlerta>"),
+      "RespuestaAlertas",
+      "la comparación debe distinguir un array de su envoltorio",
+    );
   });
 
   it("el manifiesto documenta el motivo de cada prohibición", () => {

@@ -1,0 +1,38 @@
+[package]
+name = "eje-manifiesto"
+description = "Emisor de manifiestos firmados. NO se despliega en el sensor: firma inventarios y declaraciones de segmento."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "eje-manifiesto"
+path = "src/main.rs"
+
+[dependencies]
+thiserror.workspace = true
+# Lo que escribe el administrador. `deny_unknown_fields` es la razon de traer
+# un analizador de verdad en lugar de buscar subcadenas como hace la prueba de
+# paridad del manifiesto: un campo mal escrito que se ignora en silencio es como
+# un marcado de soporte vital acaba emitido como no critico.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+# Derivacion de la clave de cifrado de la semilla desde la frase de paso.
+# RPT-023 §4 rechazo explicitamente el fichero protegido solo por permisos.
+argon2 = "0.5"
+# Aleatoriedad del sistema para la semilla, la sal y el nonce. Se toma
+# directamente y no via `rand_core`: la version 0.10 que exige `generar_par` no
+# arrastra `OsRng` por defecto (RPT-025 §1).
+getrandom = "0.3"
+# Formato, orden canonico y verificacion del manifiesto anterior. El emisor
+# reutiliza el MISMO codigo que el agente para leer: escribir un lector propio
+# permitiria que emisor y sensor discreparan sobre que es un fichero valido.
+guardian-cc = { path = "../guardian-cc" }
+# Derivacion del par de firma desde la semilla y firma hibrida.
+motor-pqc = { path = "../motor-pqc" }
+
+[lints]
+workspace = true

@@ -36,6 +36,25 @@ export type {
   ValidacionPeticion,
 } from "./puente-ipc.js";
 
+export { ESPERA_MAXIMA_MS, ErrorEnlace, pedir } from "./enlace.js";
+export type { AbrirConducto, Conducto } from "./enlace.js";
+
+export {
+  ALTO_INICIAL,
+  ANCHO_INICIAL,
+  conPolitica,
+  decidirApertura,
+  montarVentanaPrincipal,
+  opcionesDeVentana,
+} from "./ventana.js";
+export type {
+  Apertura,
+  Cabeceras,
+  FabricaVentana,
+  OpcionesVentana,
+  VentanaAbierta,
+} from "./ventana.js";
+
 export {
   CSP,
   DESTINOS_EXTERNOS_PERMITIDOS,

@@ -35,9 +35,12 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::almacen::InventarioLocal;
+use crate::almacen::{ErrorCarga, InventarioLocal};
+use crate::clasificacion::DeclaracionSegmento;
+use crate::clave::{ErrorClave, analizar as analizar_clave, serializar as serializar_clave};
 use crate::disco::{ErrorDisco, escribir_atomico, leer};
-use crate::inventario::{Centinela, ClaveInventario};
+use crate::formato::ErrorFormato;
+use crate::inventario::{Centinela, ClaveInventario, DominioClave};
 use crate::proveedores::{DireccionEnlace, ErrorProveedor, ProveedorInventario};
 use crate::revocacion::{ArchivoRevocaciones, RegistroRevocaciones};
 
@@ -90,6 +93,52 @@ impl RutasAlmacen {
     pub fn centinela(&self) -> PathBuf {
         self.directorio.join("centinela.dat")
     }
+
+    /// Clave con la que el administrador del cliente firma inventarios.
+    #[must_use]
+    pub fn clave_operativa(&self) -> PathBuf {
+        self.directorio.join("clave-cliente.pub")
+    }
+
+    /// Registro de evidencia de ALM-01.
+    ///
+    /// Cuelga del mismo directorio que el inventario y el centinela, por el
+    /// mismo motivo que ellos: tres rutas independientes invitan a que una
+    /// apunte a otro sitio tras un cambio de configuracion.
+    #[must_use]
+    pub fn evidencia(&self) -> PathBuf {
+        self.directorio.join("evidencia.alm")
+    }
+
+    /// Socket de escucha local (RPT-035, PA-41).
+    ///
+    /// Cuelga del mismo directorio que todo lo demas. RPT-002 §9.3 prohibe el
+    /// puerto TCP local: un servicio en `localhost` es alcanzable por cualquier
+    /// proceso y por cualquier pagina que el usuario visite.
+    #[must_use]
+    pub fn socket(&self) -> PathBuf {
+        self.directorio.join("agente.sock")
+    }
+
+    /// Ancla del extremo de la cadena de evidencia (RPT-033, PA-57).
+    ///
+    /// Fichero aparte del registro **a proposito**: si viviera dentro, alterarlo
+    /// seria la misma operacion que alterar lo que ancla, y no comprobaria nada.
+    #[must_use]
+    pub fn ancla_evidencia(&self) -> PathBuf {
+        self.directorio.join("evidencia.anc")
+    }
+
+    /// Clave de recuperacion, que solo firma certificados de revocacion.
+    ///
+    /// Va en fichero aparte del operativo aunque ambos sean material publico.
+    /// Un solo fichero con las dos obligaria a elegir cual se usa **en el
+    /// codigo**, y RPT-015 §4 separa las dos claves precisamente para que esa
+    /// eleccion no exista.
+    #[must_use]
+    pub fn clave_recuperacion(&self) -> PathBuf {
+        self.directorio.join("clave-recuperacion.pub")
+    }
 }
 
 /// Fallo al arrancar.
@@ -102,6 +151,14 @@ pub enum ErrorArranque {
     /// exactamente el ataque del §2 por otra puerta.
     #[error("el fichero de centinela esta corrupto")]
     CentinelaCorrupto,
+
+    /// El fichero de clave aprovisionada esta mal formado.
+    ///
+    /// **No se degrada a «sin clave»**, por el mismo motivo que el centinela
+    /// corrupto no se degrada a primer arranque: corromper un fichero seria una
+    /// via para simular un estado que exime de verificar.
+    #[error(transparent)]
+    Clave(#[from] ErrorClave),
 
     /// Fallo de disco distinto de «no existe».
     #[error(transparent)]
@@ -148,6 +205,17 @@ pub fn analizar_centinela(bytes: &[u8]) -> Result<Centinela, ErrorArranque> {
 /// Que el estado de arranque implemente [`ProveedorInventario`] evita que quien
 /// cablea tenga que acordarse de traducir cada caso: el tipo ya devuelve lo que
 /// corresponde.
+///
+/// # Sobre `Debug`
+///
+/// Se deriva porque un estado de arranque acaba en registros y mensajes de
+/// prueba, y describirlo a mano en cada sitio se desincroniza al anadir una
+/// variante — que es como `FormatoObsoleto` y `SinClaveAprovisionada` estuvieron
+/// a punto de quedarse sin llegar al operador (RPT-028 §2).
+///
+/// No expone material secreto: los marcados de un inventario no lo son, y el
+/// unico campo textual —`NoVerifica::detalle`— ya se escribe para leerse.
+#[derive(Debug)]
 pub enum EstadoArranque {
     /// Inventario cargado y verificado.
     Operativo(Box<InventarioLocal>),
@@ -168,25 +236,102 @@ pub enum EstadoArranque {
         /// Motivo, para el registro forense.
         detalle: String,
     },
+
+    /// El inventario es de una version anterior del formato.
+    ///
+    /// # Por que tiene estado propio
+    ///
+    /// Es un fichero legitimo que caduco al actualizar el agente. Sin este
+    /// estado quedaria en [`Self::NoVerifica`], y **cada actualizacion rutinaria
+    /// dispararia la alerta maxima de manipulacion**. La fatiga de alertas que
+    /// eso produce cuesta mas que la molestia de reemitir: un operador que
+    /// aprendio a ignorar esa alerta la ignorara tambien el dia que sea cierta.
+    ///
+    /// Se comporta como el primer arranque en cuanto a proteccion —sin marcados,
+    /// la clasificacion resuelve por segmento— pero **si alerta**, porque exige
+    /// una accion del administrador que nadie mas va a recordar.
+    FormatoObsoleto {
+        /// Version que traia el fichero.
+        encontrada: u16,
+    },
+
+    /// No hay clave aprovisionada con la que verificar nada.
+    ///
+    /// # Por que tiene estado propio
+    ///
+    /// Sin clave, `InventarioLocal::cargar` **no se puede ni intentar**: no es
+    /// que el inventario falle la verificacion, es que no hay con que
+    /// verificarlo. Colapsarlo en [`Self::PrimerArranque`] diria que la
+    /// instalacion esta completa cuando le falta la mitad, y el administrador no
+    /// se enteraria hasta que emitiera un manifiesto que el agente ignora en
+    /// silencio.
+    ///
+    /// Solo se alcanza con el centinela **sin establecer**. Si el centinela
+    /// existe, alguien acepto un inventario alguna vez, luego hubo clave y
+    /// ahora no: eso es [`Self::Supresion`] y no una instalacion a medias.
+    SinClaveAprovisionada,
 }
 
 impl EstadoArranque {
     /// Indica si la contencion automatica puede llegar a ejecutarse.
     ///
-    /// Solo en [`Self::Operativo`] y [`Self::PrimerArranque`]. En los dos casos
-    /// de manipulacion, el proveedor devuelve error y la clasificacion resuelve
-    /// en ambiguedad.
+    /// Sin marcados no hay contencion automatica sobre equipos que pudieran ser
+    /// criticos, asi que [`Self::FormatoObsoleto`] se comporta como el primer
+    /// arranque: la clasificacion resuelve por segmento y donde pueda haber
+    /// criticos sale ambiguedad.
     #[must_use]
     pub const fn admite_contencion_automatica(&self) -> bool {
-        matches!(self, Self::Operativo(_) | Self::PrimerArranque)
+        matches!(
+            self,
+            Self::Operativo(_)
+                | Self::PrimerArranque
+                | Self::FormatoObsoleto { .. }
+                | Self::SinClaveAprovisionada
+        )
     }
 
     /// Indica si el estado exige alerta al operador.
     ///
-    /// El primer arranque **no** alerta: es normal. La supresion si.
+    /// El primer arranque **no** alerta: es normal. Los demas si, pero por
+    /// motivos distintos — ver [`Self::es_manipulacion`].
     #[must_use]
     pub const fn exige_alerta(&self) -> bool {
+        !matches!(self, Self::Operativo(_) | Self::PrimerArranque)
+    }
+
+    /// Indica si el estado sugiere que **alguien toco el almacen**.
+    ///
+    /// Separado de [`Self::exige_alerta`] porque no toda alerta es un ataque.
+    /// Un formato obsoleto exige accion administrativa; una supresion o una
+    /// firma rota exigen respuesta a incidente. Presentarlos con la misma
+    /// urgencia produce fatiga de alertas, y un operador que aprendio a ignorar
+    /// esta la ignorara el dia que sea cierta.
+    #[must_use]
+    pub const fn es_manipulacion(&self) -> bool {
         matches!(self, Self::Supresion { .. } | Self::NoVerifica { .. })
+    }
+
+    /// Declaracion de segmento para la etiqueta VLAN observada.
+    ///
+    /// # Solo el estado operativo declara
+    ///
+    /// Los otros cuatro devuelven [`DeclaracionSegmento::NoDeclarado`], y no por
+    /// comodidad: sin manifiesto verificado **nadie ha firmado que ningun
+    /// segmento este limpio**. `NoDeclarado` admite criticos (RPT-009 §5), asi
+    /// que la ausencia de tabla no concede contencion automatica en ningun sitio.
+    ///
+    /// Es la misma asimetria que rige el proveedor de marcados: la ausencia de
+    /// evidencia declarativa no es evidencia de ausencia de criticidad.
+    #[must_use]
+    pub fn declaracion_para(&self, vlan: Option<u16>, ahora: u64) -> DeclaracionSegmento {
+        match self {
+            Self::Operativo(inventario) => inventario.declaracion_para(vlan, ahora),
+            Self::PrimerArranque
+            | Self::FormatoObsoleto { .. }
+            | Self::SinClaveAprovisionada
+            | Self::Supresion { .. }
+            | Self::NoVerifica { .. } => DeclaracionSegmento::NoDeclarado,
+        }
     }
 }
 
@@ -199,7 +344,18 @@ impl ProveedorInventario for EstadoArranque {
             Self::Operativo(inventario) => inventario.marcado(mac),
 
             // Ausencia legitima: no hay marcados y no hay nada sospechoso.
-            Self::PrimerArranque => Ok(None),
+            //
+            // `FormatoObsoleto` va por aqui a proposito. El fichero existe pero
+            // no se puede leer con este binario, asi que no hay marcado que
+            // ofrecer — y devolver error lo trataria como manipulacion, que es
+            // justo la confusion que este estado existe para deshacer.
+            //
+            // `SinClaveAprovisionada` tambien: una instalacion a medias no es un
+            // ataque. Alerta, pero por la puerta de la alerta y no por la del
+            // incidente.
+            Self::PrimerArranque | Self::FormatoObsoleto { .. } | Self::SinClaveAprovisionada => {
+                Ok(None)
+            }
 
             // Manipulacion. RPT-010 §4 obliga a no confundirla con la ausencia:
             // la ausencia permite contener en un segmento limpio, la
@@ -245,8 +401,15 @@ pub fn cargar_centinela(rutas: &RutasAlmacen) -> Result<Centinela, ErrorArranque
 /// el arranque por un fichero de revocaciones roto.
 pub fn cargar_revocaciones(
     rutas: &RutasAlmacen,
-    recuperacion: &ClaveInventario,
+    recuperacion: Option<&ClaveInventario>,
 ) -> Result<RegistroRevocaciones, ErrorArranque> {
+    // Sin clave de recuperacion no hay con que verificar certificados, y un
+    // certificado sin verificar no se lee. El registro queda vacio, que es el
+    // mismo resultado que un fichero ausente.
+    let Some(recuperacion) = recuperacion else {
+        return Ok(RegistroRevocaciones::default());
+    };
+
     match leer(&rutas.revocaciones()) {
         Ok(bytes) => Ok(ArchivoRevocaciones::analizar(&bytes, recuperacion)
             .map(|archivo| archivo.registro())
@@ -254,6 +417,91 @@ pub fn cargar_revocaciones(
         Err(ErrorDisco::NoExiste { .. }) => Ok(RegistroRevocaciones::default()),
         Err(error) => Err(ErrorArranque::Disco(error)),
     }
+}
+
+/// Carga una clave aprovisionada. Ausente significa `None`.
+///
+/// # Errores
+///
+/// [`ErrorArranque::Clave`] si el fichero existe y esta mal formado, o si su
+/// dominio no es el que la ruta exige. [`ErrorArranque::Disco`] ante fallo de
+/// lectura.
+pub fn cargar_clave(
+    ruta: &Path,
+    esperado: DominioClave,
+) -> Result<Option<ClaveInventario>, ErrorArranque> {
+    match leer(ruta) {
+        Ok(bytes) => Ok(Some(analizar_clave(&bytes, esperado)?)),
+        Err(ErrorDisco::NoExiste { .. }) => Ok(None),
+        Err(error) => Err(ErrorArranque::Disco(error)),
+    }
+}
+
+/// Escribe una clave de verificacion en el almacen.
+///
+/// Es el paso de aprovisionamiento: se ejecuta durante la instalacion, con un
+/// humano presente. Ver el §«Este fichero no esta firmado» de
+/// [`crate::clave`] sobre lo que protege a estos bytes y lo que no.
+///
+/// # Errores
+///
+/// [`ErrorArranque::Disco`] si la escritura falla.
+pub fn aprovisionar_clave(
+    ruta: &Path,
+    clave: &motor_pqc::firma_hibrida::ClaveVerificacionHibrida,
+    dominio: DominioClave,
+) -> Result<(), ErrorArranque> {
+    escribir_atomico(ruta, &serializar_clave(clave, dominio))?;
+    Ok(())
+}
+
+/// Arranca el agente leyendo tambien sus claves del almacen.
+///
+/// # Que anade sobre [`arrancar`]
+///
+/// [`arrancar`] recibe las dos claves como parametros, y hasta PA-49 nadie se
+/// las daba: `eje-agente` no tenia de donde sacarlas y operaba en primer
+/// arranque permanente. Esta funcion las lee de disco, que es lo que convierte
+/// toda la cadena de RPT-011 en algo que un despliegue real puede usar.
+///
+/// # Errores
+///
+/// Las de [`arrancar`], mas [`ErrorArranque::Clave`] si alguno de los dos
+/// ficheros de clave existe y esta mal formado.
+pub fn arrancar_con_almacen(
+    rutas: &RutasAlmacen,
+) -> Result<(EstadoArranque, Centinela), ErrorArranque> {
+    let operativa = cargar_clave(&rutas.clave_operativa(), DominioClave::Cliente)?;
+    let recuperacion = cargar_clave(
+        &rutas.clave_recuperacion(),
+        DominioClave::ClienteRecuperacion,
+    )?;
+
+    let Some(operativa) = operativa else {
+        let centinela = cargar_centinela(rutas)?;
+
+        // Sin clave no se puede verificar nada, pero el centinela sigue
+        // distinguiendo la instalacion a medias del borrado. Si alguna vez se
+        // acepto un inventario, hubo clave; que ya no este es supresion.
+        let estado = match centinela.secuencia() {
+            None => EstadoArranque::SinClaveAprovisionada,
+            Some(secuencia_conocida) => EstadoArranque::Supresion { secuencia_conocida },
+        };
+
+        return Ok((estado, centinela));
+    };
+
+    // La de recuperacion puede faltar sin que eso impida arrancar: solo sirve
+    // para leer certificados de revocacion, y RPT-015 §5 ya acepta que perder el
+    // registro devuelve al estado previo a la revocacion y no por debajo.
+    //
+    // Su ausencia se propaga como `None` y NO se sustituye por la operativa. Un
+    // borrador de esta funcion hacia justo eso —envolver la publica operativa en
+    // el dominio de recuperacion— y era un agujero: quien tuviera la privada
+    // operativa habria podido forjar un certificado que verificase, y con el
+    // bajar el centinela por `reiniciar_por` para despues reponer un inventario
+    // anterior. Es el ataque de PA-27 servido por la puerta que RPT-015 §4 cerro.
+    arrancar(rutas, &operativa, recuperacion.as_ref())
 }
 
 /// Arranca el agente sobre el almacen indicado.
@@ -266,7 +514,7 @@ pub fn cargar_revocaciones(
 pub fn arrancar(
     rutas: &RutasAlmacen,
     operativa: &ClaveInventario,
-    recuperacion: &ClaveInventario,
+    recuperacion: Option<&ClaveInventario>,
 ) -> Result<(EstadoArranque, Centinela), ErrorArranque> {
     let centinela = cargar_centinela(rutas)?;
     let revocaciones = cargar_revocaciones(rutas, recuperacion)?;
@@ -286,6 +534,13 @@ pub fn arrancar(
 
     match InventarioLocal::cargar(&bytes, operativa, centinela, &revocaciones) {
         Ok(inventario) => Ok((EstadoArranque::Operativo(Box::new(inventario)), centinela)),
+
+        // El formato obsoleto se separa antes de llegar a `NoVerifica`. Sin este
+        // brazo, actualizar el agente pareceria un ataque en cada sitio a la vez.
+        Err(ErrorCarga::Formato(ErrorFormato::FormatoObsoleto { encontrada })) => {
+            Ok((EstadoArranque::FormatoObsoleto { encontrada }, centinela))
+        }
+
         Err(error) => Ok((
             EstadoArranque::NoVerifica {
                 detalle: error.to_string(),

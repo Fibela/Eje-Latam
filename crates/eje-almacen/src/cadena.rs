@@ -20,6 +20,7 @@
 
 use crate::ErrorAlmacen;
 use crate::esquema::ClaseEvento;
+use crate::persistencia::ASIENTOS_MAXIMOS;
 use crate::resumen::{Absorbedor, Resumen};
 
 /// Dominio de separacion para el resumen de un asiento.
@@ -68,18 +69,106 @@ impl Asiento {
 /// Implementacion de referencia sobre la que se validan las invariantes. La
 /// persistencia en libSQL se apoya en esta misma logica de encadenamiento: la
 /// base almacena, no decide.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct RegistroEvidencia {
     asientos: Vec<Asiento>,
+    /// Numero del primer asiento que este segmento contiene.
+    ///
+    /// RPT-040 §2, PA-59. Un registro sin segmentar tiene `base = 1`, que es lo
+    /// que un fichero de la version 1 significa sin necesidad de migrarlo.
+    base: u64,
+    /// Resumen con el que enlaza el primer asiento del segmento.
+    ///
+    /// Para el primer segmento es [`Resumen::GENESIS`]; para los siguientes, el
+    /// extremo del segmento anterior. Es lo que **encadena los segmentos entre
+    /// si**: alterar un segmento archivado rompe este enlace en el siguiente
+    /// (RPT-040 §4), y por eso los archivados no necesitan ancla propia.
+    genesis: Resumen,
+}
+
+impl Default for RegistroEvidencia {
+    /// Delega en [`RegistroEvidencia::nuevo`].
+    ///
+    /// # Por que no se deriva
+    ///
+    /// RPT-040, PA-59. `Default` derivado daria `base: 0` y
+    /// `genesis: Default::default()`, y `base == 0` es justo el estado que
+    /// `analizar` rechaza en la puerta: con base cero, el `ultimo_numero` de un
+    /// segmento vacio se calcula sobre `0 - 1`.
+    ///
+    /// Derivarlo habria construido en memoria, sin ruido, el mismo registro
+    /// invalido que el analizador se niega a leer del disco.
+    fn default() -> Self {
+        Self::nuevo()
+    }
 }
 
 impl RegistroEvidencia {
-    /// Crea un registro vacio.
+    /// Crea un registro vacio que empieza en el asiento 1.
     #[must_use]
     pub const fn nuevo() -> Self {
         Self {
             asientos: Vec::new(),
+            base: 1,
+            genesis: Resumen::GENESIS,
         }
+    }
+
+    /// Crea un segmento vacio que continua a otro.
+    ///
+    /// RPT-040 §1. El segmento nuevo arrastra el extremo del anterior como
+    /// genesis, y de ahi sale la propiedad que hace la rotacion segura: el ancla
+    /// que describe el final del segmento cerrado describe **tambien** el estado
+    /// inicial de este, con el mismo numero y el mismo extremo. Rotar no toca el
+    /// ancla, asi que no hay estado intermedio que un corte de energia pueda
+    /// dejar a medias.
+    #[must_use]
+    pub const fn continuando(base: u64, genesis: Resumen) -> Self {
+        Self {
+            asientos: Vec::new(),
+            base,
+            genesis,
+        }
+    }
+
+    /// Este segmento continua exactamente al dado.
+    ///
+    /// RPT-040 §4, PA-59. **Es lo que sustituye al ancla en los segmentos
+    /// archivados.** Alterar un asiento de un segmento cerrado cambia su
+    /// extremo, y entonces deja de coincidir con el genesis del siguiente: la
+    /// cadena se rompe en la frontera aunque cada segmento verifique consigo
+    /// mismo sin objecion.
+    ///
+    /// Sin esta comprobacion la propiedad seguiria siendo cierta y no la
+    /// ejecutaria nadie, que es la unica forma que tiene una garantia de no
+    /// existir.
+    #[must_use]
+    pub fn continua_a(&self, anterior: &Self) -> bool {
+        self.base == anterior.ultimo_numero() + 1 && self.genesis == anterior.extremo()
+    }
+
+    /// Numero del primer asiento que este segmento contiene.
+    #[must_use]
+    pub const fn base(&self) -> u64 {
+        self.base
+    }
+
+    /// Resumen con el que enlaza el primer asiento.
+    #[must_use]
+    pub const fn genesis(&self) -> Resumen {
+        self.genesis
+    }
+
+    /// Numero del ultimo asiento **conocido**, este o no en este segmento.
+    ///
+    /// Para un segmento vacio es `base - 1`: el ultimo del anterior. Es la cifra
+    /// que el ancla describe, y por eso un segmento recien abierto la satisface
+    /// sin que nadie reescriba nada.
+    #[must_use]
+    pub fn ultimo_numero(&self) -> u64 {
+        self.asientos
+            .last()
+            .map_or(self.base.saturating_sub(1), |asiento| asiento.numero)
     }
 
     /// Numero de asientos registrados.
@@ -100,12 +189,12 @@ impl RegistroEvidencia {
         &self.asientos
     }
 
-    /// Resumen del ultimo asiento, o genesis si el registro esta vacio.
+    /// Resumen del ultimo asiento, o el genesis del segmento si esta vacio.
     #[must_use]
     pub fn extremo(&self) -> Resumen {
         self.asientos
             .last()
-            .map_or(Resumen::GENESIS, |asiento| asiento.resumen_propio)
+            .map_or(self.genesis, |asiento| asiento.resumen_propio)
     }
 
     /// Anexa un evento al registro.
@@ -113,14 +202,30 @@ impl RegistroEvidencia {
     /// Es la unica operacion de escritura. No existe metodo alguno para
     /// modificar ni eliminar un asiento: la inmutabilidad es una propiedad del
     /// tipo, no una convencion.
+    /// # Errores
+    ///
+    /// [`ErrorAlmacen::CapacidadExcedida`] cuando el registro ya contiene
+    /// [`ASIENTOS_MAXIMOS`] asientos. **Negarse es lo correcto**: seguir
+    /// anexando produce un fichero que el arranque siguiente no puede leer y que
+    /// por tanto se lee como manipulacion (RPT-039 §1).
+    ///
+    /// Perder una alerta es grave. Perderla **y ademas** acusar de manipulacion
+    /// a quien no toco nada lo es mas, porque manda al operador a investigar un
+    /// ataque que no existio mientras el sensor sigue sin registrar.
     pub fn anexar(
         &mut self,
         instante_utc: i64,
         clase: ClaseEvento,
         nodo: &str,
         detalle: &str,
-    ) -> &Asiento {
-        let numero = self.asientos.len() as u64 + 1;
+    ) -> Result<&Asiento, ErrorAlmacen> {
+        if self.asientos.len() >= ASIENTOS_MAXIMOS {
+            return Err(ErrorAlmacen::CapacidadExcedida {
+                maximo: ASIENTOS_MAXIMOS,
+            });
+        }
+
+        let numero = self.base + self.asientos.len() as u64;
         let resumen_anterior = self.extremo();
 
         let mut asiento = Asiento {
@@ -136,7 +241,17 @@ impl RegistroEvidencia {
 
         self.asientos.push(asiento);
         // El indice existe: se acaba de insertar.
-        &self.asientos[numero as usize - 1]
+        Ok(&self.asientos[self.asientos.len() - 1])
+    }
+
+    /// El registro no admite mas asientos.
+    ///
+    /// Es una condicion, no un suceso: sigue siendo cierta hasta que alguien
+    /// intervenga (RPT-019 §2). Mientras dure, **este sensor no registra
+    /// amenazas**.
+    #[must_use]
+    pub fn saturado(&self) -> bool {
+        self.asientos.len() >= ASIENTOS_MAXIMOS
     }
 
     /// Verifica la integridad de toda la cadena.
@@ -149,10 +264,13 @@ impl RegistroEvidencia {
     /// Devuelve [`ErrorAlmacen::CadenaRota`] indicando el primer asiento donde
     /// se detecto la discontinuidad.
     pub fn verificar_cadena(&self) -> Result<(), ErrorAlmacen> {
-        let mut esperado_anterior = Resumen::GENESIS;
+        // El primer asiento del segmento enlaza con el extremo del segmento
+        // anterior, no con el genesis absoluto. Comparar contra `GENESIS` aqui
+        // haria que todo segmento rotado se leyera como cadena rota.
+        let mut esperado_anterior = self.genesis;
 
         for (indice, asiento) in self.asientos.iter().enumerate() {
-            let numero_esperado = indice as u64 + 1;
+            let numero_esperado = self.base + indice as u64;
 
             if asiento.numero != numero_esperado {
                 return Err(ErrorAlmacen::CadenaRota {
@@ -190,9 +308,10 @@ impl RegistroEvidencia {
     /// Recupera un asiento por su numero.
     #[must_use]
     pub fn asiento(&self, numero: u64) -> Option<&Asiento> {
-        if numero == 0 {
-            return None;
-        }
-        self.asientos.get(numero as usize - 1)
+        // Un numero anterior a la base no esta en este segmento. **No es que no
+        // exista**: esta en un segmento archivado, y quien pregunte debe poder
+        // distinguirlo (PA-74).
+        let posicion = numero.checked_sub(self.base)?;
+        self.asientos.get(usize::try_from(posicion).ok()?)
     }
 }

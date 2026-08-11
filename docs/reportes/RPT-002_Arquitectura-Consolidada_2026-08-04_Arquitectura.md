@@ -449,7 +449,11 @@ Todo reporte incluye tabla de metadatos, sección de trazabilidad indicando qué
 | PA-12 | Empaquetador de `eje-vision` | 🟡 Abierto — RPT-004 §10 |
 | PA-15 | `CON-SIM` deshabilitado durante incidente activo | 🟡 Abierto — RPT-004 §10 |
 | PA-13 | Biblioteca de componentes de la capa base y su licencia | 🟡 Abierto — RPT-004 §10 |
-| PA-14 | Cadena de firma de releases y del paquete empresarial. **Absorbe la atestación de conformidad PQC** | 🟡 Abierto — RPT-004 §10, RPT-005 §9.4 |
+| ~~PA-14~~ | ~~Cadena de firma de releases y del paquete empresarial~~ | ✅ **Partido** 5-ago-2026 — RPT-021 §1. Eran tres puntos con un número, con verificadores distintos |
+| PA-14a | **Firma de release.** Certificado de firma de código, custodia en hardware y sellado de tiempo | 🔴 **Abierto, bloquea despliegue de Eje-Visión** — RPT-021 §8 |
+| PA-14c | Atestación de conformidad PQC (`CONFORMIDAD.lock`) | 🟡 Abierto — RPT-021 §1. Post-MVP |
+| PA-46 | **Repositorio firmado para Linux.** No es opcional: `eje-captura` sólo funciona en Linux, así que el agente **no tiene otra plataforma** | 🔴 **Abierto, bloquea despliegue de `eje-agente`** — RPT-021 §5 |
+| PA-47 | Procedimiento de rotación del certificado de firma | 🟡 Abierto — RPT-021 §8 |
 | ~~PA-16~~ | ~~Selección de bibliotecas poscuánticas~~ | ✅ Cerrado — RPT-005 §7.2 |
 | ~~PA-17~~ | ~~Vectores ACVP y Wycheproof: anclaje y ejecución~~ | ✅ Cerrado 4-ago-2026 — RPT-005 §9 |
 | PA-18 | Fuente de aleatoriedad: DRBG conforme al NIST | 🟡 Abierto — RPT-005 §7.4 |
@@ -470,10 +474,39 @@ Todo reporte incluye tabla de metadatos, sección de trazabilidad indicando qué
 | PA-37 | Crate `eje-captura`: AF_PACKET de sólo lectura, frontera de `unsafe` | 🔵 **Parcial** 5-ago-2026 — RPT-018 §9. Crate y guardianes verificados; **`linux.rs` nunca se ha compilado** |
 | PA-40 | ~~Compilar `linux.rs`~~ y ejecutarlo contra una interfaz | 🔵 **Parcial** — RPT-018 §10. Tipos validados con `--target x86_64-unknown-linux-gnu`; sin ejecutar |
 | PA-41 | Intervalo de consulta de alertas desde VIS-04 | 🟡 Abierto — RPT-019 §8 |
-| PA-42 | Salida de alertas fuera del equipo (syslog o equivalente) | 🟡 Abierto — RPT-019 §8 |
-| PA-43 | Manejadores de `consultar-alertas` y `obtener-condiciones` | 🟡 Abierto — RPT-019 §8 |
+| ~~PA-42~~ | ~~Salida de alertas fuera del equipo (syslog o equivalente)~~ | ✅ Cerrado 6-ago-2026 — RPT-031 (diseño) y RPT-032. **Inútil sin PA-61** |
+| PA-61 | **Segunda interfaz en la matriz de despliegue.** Un sensor con una sola tarjeta **no puede** emitir: la que vigila suele ser receive-only | 🔴 **Abierto, bloquea PA-42** — RPT-031 §2 |
+| PA-62 | Syslog sobre TLS | 🟡 Abierto — RPT-031 §6 |
+| PA-63 | Autenticidad de la alerta emitida | 🟡 Abierto — RPT-031 §6 |
+| ~~PA-43~~ | ~~Manejadores de `consultar-alertas` y `obtener-condiciones`~~ | ✅ Cerrado 6-ago-2026 — RPT-028. **Abre PA-56** |
+| ~~PA-56~~ | ~~Persistencia del registro de evidencia~~ | ✅ Cerrado 6-ago-2026 — RPT-029. **Abre PA-57, PA-58 y PA-59** |
+| ~~PA-57~~ | ~~Anclaje del extremo de la cadena fuera del fichero~~ | ✅ Cerrado 6-ago-2026 — RPT-033. **Abre PA-64** |
+| ~~PA-64~~ | ~~Anclar el extremo fuera de la máquina~~ (reformulado desde «firmar el ancla») | ✅ Cerrado 8-ago-2026 — RPT-038. **Abre PA-70 y PA-71**. La firma local se descartó: la clave viviría donde el atacante escribe |
+| PA-70 | **Fichero de sólo-anexado en Linux** (`chattr +a`). Defensa en profundidad: detiene a quien escribe sin ser root | 🟡 Abierto — RPT-038 §3. Depende de PA-40 |
+| ~~PA-72~~ | ~~El techo de asientos no se comprobaba al anexar~~ | ✅ Cerrado 8-ago-2026 — RPT-039 §1. Superarlo dejaba el registro ilegible y el arranque siguiente lo acusaba de manipulación |
+| ~~PA-73~~ | ~~Nadie cuenta las pruebas que se ejecutan~~ | ✅ Cerrado 8-ago-2026 — RPT-039 §8. `cargo xtask cobertura`. Tres cifras, no dos: las condicionadas por `#[cfg]` quedan declaradas fuera de la vigilancia |
+| PA-71 | **Sellado del ancla en elemento seguro** (TPM 2.0 / SE). Lo único que aísla la clave del sistema de ficheros | 🟡 Abierto — RPT-038 §3. Condición de BOM, con PA-61 |
+| ~~PA-58~~ | ~~Cablear la persistencia en el recorrido del agente~~ | ✅ Cerrado 6-ago-2026 — RPT-030. **Abre PA-60** |
+| PA-60 | **Anexado incremental del registro.** Reformulado por RPT-034 §1.1: con persistencia por ciclo deja de ser correctitud y pasa a ser **rendimiento** | 🟡 Abierto — RPT-030 §5, RPT-034 §1.1 |
+| PA-65 | **Unidad de servicio y arranque automático.** Va con PA-12 y PA-39 | 🟡 Abierto — RPT-034 §6 |
+| ~~PA-66~~ | ~~Bucle de servicio~~ | ✅ Cerrado 6-ago-2026 — RPT-036. **Abre PA-68** |
+| ~~PA-68~~ | ~~Probar el ciclo, no sólo sus piezas~~ | ✅ Cerrado 6-ago-2026 — RPT-037. **Abre PA-69**. Encontró la reemisión del historial completo en cada vuelta |
+| ~~PA-69~~ | ~~La evidencia en riesgo no tiene canal~~ | ✅ Cerrado 9-ago-2026 — RPT-044. Octava condición `evidenciaEnRiesgo`, reintento mientras haya sucio y asiento `persistencia-restablecida` **al recuperar** |
+| ~~PA-67~~ | ~~Servicio continuo~~ | ✅ Cerrado 6-ago-2026 — RPT-034, RPT-035 y RPT-036. **No cierra PA-41**: ese es la cifra del intervalo, y sigue sin medir |
+| ~~PA-59~~ | ~~Rotación del registro~~ | ✅ Cerrado 8-ago-2026 — RPT-040, vía C (segmentación). **Abre PA-74**. La poda por política queda para la vía B, cuando la retención esté decidida |
+| ~~PA-74~~ | ~~Una consulta tras rotar parece completa y no lo es~~ | ✅ Cerrado 8-ago-2026 — RPT-041. `{ primerDisponible, sucesos }`, leído del disco en cada consulta. **Abre PA-75** |
+| ~~PA-75~~ | ~~La paridad valida esquemas, no usos~~ | ✅ Cerrado 8-ago-2026 — RPT-042, frontera TypeScript. **Abre PA-76**. Encontró además que el manifiesto seguía declarando `lista<SucesoAlerta>` |
+| ~~PA-76~~ | ~~La paridad de uso no cubre Rust~~ | ✅ Cerrado 8-ago-2026 — RPT-043. Comprobacion **conductual**: se llama al manejador y se comparan las claves del JSON con lo declarado. No encontro nada |
 | PA-44 | ~~Agente mínimo que recorra captura → veredicto~~ | ✅ Cerrado 5-ago-2026 — RPT-020. **Habilita PA-40** |
-| PA-45 | Declaración de segmentos por identificador de VLAN | 🟡 Abierto — RPT-020 §7 |
+| ~~PA-45~~ | ~~Declaración de segmentos por identificador de VLAN~~ | ✅ Cerrado 6-ago-2026 — RPT-022. Fase 1: `FormatoObsoleto`; Fase 2: bloque firmado de VLAN. **Abre PA-48** |
+| ~~PA-48~~ | ~~Emisor de manifiestos~~ | ✅ Cerrado 6-ago-2026 — RPT-025 y RPT-026. **Abre PA-53 y PA-54** |
+| PA-53 | Lectura de la frase de paso sin eco en pantalla | 🟡 Abierto — RPT-026 §5 |
+| ~~PA-54~~ | ~~Generación y custodia de la clave de recuperación~~ | ✅ Cerrado 6-ago-2026 — RPT-027. Reparto 2-de-3 verificable. **Abre PA-55** |
+| PA-55 | Elevar el reparto a 3-de-5, o exigir dos custodios externos a la organización | 🟡 Abierto — RPT-027 §6 |
+| PA-52 | Techo de secuencia en el camino en memoria, no sólo en el analizador de fichero | 🟡 Abierto — RPT-025 §2 |
+| ~~PA-49~~ | ~~Aprovisionamiento de la clave de verificación en el agente~~ | ✅ Cerrado 6-ago-2026 — RPT-024. Dominio en el fichero, no en la ruta. **Abre PA-51** |
+| PA-50 | Custodia y rotación de la clave del cliente | 🟡 Abierto — RPT-023 §7 |
+| PA-51 | **Procedimiento e instrumentación del aprovisionamiento.** Hoy son dos ficheros copiados a mano sin comprobación | 🟡 Abierto — RPT-024 §7 |
 | ~~PA-38~~ | ~~Almacén de observación partido: volátil con expulsión, pegajoso sin ella~~ | ✅ Cerrado 5-ago-2026 — RPT-018 §6. **La saturación bloquea en lugar de olvidar** |
 | PA-39 | Privilegios de captura (`CAP_NET_RAW`) | 🟡 Abierto — RPT-018 §9 |
 | PA-27 | Reversión del inventario firmado y revocación de la clave del administrador | 🔵 **Parcial** 5-ago-2026 — RPT-012. Secuencia firmada y centinela; falta el ancla y la revocación |
@@ -481,32 +514,54 @@ Todo reporte incluye tabla de metadatos, sección de trazabilidad indicando qué
 | PA-25 | Distribución de la base OUI en Local-First | 🟡 Abierto — RPT-010 §9 |
 | PA-26 | Limpieza auditada de la ambigüedad pegajosa | 🟡 Abierto — RPT-010 §9. **Requisito, no mejora**, desde RPT-018 §6 |
 
+### 12.0 Reglas de alcance
+
+Dos límites que no son tareas y por eso no llevan número, pero que se reabren **sólo de forma explícita**.
+
+**`eje-agente` no corre en Windows.** `eje-captura` devuelve `PlataformaNoSoportada` fuera de Linux porque Npcap exige licencia OEM (RPT-003 §5.4). Si un cliente llegara a exigir agente nativo en Windows, eso **no es un objetivo de compilación**: reabre la compra de esa licencia, con su coste y su plazo. No se reabre de forma implícita bajo ninguna circunstancia.
+
+**La captura es AF_PACKET simple.** Ni `PACKET_MMAP` con anillos ni eBPF. `RutaCaptura::Ebpf` es una variante del enum sin implementación detrás, y RPT-018 §7 dejó los anillos fuera de la primera entrega a propósito: si el diseño no aguanta con lectura simple, tampoco aguantará con anillos. La diferencia de rendimiento en red cargada es de un orden de magnitud, así que conviene medirla antes de prometer capacidad.
+
 ### 12.1 Triaje
 
-De los 45 identificadores, **22 siguen abiertos o parciales** — 18 abiertos y 4 a medias. La tabla los mezcla y eso se lee peor de lo que el estado justifica: un tablero largo de puntos honestos parece un producto incompleto, cuando la mayoría no impide desplegar nada.
+El recuento vigente lo da `cargo xtask tablero`, que lo **lee** del tablero de arriba. Aquí no se transcribe: cuatro veces se resumió a mano y las cuatro reintrodujo puntos ya cerrados, que es precisamente por lo que existe el comando.
 
-> Las cifras de este apartado se contrastan con `cargo xtask tablero`, que las **lee** del tablero en lugar de recordarlas. La primera versión de esta frase decía 21 y el comando la corrigió el día que se escribió: los recuentos a mano fallan aunque las listas que los acompañan estén bien.
+Lo que sí conviene decir es la forma del saldo: la mayoría de lo pendiente **no impide desplegar nada**, y mezclarlo todo en una tabla larga hace parecer incompleto un producto que no lo está.
+
+> Este apartado llegó a llevar cifras escritas a mano. La primera decía 21 y el comando la corrigió el día que se escribió; la siguiente quedó desfasada al añadir PA-46 y PA-47 sin que nadie lo notara. Se han retirado: una cifra que envejece en silencio es peor que ninguna.
 
 Tres categorías, y la distinción no es técnica sino de decisión.
 
 **🔴 Bloquean el despliegue.** Sin esto el binario es un prototipo observable, no un producto.
 
+> **6-ago-2026: ninguno de los cinco se resuelve escribiendo Rust.** Cuatro esperan a algo externo —una máquina Linux, una compra, un repositorio, un permiso de despliegue— y el quinto, PA-12, es construible pero su resultado no se puede verificar sin las plataformas de destino y depende de PA-14a y PA-46 para significar algo.
+>
+> Es un cambio de naturaleza, no de tamaño. Durante veinte reportes el cuello de botella fue lo que faltaba por escribir; ahora es lo que falta por comprar y por montar. Conviene decirlo porque la lista de 🟡 sigue siendo larga y puede leerse como si quedara mucha ingeniería: la que queda no bloquea.
+
 | ID | Por qué bloquea |
 |---|---|
-| PA-45 | Toda VLAN etiquetada se trata igual, así que la clasificación por segmento —autoridad de todo el modelo desde RPT-009 §5— opera sobre una entrada que no significa nada |
-| PA-43 | Las alertas no llegan a nadie. Detectar y no comunicar equivale a no detectar |
 | PA-40 | El agente nunca ha leído una trama real |
-| PA-14 | **Cadena de firma de releases.** No se puede entregar a un cliente un agente sin firmar que además le pide confiar en firmas |
+| PA-14a | **Certificado de firma de código.** No se puede entregar a un cliente un agente sin firmar que además le pide confiar en firmas |
+| PA-46 | **Repositorio firmado para Linux.** `eje-captura` sólo funciona en Linux, así que el agente **no tiene otra plataforma** |
 | PA-12 | Sin empaquetador no hay nada que instalar |
 | PA-39 | Sin `CAP_NET_RAW` resuelto, el agente no captura en el sitio del cliente |
+| PA-61 | Un sensor con **una sola tarjeta de red** no puede emitir alertas: la interfaz que vigila suele ser receive-only. Es condición de compra del hardware, y descubrirlo en planta es caro |
+
+> Esta tabla decía «PA-14» a secas cuando RPT-021 ya lo había partido, y le faltaban PA-46 y PA-47 —añadidos por ese mismo reporte sin pasar por aquí—. Lo que destapó la deriva fue cuadrar el recuento del comando contra la suma de estas tres listas.
+>
+> Pero al mirar por qué no cuadraban apareció algo peor, y en el comando: `identificador_de` se detenía en los dígitos, así que **`PA-14`, `PA-14a` y `PA-14c` colapsaban en un solo identificador** y la deduplicación conservaba el primero — la fila cerrada del padre. El comando escondía un bloqueante y un punto abierto, que es exactamente el fallo que existe para impedir. Corregido en 6-ago-2026 con `un_punto_partido_no_se_come_a_sus_hijos` y una comprobación contra el tablero real.
 
 **🟡 Deuda conocida, asumible con los ojos abiertos.** Empeoran el perfil de riesgo sin impedir que el producto funcione. Desplegar con estos abiertos es decisión de negocio, no fallo de ingeniería.
 
-PA-08, PA-13, PA-15, PA-18, PA-19, PA-25, PA-26, PA-27, PA-28, PA-30, PA-36, PA-37, PA-41, PA-42.
+PA-08, PA-13, PA-14c, PA-15, PA-18, PA-19, PA-25, PA-26, PA-27, PA-28, PA-30, PA-36, PA-37, PA-41, PA-47, PA-50, PA-51, PA-52, PA-53, PA-55, PA-59, PA-60, PA-62, PA-63, PA-65, PA-70, PA-71.
+
+> **6-ago-2026.** El servicio continuo se llamó PA-41 durante dos reportes. PA-41 ya existía desde RPT-019 §8 —el intervalo de consulta— y no es lo mismo: el demonio es el mecanismo, PA-41 es la cifra, y RPT-034 §5.4 dice que no está medida. El demonio pasa a PA-67. Los identificadores se asignan escribiendo prosa, y ahí `cargo xtask tablero` no llega.
+
+De estos, **PA-26, PA-28 y PA-64 son los que se degradan con el uso o dejan una frontera abierta**: la mitad pegajosa crece sin límite, y tanto el centinela del inventario como el ancla de la evidencia siguen siendo rebobinables por quien controle el almacén.
 
 De estos, **PA-26 y PA-28 son los que se degradan con el uso** —la mitad pegajosa crece sin límite y el centinela sigue siendo rebobinable—, así que su plazo no es indefinido aunque no bloqueen hoy.
 
-**🔵 Dependen de terceros.** La ingeniería está hecha; la tasa de avance es cero hasta que alguien externo actúe.
+**🔵 Dependen de terceros.** La ingeniería está hecha; la tasa de avance es cero hasta que alguien externo actúe. **No son secundarios**: PA-09 es el oráculo contra el que se prueban los adaptadores de contención, y sin él ningún adaptador pasa de espejo a verificación (RPT-008 §2).
 
 | ID | Espera a |
 |---|---|
@@ -516,3 +571,17 @@ De estos, **PA-26 y PA-28 son los que se degradan con el uso** —la mitad pegaj
 ---
 
 *Reporte Nº 2 — Arquitectura Consolidada · PremosCorp · 4 de agosto de 2026 · Estado: Canónico*
+
+> **6-ago-2026 (II).** PA-68 no se cerró comprobando que el bucle seguía funcionando: se cerró encontrando un segundo defecto de la misma familia que el reloj congelado. `main.rs` consultaba las alertas a emitir con `desde_asiento: 0` **en cada vuelta**, de modo que en modo continuo el SIEM del cliente habría recibido el historial completo de alertas una vez por ciclo, indefinidamente. Correcto en un recorrido de una pasada; inservible en un demonio. Los dos defectos comparten causa: código escrito para ejecutarse una vez, ejecutándose muchas.
+
+> **8-ago-2026.** PA-64 se cerró cambiándole el objetivo, no cumpliéndolo. Decía «sellar criptográficamente el ancla» para cerrar la manipulación local por quien tiene permisos de escritura, y una firma local no cierra eso: la clave privada tendría que vivir, disponible sin intervención humana, en el mismo disco que el atacante escribe. Además habría dado al agente una capacidad de firma que RPT-015 y RPT-024 le negaron a propósito. Lo que cierra el vector es que el extremo salga de la máquina. Queda dicho aquí porque un punto cerrado con el enunciado original habría dejado escrito que el hueco está tapado.
+
+> **8-ago-2026 (II).** PA-72 salió de mirar PA-59, no de buscarlo. `ASIENTOS_MAXIMOS` sólo se comprobaba en `analizar` —al leer—, así que un agente que superara los 500 000 asientos escribía un fichero que él mismo no podía releer, y el arranque siguiente lo apartaba como evidencia de manipulación. Es la tercera vez en dos días que un defecto aparece **al mover código, no al revisarlo**: el reloj congelado de RPT-036 §3, la reemisión del historial de RPT-037 §3 y éste. Los tres eran correctos ejecutándose una vez.
+
+> **8-ago-2026 (III).** PA-74 estuvo a punto de darse por cerrado con el tipo declarado y el contrato del puente devolviendo todavía un array. Las dos pruebas de paridad pasaban: comprueban que los campos coinciden entre manifiesto y código, no que alguien use el registro declarado. Es un hueco de la barrera de PA-20 y queda como PA-75. Van siete veces esta semana que aparece un mecanismo sin cablear; la única novedad es que esta vez se vio antes de escribir «cerrado».
+
+> **8-ago-2026 (IV).** Al construir la barrera de PA-75 apareció que `contrato-ipc.toml` —la fuente de verdad— seguía declarando `forma = "lista<SucesoAlerta>"` para `consultar-alertas`. Se habían cambiado Rust, TypeScript, los campos de ambos lados y la firma del puente; no la declaración del canal. La prueba que existía comprobaba que el canal apareciera en el manifiesto, no que su forma correspondiera con algo. Van ocho piezas sin cablear esta semana, y ésta estaba en el documento que gobierna a las demás.
+
+> **8-ago-2026 (V).** PA-76 es el primero de nueve en el que la barrera nueva **no encuentra nada**: el manejador ya servia lo que el manifiesto declara. Queda anotado con el mismo enfasis que los ocho hallazgos anteriores, porque un registro que solo destaca cuando caza algo mide el entusiasmo de quien escribe y no el estado del sistema.
+
+> **9-ago-2026.** PA-69 tenía dos partes y el enunciado sólo nombraba una. La visible era que la pérdida no llegaba a VIS-04; la de fondo era que **la guarda de escritura sólo miraba si esa vuelta había anexado**, así que un fallo transitorio dejaba las alertas en memoria hasta la amenaza siguiente. Y queda un caso sin cerrar en local: si el proceso muere durante el fallo, la única prueba está en el colector, donde el sello dejó de avanzar.

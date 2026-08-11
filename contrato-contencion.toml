@@ -233,12 +233,61 @@ significado = "La huella o el OUI apuntan a un equipo critico sin marcado que lo
 nombre = "EvidenciaNoVerificable"
 significado = "Una fuente DECLARATIVA no respondio, o el inventario no verifica. Una firma invalida o una inclusion no probada no son 'marcado ausente': son manipulacion, y se distinguen de la ausencia."
 
+# ---------------------------------------------------------------------------
+# NATURALEZA DE SEGMENTO — RPT-022, PA-45
+# ---------------------------------------------------------------------------
+#
+# Lo que un administrador puede DECLARAR de una VLAN. Son dos valores, no tres:
+# "no declarado" no se codifica, porque su representacion es la AUSENCIA de
+# registro. Anadir un codigo para el daria dos formas de decir lo mismo, que es
+# la ambiguedad que el rechazo de bytes sobrantes cierra en el resto del formato.
+#
+# La declaracion viaja DENTRO del manifiesto firmado. Un fichero de configuracion
+# aparte seria editable sin romper firma alguna, y la edicion util para un
+# atacante es de una sola linea: declarar limpia la VLAN clinica.
+#
+# El codigo 0 queda reservado y se rechaza: un bloque de ceros no debe analizarse
+# como una tabla de declaraciones validas.
+
+[[naturaleza_segmento]]
+nombre = "SinDispositivosCriticos"
+codigo = 1
+significado = "El administrador declara que el segmento no aloja equipos criticos. Es la UNICA declaracion que concede contencion automatica a un equipo sin marcado."
+caduca = true
+
+[[naturaleza_segmento]]
+nombre = "PuedeAlojarCriticos"
+codigo = 2
+significado = "Segmento clinico, de planta o similar. Equivalente en efecto a la ausencia de declaracion, pero dicho por un humano."
+caduca = true
+
+[segmento]
+# Rango declarable. El VID 0 es "etiquetado solo por prioridad, sin pertenencia a
+# VLAN" y el 4095 esta reservado por la norma. Admitir el 0 permitiria declarar
+# limpio un no-segmento y conceder contencion a cualquiera que emita tramas con
+# prioridad, que es una condicion trivial de cumplir.
+vlan_minima = 1
+vlan_maxima = 4094
+# La etiqueta VLAN es la palabra del conmutador solo sobre espejo de puertos de
+# ACCESO. Sobre espejo de troncal, quien esta en el cable elige su etiqueta.
+#
+# La asimetria sorprende y por eso se escribe: fingir estar en una VLAN limpia te
+# vuelve contenible —nadie lo hace—; fingir estar en una critica te vuelve
+# ambiguo y por tanto incontenible sin un humano. La declaracion de segmento es
+# un vector de EVASION, no de contencion excesiva. Igual que la MAC.
+etiqueta_fiable_solo_en_espejo_de_acceso = true
+
 [clasificacion]
 # Vigencia por defecto de un marcado, en dias. Un parque cambia; un marcado de
 # hace tres anos describe un equipo que quiza ya no esta.
 vigencia_marcado_dias = 365
 # Un segmento sin declaracion se trata como si pudiera alojar criticos.
 segmento_no_declarado_admite_criticos = true
+# Vigencia por defecto de una declaracion de segmento, en dias. Caduca por el
+# mismo motivo que el marcado y con mas urgencia: la declaracion peligrosa es
+# "este segmento esta limpio", y es justo la que nadie vuelve a revisar el dia
+# que se conecta un carro de telemedicina a la VLAN administrativa.
+vigencia_segmento_dias = 365
 
 # ---------------------------------------------------------------------------
 # POLITICA POR PERFIL

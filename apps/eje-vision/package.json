@@ -23,6 +23,7 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "dependency-cruiser": "^16.0.0",
+    "electron": "^43.3.0",
     "typescript": "^5.7.0"
   }
 }

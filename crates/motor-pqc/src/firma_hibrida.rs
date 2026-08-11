@@ -23,8 +23,9 @@ use ed25519_dalek::{
 };
 use ed25519_dalek::{Signer as _, Verifier as _};
 use ml_dsa::{
-    EncodedSignature, Generate as _, Keypair as _, MlDsa65, Signature as FirmaMlDsa, Signer as _,
-    SigningKey as PrivadaMlDsa, Verifier as _, VerifyingKey as PublicaMlDsa,
+    EncodedSignature, EncodedVerifyingKey, Generate as _, Keypair as _, MlDsa65,
+    Signature as FirmaMlDsa, Signer as _, SigningKey as PrivadaMlDsa, Verifier as _,
+    VerifyingKey as PublicaMlDsa,
 };
 use rand_core::CryptoRng;
 
@@ -36,6 +37,9 @@ pub const ALGORITMO: &str = "ed25519+ml-dsa-65";
 
 /// Longitud en bytes de una firma Ed25519.
 pub const LONGITUD_FIRMA_CLASICA: usize = 64;
+
+/// Longitud en bytes de una clave de verificacion Ed25519.
+pub const LONGITUD_PUBLICA_CLASICA: usize = 32;
 
 /// Clave de firma híbrida.
 pub struct ClaveFirmaHibrida {
@@ -67,6 +71,65 @@ impl ClaveVerificacionHibrida {
         let mut salida = self.poscuantica.encode().to_vec();
         salida.extend_from_slice(self.clasica.as_bytes());
         salida
+    }
+
+    /// Longitud total de una clave de verificacion serializada.
+    ///
+    /// Se deriva del tipo y no se escribe a mano, por el mismo motivo que
+    /// [`FirmaHibrida::longitud_serializada`].
+    #[must_use]
+    pub fn longitud_serializada() -> usize {
+        EncodedVerifyingKey::<MlDsa65>::default().len() + LONGITUD_PUBLICA_CLASICA
+    }
+
+    /// Reconstruye una clave de verificacion a partir de su serializacion.
+    ///
+    /// # Por que esta funcion si existe y la de la clave privada no
+    ///
+    /// Esto es material **publico**. Su simetrica para [`ClaveFirmaHibrida`]
+    /// seria la funcion que permite al material privado salir del proceso, y esa
+    /// no existe a proposito: RPT-021 §3 obliga a que la clave de firma no sea
+    /// exportable, y RPT-023 §3 resuelve la persistencia del emisor guardando
+    /// una semilla y re-derivando el par, no serializando la clave.
+    ///
+    /// # Errores
+    ///
+    /// [`ErrorPqc::ClaveInvalida`] si la longitud no es exactamente
+    /// [`Self::longitud_serializada`], si la componente poscuantica no decodifica
+    /// o si la clasica no es un punto valido de la curva.
+    ///
+    /// La longitud se exige **exacta**: aceptar una entrada mas larga y quedarse
+    /// con el prefijo dejaria bytes sin interpretar en un fichero que el modelo
+    /// de amenazas asume manipulable.
+    pub fn desde_bytes(bytes: &[u8]) -> Result<Self, ErrorPqc> {
+        let longitud_pq = EncodedVerifyingKey::<MlDsa65>::default().len();
+
+        if bytes.len() != longitud_pq + LONGITUD_PUBLICA_CLASICA {
+            return Err(ErrorPqc::ClaveInvalida {
+                algoritmo: ALGORITMO,
+            });
+        }
+
+        let (parte_pq, parte_clasica) = bytes.split_at(longitud_pq);
+
+        let codificada = EncodedVerifyingKey::<MlDsa65>::try_from(parte_pq).map_err(|_| {
+            ErrorPqc::ClaveInvalida {
+                algoritmo: ALGORITMO,
+            }
+        })?;
+
+        let mut bruta = [0u8; LONGITUD_PUBLICA_CLASICA];
+        bruta.copy_from_slice(parte_clasica);
+
+        Ok(Self {
+            poscuantica: PublicaMlDsa::<MlDsa65>::decode(&codificada),
+            // Ed25519 valida aqui que los bytes sean un punto de la curva. No es
+            // una formalidad: una clave publica invalida haria fallar toda
+            // verificacion posterior con un error que no nombraria la causa.
+            clasica: PublicaEd25519::from_bytes(&bruta).map_err(|_| ErrorPqc::ClaveInvalida {
+                algoritmo: ALGORITMO,
+            })?,
+        })
     }
 }
 

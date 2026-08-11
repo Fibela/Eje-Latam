@@ -8,7 +8,9 @@
 #![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
 
 use super::{
-    Canal, ErrorIpc, LONGITUD_MAXIMA_MARCO, PREFIJO_LONGITUD, autorizar, desenmarcar, enmarcar,
+    CODIGO_RECHAZO, CODIGO_RESPUESTA, Canal, ErrorIpc, LONGITUD_MAXIMA_MARCO, NOMBRE_MAXIMO,
+    PREFIJO_LONGITUD, PREFIJO_NOMBRE, autorizar, componer_peticion, componer_rechazo,
+    descomponer_peticion, desenmarcar, enmarcar,
 };
 
 /// Lee el manifiesto desde la raíz del workspace.
@@ -107,6 +109,65 @@ fn el_limite_de_marco_coincide_con_el_manifiesto() {
 // ---------------------------------------------------------------------------
 // Autorización
 // ---------------------------------------------------------------------------
+
+#[test]
+fn la_forma_de_la_peticion_coincide_con_el_manifiesto() {
+    // RPT-035. Este bloque del manifiesto faltaba: declaraba QUE canales existen
+    // y QUE campos lleva cada carga, pero no COMO viaja el nombre por el cable.
+    // Mientras no hubo transporte no se noto; al escribir el servicio, cada
+    // extremo habria tenido que inventarlo.
+    let contenido = manifiesto();
+
+    for esperado in [
+        format!("prefijo_nombre = {PREFIJO_NOMBRE}"),
+        format!("nombre_maximo = {NOMBRE_MAXIMO}"),
+        format!("codigo_respuesta = {CODIGO_RESPUESTA}"),
+        format!("codigo_rechazo = {CODIGO_RECHAZO}"),
+    ] {
+        assert!(
+            contenido.contains(&esperado),
+            "el manifiesto debe declarar '{esperado}'; una forma distinta en cada \
+             extremo permite que un lado acepte lo que el otro rechaza"
+        );
+    }
+}
+
+#[test]
+fn la_peticion_es_reversible_y_autoriza_al_descomponer() {
+    for canal in Canal::TODOS {
+        let peticion = componer_peticion(canal, b"carga").expect("el canal esta permitido");
+        let (leido, util) = descomponer_peticion(&peticion).expect("se descompone");
+
+        assert_eq!(leido, canal);
+        assert_eq!(util, b"carga");
+    }
+}
+
+#[test]
+fn un_nombre_prefijado_absurdo_no_llega_a_indexar() {
+    let mut absurdo = Vec::new();
+    absurdo.extend_from_slice(&u16::MAX.to_be_bytes());
+    absurdo.extend_from_slice(b"corto");
+
+    assert_eq!(
+        descomponer_peticion(&absurdo),
+        Err(ErrorIpc::CanalNoPermitido)
+    );
+    assert!(NOMBRE_MAXIMO < u16::MAX as usize);
+}
+
+#[test]
+fn el_rechazo_nunca_falla_al_componerse() {
+    // Quien rechaza ya esta en el camino de error. Un fallo al construir el
+    // mensaje de fallo dejaria al otro extremo sin respuesta ninguna, que es lo
+    // unico inaceptable.
+    let enorme = "x".repeat(LONGITUD_MAXIMA_MARCO * 2);
+    let rechazo = componer_rechazo(&enorme);
+
+    assert_eq!(rechazo[0], CODIGO_RECHAZO);
+    assert!(rechazo.len() <= LONGITUD_MAXIMA_MARCO);
+    assert!(enmarcar(&rechazo).is_ok(), "y siempre cabe en un marco");
+}
 
 #[test]
 fn los_canales_permitidos_se_admiten() {
@@ -214,10 +275,10 @@ fn un_prefijo_malicioso_no_provoca_reserva() {
 
 use crate::mensajes::{
     CAMPOS_CONDICIONES, CAMPOS_ESTADO_AGENTE, CAMPOS_ESTADO_BOVEDA, CAMPOS_NODO_INVENTARIO,
-    CAMPOS_PETICION_ALERTAS, CAMPOS_PETICION_CONSULTA, CAMPOS_RESULTADO_CONSULTA,
-    CAMPOS_SUCESO_ALERTA, ClaseAlerta, ClaseDispositivo, Condiciones, EstadoAgente, EstadoBoveda,
-    NodoInventario, PerfilSegmento, PeticionAlertas, PeticionConsulta, Postura, ResultadoConsulta,
-    SucesoAlerta,
+    CAMPOS_PETICION_ALERTAS, CAMPOS_PETICION_CONSULTA, CAMPOS_RESPUESTA_ALERTAS,
+    CAMPOS_RESULTADO_CONSULTA, CAMPOS_SUCESO_ALERTA, ClaseAlerta, ClaseDispositivo, Condiciones,
+    EstadoAgente, EstadoBoveda, NodoInventario, PerfilSegmento, PeticionAlertas, PeticionConsulta,
+    Postura, ResultadoConsulta, SucesoAlerta,
 };
 
 /// Campo declarado en el manifiesto.
@@ -314,6 +375,7 @@ fn los_registros_coinciden_con_el_manifiesto() {
     comprobar_registro("PeticionAlertas", &CAMPOS_PETICION_ALERTAS);
     comprobar_registro("SucesoAlerta", &CAMPOS_SUCESO_ALERTA);
     comprobar_registro("Condiciones", &CAMPOS_CONDICIONES);
+    comprobar_registro("RespuestaAlertas", &CAMPOS_RESPUESTA_ALERTAS);
 }
 
 #[test]
@@ -396,19 +458,31 @@ fn las_constantes_estan_atadas_a_los_structs() {
         inventario_no_verifica,
         observacion_saturada,
         captura_con_perdida,
+        accion_administrativa,
+        salida_no_disponible,
+        registro_saturado,
+        evidencia_en_riesgo,
     } = Condiciones {
         inventario_suprimido: false,
         inventario_no_verifica: false,
         observacion_saturada: false,
         captura_con_perdida: false,
+        accion_administrativa: false,
+        salida_no_disponible: false,
+        registro_saturado: false,
+        evidencia_en_riesgo: false,
     };
     let _ = (
         inventario_suprimido,
         inventario_no_verifica,
         observacion_saturada,
         captura_con_perdida,
+        accion_administrativa,
+        salida_no_disponible,
+        registro_saturado,
+        evidencia_en_riesgo,
     );
-    assert_eq!(CAMPOS_CONDICIONES.len(), 4);
+    assert_eq!(CAMPOS_CONDICIONES.len(), 8);
 }
 
 #[test]
@@ -418,8 +492,13 @@ fn las_condiciones_distinguen_lo_degradado_de_lo_normal() {
         inventario_no_verifica: false,
         observacion_saturada: false,
         captura_con_perdida: false,
+        accion_administrativa: false,
+        salida_no_disponible: false,
+        registro_saturado: false,
+        evidencia_en_riesgo: false,
     };
     assert!(!normal.hay_degradacion());
+    assert!(!normal.hay_manipulacion());
 
     // Cada condicion basta por si sola: no hay ninguna que sea «menos grave».
     for degradada in [
@@ -439,8 +518,74 @@ fn las_condiciones_distinguen_lo_degradado_de_lo_normal() {
             captura_con_perdida: true,
             ..normal
         },
+        Condiciones {
+            accion_administrativa: true,
+            ..normal
+        },
+        Condiciones {
+            registro_saturado: true,
+            ..normal
+        },
+        Condiciones {
+            evidencia_en_riesgo: true,
+            ..normal
+        },
     ] {
         assert!(degradada.hay_degradacion(), "{degradada:?}");
+    }
+}
+
+#[test]
+fn la_manipulacion_no_se_confunde_con_la_accion_administrativa() {
+    // RPT-028 §2. Un formato obsoleto o una instalacion a medias exigen
+    // reemitir o aprovisionar; una supresion o una firma rota exigen respuesta
+    // a incidente. Que VIS-04 las presente igual es como se ensena a un
+    // operador a ignorar la segunda.
+    let normal = Condiciones {
+        inventario_suprimido: false,
+        inventario_no_verifica: false,
+        observacion_saturada: false,
+        captura_con_perdida: false,
+        accion_administrativa: false,
+        salida_no_disponible: false,
+        registro_saturado: false,
+        evidencia_en_riesgo: false,
+    };
+
+    for manipulada in [
+        Condiciones {
+            inventario_suprimido: true,
+            ..normal
+        },
+        Condiciones {
+            inventario_no_verifica: true,
+            ..normal
+        },
+    ] {
+        assert!(manipulada.hay_manipulacion(), "{manipulada:?}");
+    }
+
+    // Las otras tres degradan sin acusar a nadie. La saturacion y la perdida
+    // tampoco: son limites del propio agente, no huellas de un tercero.
+    for degradada in [
+        Condiciones {
+            accion_administrativa: true,
+            ..normal
+        },
+        Condiciones {
+            observacion_saturada: true,
+            ..normal
+        },
+        Condiciones {
+            captura_con_perdida: true,
+            ..normal
+        },
+    ] {
+        assert!(degradada.hay_degradacion(), "{degradada:?}");
+        assert!(
+            !degradada.hay_manipulacion(),
+            "no hay indicio de que nadie tocara nada: {degradada:?}"
+        );
     }
 }
 

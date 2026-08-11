@@ -10,6 +10,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+eje-ipc = { path = "../crates/eje-ipc" }
 regex = "1"
 sha2 = "0.10"
 

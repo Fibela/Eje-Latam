@@ -28,8 +28,10 @@ pub mod combinador;
 pub mod conformidad;
 pub mod firma_hibrida;
 pub mod kem_hibrido;
+pub mod reparto;
 pub mod reposo;
 pub mod secreto;
+pub mod semilla;
 
 #[cfg(test)]
 mod pruebas;

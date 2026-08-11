@@ -201,3 +201,138 @@ pub fn desenmarcar(marco: &[u8]) -> Result<&[u8], ErrorIpc> {
             disponibles,
         })
 }
+
+// ---------------------------------------------------------------------------
+// Forma de la peticion y de la respuesta — RPT-035, PA-41
+// ---------------------------------------------------------------------------
+//
+// Este bloque faltaba y no se noto mientras no hubo transporte. El manifiesto
+// declaraba QUE canales existen y QUE campos lleva cada carga, pero no COMO
+// viaja el nombre del canal por el cable. Al escribir el servicio, cada extremo
+// habria tenido que inventarlo — que es lo que este contrato existe para
+// impedir.
+
+/// Bytes del prefijo que declara la longitud del nombre de canal.
+pub const PREFIJO_NOMBRE: usize = 2;
+
+/// Cota del nombre de canal, en bytes.
+///
+/// Ningun identificador declarado se acerca. La cota existe para que un prefijo
+/// absurdo no provoque una reserva absurda, por el mismo motivo que la del
+/// marco.
+pub const NOMBRE_MAXIMO: usize = 64;
+
+/// Primer byte de una respuesta valida.
+pub const CODIGO_RESPUESTA: u8 = 0;
+
+/// Primer byte de un rechazo, con el motivo en texto a continuacion.
+///
+/// # Por que hay codigo y no silencio
+///
+/// Un canal que devolviera bytes vacios ante un rechazo seria indistinguible de
+/// uno que devuelve una lista vacia. Es el tercer estado de RPT-006 §4 en el
+/// cable: «no hay nada» y «no pude decirtelo» no son lo mismo.
+pub const CODIGO_RECHAZO: u8 = 1;
+
+/// Compone la carga de una peticion: nombre de canal y carga util.
+///
+/// El nombre va **prefijado en longitud** y no delimitado por un separador: un
+/// separador obliga a decidir que pasa si aparece dentro del nombre, y esa
+/// decision no deberia existir.
+///
+/// # Errores
+///
+/// [`ErrorIpc::CanalNoPermitido`] si el canal no esta en la lista, o
+/// [`ErrorIpc::CargaExcesiva`] si la carga supera el limite.
+pub fn componer_peticion(canal: Canal, carga: &[u8]) -> Result<Vec<u8>, ErrorIpc> {
+    autorizar(canal.identificador(), carga.len())?;
+
+    let nombre = canal.identificador().as_bytes();
+    let mut salida = Vec::with_capacity(PREFIJO_NOMBRE + nombre.len() + carga.len());
+
+    // El identificador de un canal del enum nunca excede la cota; se convierte
+    // sin desenvolver por si algun dia deja de ser cierto.
+    let longitud = u16::try_from(nombre.len()).unwrap_or(u16::MAX);
+    salida.extend_from_slice(&longitud.to_be_bytes());
+    salida.extend_from_slice(nombre);
+    salida.extend_from_slice(carga);
+    Ok(salida)
+}
+
+/// Descompone la carga de una peticion en canal autorizado y carga util.
+///
+/// # Orden de comprobaciones
+///
+/// Cota del nombre, longitud disponible, y solo despues autorizacion. Nada se
+/// reserva en funcion de un valor sin validar, y **el canal se autoriza antes de
+/// que quien llame vea la carga**.
+///
+/// # Errores
+///
+/// [`ErrorIpc::PrefijoTruncado`] si no cabe el prefijo o el nombre,
+/// [`ErrorIpc::CanalNoPermitido`] si el nombre no es un canal de la lista o
+/// excede la cota, [`ErrorIpc::CargaExcesiva`] si la carga es mayor del limite.
+pub fn descomponer_peticion(carga: &[u8]) -> Result<(Canal, &[u8]), ErrorIpc> {
+    let Some(prefijo) = carga.get(..PREFIJO_NOMBRE) else {
+        return Err(ErrorIpc::PrefijoTruncado);
+    };
+
+    let mut bytes = [0u8; PREFIJO_NOMBRE];
+    bytes.copy_from_slice(prefijo);
+    let longitud = u16::from_be_bytes(bytes) as usize;
+
+    // La cota va antes de indexar: un nombre declarado de sesenta y cinco mil
+    // bytes no debe llegar siquiera a la comprobacion de limites.
+    if longitud > NOMBRE_MAXIMO {
+        return Err(ErrorIpc::CanalNoPermitido);
+    }
+
+    let Some(nombre) = carga.get(PREFIJO_NOMBRE..PREFIJO_NOMBRE + longitud) else {
+        return Err(ErrorIpc::PrefijoTruncado);
+    };
+
+    // Un nombre que no es UTF-8 no puede ser ninguno de los declarados, asi que
+    // se rechaza como canal desconocido y no como error de codificacion: el
+    // motivo que importa es que no esta permitido.
+    let Ok(nombre) = std::str::from_utf8(nombre) else {
+        return Err(ErrorIpc::CanalNoPermitido);
+    };
+
+    let util = &carga[PREFIJO_NOMBRE + longitud..];
+    let canal = autorizar(nombre, util.len())?;
+    Ok((canal, util))
+}
+
+/// Compone una respuesta valida.
+///
+/// # Errores
+///
+/// [`ErrorIpc::CargaExcesiva`] si la carga supera el limite.
+pub fn componer_respuesta(carga: &[u8]) -> Result<Vec<u8>, ErrorIpc> {
+    if carga.len() >= LONGITUD_MAXIMA_MARCO {
+        return Err(ErrorIpc::CargaExcesiva {
+            longitud: carga.len(),
+        });
+    }
+
+    let mut salida = Vec::with_capacity(1 + carga.len());
+    salida.push(CODIGO_RESPUESTA);
+    salida.extend_from_slice(carga);
+    Ok(salida)
+}
+
+/// Compone un rechazo con su motivo.
+///
+/// El motivo se **recorta** en lugar de fallar: quien rechaza ya esta en el
+/// camino de error, y un fallo al construir el mensaje de fallo dejaria al otro
+/// extremo sin respuesta ninguna.
+#[must_use]
+pub fn componer_rechazo(motivo: &str) -> Vec<u8> {
+    let bytes = motivo.as_bytes();
+    let hasta = bytes.len().min(LONGITUD_MAXIMA_MARCO - 1);
+
+    let mut salida = Vec::with_capacity(1 + hasta);
+    salida.push(CODIGO_RECHAZO);
+    salida.extend_from_slice(&bytes[..hasta]);
+    salida
+}

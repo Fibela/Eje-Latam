@@ -98,6 +98,49 @@ export interface Condiciones {
   readonly observacionSaturada: boolean;
   /** La captura perdió tramas y la vista de la red está incompleta. */
   readonly capturaConPerdida: boolean;
+  /**
+   * El almacén exige una acción del administrador, sin indicio de ataque.
+   *
+   * Cubre `FormatoObsoleto` (RPT-022) y `SinClaveAprovisionada` (RPT-024): dos
+   * estados que **exigen alerta y no son manipulación**. Su remedio es reemitir
+   * o aprovisionar, no responder a un incidente.
+   *
+   * VIS-04 debe presentarlo distinto de `inventarioSuprimido` y
+   * `inventarioNoVerifica`. Mezclarlos produce la fatiga de alertas que la
+   * Fase 1 de PA-45 existía para evitar.
+   */
+  readonly accionAdministrativa: boolean;
+  /**
+   * El colector de syslog no responde y la alerta no sale del equipo.
+   *
+   * **Es la única condición que no viaja también por syslog**: emitirla exigiría
+   * el canal que acaba de fallar. Llega sólo por este puente.
+   *
+   * VIS-04 debe mostrarla de forma prominente: mientras esté activa, el SIEM del
+   * cliente **no se está enterando de nada**, y esta interfaz es lo único que lo
+   * sabe.
+   */
+  readonly salidaNoDisponible: boolean;
+  /**
+   * El registro de evidencia está lleno y **ya no admite alertas**.
+   *
+   * RPT-039, PA-72. Es la más grave de las siete: las otras seis dicen que algo
+   * se ve peor, ésta dice que este sensor ha dejado de registrar amenazas.
+   *
+   * VIS-04 no debe presentarlo como manipulación —nadie tocó nada— pero tampoco
+   * como un aviso que pueda esperar. La libreta se acabó.
+   */
+  readonly registroSaturado: boolean;
+  /**
+   * Hay alertas anexadas que **sólo viven en memoria**.
+   *
+   * RPT-044, PA-69. La escritura a disco falló: las alertas existen y están
+   * completas, lo que no está es su durabilidad. Un corte de luz se las lleva.
+   *
+   * VIS-04 debe distinguirlo de `registroSaturado`: allí el sensor dejó de
+   * anotar; aquí anota y no consigue guardar.
+   */
+  readonly evidenciaEnRiesgo: boolean;
 }
 
 /**
@@ -130,7 +173,7 @@ export interface PuenteEje {
    * agente no inicia comunicación hacia el renderer, porque eso sería una
    * capacidad nueva y no un mensaje nuevo.
    */
-  consultarAlertas(desdeAsiento: number): Promise<readonly SucesoAlerta[]>;
+  consultarAlertas(desdeAsiento: number): Promise<RespuestaAlertas>;
 
   /** VIS-04 — estados degradados vigentes. */
   obtenerCondiciones(): Promise<Condiciones>;
@@ -227,11 +270,41 @@ export const CAMPOS_SUCESO_ALERTA = [
 ] as const satisfies readonly (readonly [keyof SucesoAlerta, string])[];
 
 /** Campos de [`Condiciones`]. */
+/**
+ * Respuesta de `consultar-alertas`.
+ *
+ * RPT-041, PA-74. Antes era un array desnudo. Tras la segmentación de PA-59 eso
+ * se convirtió en una vista parcial con apariencia de exhaustividad: quien pedía
+ * `desdeAsiento: 0` recibía el segmento activo sin forma de saber que había
+ * asientos archivados antes.
+ *
+ * VIS-04 debe presentar `primerDisponible > 1` como «el histórico anterior está
+ * archivado», nunca como «no hay más». Son cosas distintas y confundirlas es
+ * como un operador concluye que un incidente no ocurrió.
+ */
+export interface RespuestaAlertas {
+  /** Asiento más antiguo que sobrevive en disco. */
+  readonly primerDisponible: number;
+  /** Alertas de esta respuesta, desde `desdeAsiento` exclusive. */
+  readonly sucesos: readonly SucesoAlerta[];
+}
+
+export const CAMPOS_RESPUESTA_ALERTAS = [
+  ["primerDisponible", "entero"],
+  ["sucesos", "lista"],
+] as const satisfies readonly (readonly [keyof RespuestaAlertas, string])[];
+
+exigirCompleto<Faltantes<RespuestaAlertas, typeof CAMPOS_RESPUESTA_ALERTAS>>();
+
 export const CAMPOS_CONDICIONES = [
   ["inventarioSuprimido", "booleano"],
   ["inventarioNoVerifica", "booleano"],
   ["observacionSaturada", "booleano"],
   ["capturaConPerdida", "booleano"],
+  ["accionAdministrativa", "booleano"],
+  ["salidaNoDisponible", "booleano"],
+  ["registroSaturado", "booleano"],
+  ["evidenciaEnRiesgo", "booleano"],
 ] as const satisfies readonly (readonly [keyof Condiciones, string])[];
 
 // Comprobación de exhaustividad. Estas llamadas no producen código: si una

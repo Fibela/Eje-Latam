@@ -1,0 +1,106 @@
+{
+  "descripcion": "Vectores del formato de cable de eje-ipc. Generados por 'cargo xtask vectores-ipc'; NO editar a mano.",
+  "limites": {
+    "marcoMaximo": 1048576,
+    "prefijoLongitud": 4,
+    "prefijoNombre": 2,
+    "nombreMaximo": 64,
+    "codigoRespuesta": 0,
+    "codigoRechazo": 1
+  },
+  "peticiones": [
+    {
+      "nombre": "carga vacia en obtener-estado-agente",
+      "canal": "obtener-estado-agente",
+      "cargaHex": "",
+      "cuerpoHex": "00156f6274656e65722d65737461646f2d6167656e7465",
+      "marcoHex": "0000001700156f6274656e65722d65737461646f2d6167656e7465"
+    },
+    {
+      "nombre": "carga vacia en obtener-inventario",
+      "canal": "obtener-inventario",
+      "cargaHex": "",
+      "cuerpoHex": "00126f6274656e65722d696e76656e746172696f",
+      "marcoHex": "0000001400126f6274656e65722d696e76656e746172696f"
+    },
+    {
+      "nombre": "carga vacia en obtener-estado-boveda",
+      "canal": "obtener-estado-boveda",
+      "cargaHex": "",
+      "cuerpoHex": "00156f6274656e65722d65737461646f2d626f76656461",
+      "marcoHex": "0000001700156f6274656e65722d65737461646f2d626f76656461"
+    },
+    {
+      "nombre": "carga vacia en consultar-sandbox",
+      "canal": "consultar-sandbox",
+      "cargaHex": "",
+      "cuerpoHex": "0011636f6e73756c7461722d73616e64626f78",
+      "marcoHex": "000000130011636f6e73756c7461722d73616e64626f78"
+    },
+    {
+      "nombre": "carga vacia en consultar-alertas",
+      "canal": "consultar-alertas",
+      "cargaHex": "",
+      "cuerpoHex": "0011636f6e73756c7461722d616c6572746173",
+      "marcoHex": "000000130011636f6e73756c7461722d616c6572746173"
+    },
+    {
+      "nombre": "carga vacia en obtener-condiciones",
+      "canal": "obtener-condiciones",
+      "cargaHex": "",
+      "cuerpoHex": "00136f6274656e65722d636f6e646963696f6e6573",
+      "marcoHex": "0000001500136f6274656e65722d636f6e646963696f6e6573"
+    },
+    {
+      "nombre": "peticion de alertas tipica",
+      "canal": "consultar-alertas",
+      "cargaHex": "7b226465736465417369656e746f223a307d",
+      "cuerpoHex": "0011636f6e73756c7461722d616c65727461737b226465736465417369656e746f223a307d",
+      "marcoHex": "000000250011636f6e73756c7461722d616c65727461737b226465736465417369656e746f223a307d"
+    },
+    {
+      "nombre": "carga de 256 bytes con todos los valores",
+      "canal": "consultar-sandbox",
+      "cargaHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fa0001020304",
+      "cuerpoHex": "0011636f6e73756c7461722d73616e64626f78000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fa0001020304",
+      "marcoHex": "000001130011636f6e73756c7461722d73616e64626f78000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fa0001020304"
+    },
+    {
+      "nombre": "carga con byte nulo y con 0xff",
+      "canal": "consultar-alertas",
+      "cargaHex": "00ff00ff",
+      "cuerpoHex": "0011636f6e73756c7461722d616c657274617300ff00ff",
+      "marcoHex": "000000170011636f6e73756c7461722d616c657274617300ff00ff"
+    }
+  ],
+  "respuestas": [
+    {
+      "nombre": "respuesta con cuerpo vacio",
+      "clase": "respuesta",
+      "cuerpoHex": "",
+      "cargaHex": "00",
+      "marcoHex": "0000000100"
+    },
+    {
+      "nombre": "respuesta con json",
+      "clase": "respuesta",
+      "cuerpoHex": "7b227072696d6572446973706f6e69626c65223a312c2273756365736f73223a5b5d7d",
+      "cargaHex": "007b227072696d6572446973706f6e69626c65223a312c2273756365736f73223a5b5d7d",
+      "marcoHex": "00000024007b227072696d6572446973706f6e69626c65223a312c2273756365736f73223a5b5d7d"
+    },
+    {
+      "nombre": "rechazo con motivo ascii",
+      "clase": "rechazo",
+      "cuerpoHex": "63616e616c2073696e206d616e656a61646f72",
+      "cargaHex": "0163616e616c2073696e206d616e656a61646f72",
+      "marcoHex": "000000140163616e616c2073696e206d616e656a61646f72"
+    },
+    {
+      "nombre": "rechazo con motivo acentuado",
+      "clase": "rechazo",
+      "cuerpoHex": "656c20696e76656e746172696f206e6f2076657269666963613a20726576697369c3b36e2070656e6469656e7465",
+      "cargaHex": "01656c20696e76656e746172696f206e6f2076657269666963613a20726576697369c3b36e2070656e6469656e7465",
+      "marcoHex": "0000002f01656c20696e76656e746172696f206e6f2076657269666963613a20726576697369c3b36e2070656e6469656e7465"
+    }
+  ]
+}

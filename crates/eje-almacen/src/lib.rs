@@ -33,6 +33,7 @@
 pub mod cadena;
 pub mod esquema;
 pub mod merkle;
+pub mod persistencia;
 pub mod resumen;
 
 #[cfg(test)]
@@ -65,6 +66,20 @@ pub enum ErrorAlmacen {
     /// Se intento persistir un secreto en el registro de evidencia.
     #[error("los secretos no se almacenan en el registro de evidencia (RPT-003 §6.1)")]
     SecretoEnEvidencia,
+
+    /// El registro alcanzo el maximo de asientos que su formato admite.
+    ///
+    /// RPT-039 §1, PA-72. Antes de esto `anexar` no comprobaba nada: se seguia
+    /// anexando en memoria, se escribia el fichero entero, y **el arranque
+    /// siguiente no podia leerlo** porque `analizar` rechaza cualquier registro
+    /// por encima del maximo. Un registro ilegible se lee como
+    /// `ViolacionDetectada`, asi que el agente apartaba el fichero acusando de
+    /// manipulacion a nadie: solo habia trabajado demasiado tiempo.
+    #[error("el registro esta lleno: {maximo} asientos es el maximo del formato")]
+    CapacidadExcedida {
+        /// Maximo que admite el formato en disco.
+        maximo: usize,
+    },
 }
 
 /// Base de datos destino de una operacion.

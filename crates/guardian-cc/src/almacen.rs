@@ -30,12 +30,14 @@
 
 use eje_almacen::merkle::prueba_inclusion;
 
+use crate::clasificacion::DeclaracionSegmento;
 use crate::formato::{ErrorFormato, analizar};
 use crate::inventario::{
     Centinela, ClaveInventario, ErrorInventario, Inventario, MarcadoVerificado, RaizVerificada,
 };
 use crate::proveedores::{DireccionEnlace, ErrorProveedor, ProveedorInventario};
 use crate::revocacion::RegistroRevocaciones;
+use crate::vlan::{ErrorVlan, TablaVlanVerificada};
 
 /// Fallo al cargar el inventario desde el almacen local.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -47,12 +49,17 @@ pub enum ErrorCarga {
     /// El fichero esta bien formado pero no supera la verificacion.
     #[error(transparent)]
     Verificacion(#[from] ErrorInventario),
+
+    /// La tabla de segmentos no corresponde al manifiesto firmado.
+    #[error(transparent)]
+    Segmentos(#[from] ErrorVlan),
 }
 
 /// Inventario cargado y verificado, listo para consultarse.
 #[derive(Debug, Clone)]
 pub struct InventarioLocal {
     inventario: Inventario,
+    vlans: TablaVlanVerificada,
     raiz: RaizVerificada,
 }
 
@@ -79,8 +86,20 @@ impl InventarioLocal {
             revocaciones,
         )?;
 
+        // Por este camino la comprobacion no puede fallar: `analizar` derivo el
+        // resumen anclado de la misma tabla que aqui se presenta, y la firma ya
+        // lo cubrio. No sobra por eso.
+        //
+        // `TablaVlanVerificada` no tiene otro constructor, asi que ningun modulo
+        // futuro puede fabricar una tabla «verificada» a partir de otra fuente
+        // —un fichero de configuracion, una opcion de linea de ordenes— sin
+        // pasar por aqui. Es la misma disciplina que hace inconstruible un
+        // `MarcadoVerificado` sin su prueba de inclusion.
+        let vlans = TablaVlanVerificada::verificar_e_instanciar(fichero.vlans, &raiz)?;
+
         Ok(Self {
             inventario: fichero.inventario,
+            vlans,
             raiz,
         })
     }
@@ -95,6 +114,18 @@ impl InventarioLocal {
     #[must_use]
     pub fn entradas(&self) -> usize {
         self.inventario.marcados().len()
+    }
+
+    /// Numero de segmentos declarados.
+    #[must_use]
+    pub fn segmentos(&self) -> usize {
+        self.vlans.tabla().declaraciones().len()
+    }
+
+    /// Declaracion firmada para la etiqueta VLAN observada.
+    #[must_use]
+    pub fn declaracion_para(&self, vlan: Option<u16>, ahora: u64) -> DeclaracionSegmento {
+        self.vlans.declaracion_para(vlan, ahora)
     }
 }
 

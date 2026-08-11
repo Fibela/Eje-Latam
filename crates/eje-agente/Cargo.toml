@@ -18,6 +18,13 @@ tracing.workspace = true
 guardian-cc.workspace = true
 motor-pqc.workspace = true
 eje-almacen.workspace = true
+# El agente es el unico que tiene las dos mitades de la alerta: el registro de
+# evidencia y el contrato de cable. La traduccion vive aqui y no en
+# `guardian-cc`, que decide y no comunica (RPT-028 §1).
+eje-ipc = { path = "../eje-ipc" }
+# Serializacion de las respuestas del puente. El contrato de `eje-ipc` ya declara
+# los tipos con serde; esto solo los pone en el cable.
+serde_json = "1"
 boveda.workspace = true
 eje-red.workspace = true
 eje-captura.workspace = true

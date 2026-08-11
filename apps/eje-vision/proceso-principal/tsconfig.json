@@ -5,6 +5,6 @@
     "outDir": "dist",
     "types": ["node"]
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.cts"],
   "references": [{ "path": "../packages/eje-vision-base" }]
 }

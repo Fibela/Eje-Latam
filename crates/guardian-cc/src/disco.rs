@@ -43,9 +43,12 @@ pub enum ErrorDisco {
         ruta: String,
     },
 
-    /// El fichero supera [`LONGITUD_MAXIMA`].
-    #[error("el fichero supera los {LONGITUD_MAXIMA} bytes admitidos")]
-    Excesivo,
+    /// El fichero supera la cota que quien lee declaro.
+    #[error("el fichero supera los {cota} bytes admitidos")]
+    Excesivo {
+        /// Cota que se aplicaba a esta lectura.
+        cota: usize,
+    },
 
     /// Fallo del sistema de ficheros.
     #[error("fallo de entrada/salida en {ruta}: {detalle}")]
@@ -75,13 +78,35 @@ pub fn ruta_temporal(destino: &Path) -> PathBuf {
     destino.with_file_name(nombre)
 }
 
-/// Lee el inventario del disco con la longitud acotada.
+/// Lee el inventario del disco con la cota de [`LONGITUD_MAXIMA`].
+///
+/// # Errores
+///
+/// Las de [`leer_hasta`].
+pub fn leer(ruta: &Path) -> Result<Vec<u8>, ErrorDisco> {
+    leer_hasta(ruta, LONGITUD_MAXIMA)
+}
+
+/// Lee un fichero con la cota que quien llama declare.
+///
+/// # Por que la cota es un parametro
+///
+/// La primera version la fijaba en [`LONGITUD_MAXIMA`], que es la del inventario
+/// —ocho megabytes—. Al reutilizar esta funcion para el registro de evidencia
+/// (RPT-029), cuya cota son sesenta y cuatro, la lectura habria rechazado
+/// ficheros perfectamente validos **y el rechazo habria parecido una
+/// manipulacion**: quien mira el error ve «excesivo», no «te equivocaste de
+/// constante».
+///
+/// La alternativa era duplicar esta funcion en el otro crate con otra constante,
+/// que es como dos lectores con dos ideas de que es demasiado grande acaban
+/// discrepando.
 ///
 /// # Errores
 ///
 /// [`ErrorDisco::NoExiste`] si el fichero no esta, [`ErrorDisco::Excesivo`] si
-/// supera el limite, [`ErrorDisco::Entrada`] ante cualquier otro fallo.
-pub fn leer(ruta: &Path) -> Result<Vec<u8>, ErrorDisco> {
+/// supera `cota`, [`ErrorDisco::Entrada`] ante cualquier otro fallo.
+pub fn leer_hasta(ruta: &Path, cota: usize) -> Result<Vec<u8>, ErrorDisco> {
     let fichero = match File::open(ruta) {
         Ok(fichero) => fichero,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -97,12 +122,12 @@ pub fn leer(ruta: &Path) -> Result<Vec<u8>, ErrorDisco> {
     // la lectura.
     let mut contenido = Vec::new();
     fichero
-        .take(LONGITUD_MAXIMA as u64 + 1)
+        .take(cota as u64 + 1)
         .read_to_end(&mut contenido)
         .map_err(|error| error_de(ruta, &error))?;
 
-    if contenido.len() > LONGITUD_MAXIMA {
-        return Err(ErrorDisco::Excesivo);
+    if contenido.len() > cota {
+        return Err(ErrorDisco::Excesivo { cota });
     }
 
     Ok(contenido)
@@ -379,7 +404,10 @@ mod pruebas {
         let destino = directorio.junto("grande.inv");
         std::fs::write(&destino, vec![0u8; LONGITUD_MAXIMA + 1]).expect("se escribe");
 
-        assert!(matches!(leer(&destino), Err(ErrorDisco::Excesivo)));
+        assert!(matches!(leer(&destino), Err(ErrorDisco::Excesivo { .. })));
+
+        // Y la cota es de quien lee: el mismo fichero cabe con una mas holgada.
+        assert!(leer_hasta(&destino, LONGITUD_MAXIMA + 1).is_ok());
     }
 
     #[test]

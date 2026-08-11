@@ -56,7 +56,12 @@ const DOMINIO_MARCADO: &[u8] = b"eje-latam/agt-01/marcado-inventario/v1";
 ///
 /// Separado del anterior: sin esta etiqueta, una firma sobre 32 bytes
 /// cualesquiera podria reutilizarse como firma de raiz.
-const DOMINIO_RAIZ: &[u8] = b"eje-latam/agt-01/raiz-inventario/v1";
+///
+/// La `v2` corresponde a la incorporacion del resumen de la tabla de segmentos
+/// (RPT-022, PA-45). La estructura del mensaje ya bastaria para distinguirlas
+/// —hay un campo mas y todos van prefijados en longitud—, pero una etiqueta que
+/// miente sobre lo que cubre es deuda que se cobra en la siguiente revision.
+const DOMINIO_RAIZ: &[u8] = b"eje-latam/agt-01/raiz-inventario/v2";
 
 /// Dominio de custodia de una clave de verificacion.
 ///
@@ -233,15 +238,23 @@ const fn codigo_de_clase(clase: Option<ClaseExcluida>) -> u8 {
     }
 }
 
-/// Raiz de un inventario junto al numero de secuencia que lo fecha.
+/// Raiz de un inventario junto a la tabla de segmentos y la secuencia que lo
+/// fecha.
 ///
-/// Ambos viajan dentro del **mismo** mensaje firmado. Firmar la raiz por un lado
-/// y la secuencia por otro permitiria recombinar la raiz vieja con la secuencia
-/// nueva.
+/// Los tres viajan dentro del **mismo** mensaje firmado. Firmar la raiz por un
+/// lado y la secuencia por otro permitiria recombinar la raiz vieja con la
+/// secuencia nueva; dejar la tabla de segmentos fuera permitiria editarla sin
+/// romper ninguna firma, y la edicion util es de una sola linea —declarar limpia
+/// la VLAN clinica— (RPT-022 §2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RaizAnclada {
-    /// Raiz Merkle del inventario.
+    /// Raiz Merkle del inventario de marcados.
     pub raiz: Resumen,
+    /// Resumen canonico de la tabla de segmentos.
+    ///
+    /// Se ancla el resumen y no la tabla: el mensaje firmado tiene tamano fijo
+    /// independientemente de cuantos segmentos se declaren.
+    pub vlans: Resumen,
     /// Numero de secuencia, estrictamente creciente entre emisiones.
     pub secuencia: u64,
 }
@@ -250,7 +263,10 @@ pub struct RaizAnclada {
 #[must_use]
 pub fn mensaje_de_raiz(anclada: &RaizAnclada) -> Vec<u8> {
     let mut absorbedor = Absorbedor::nuevo(DOMINIO_RAIZ);
-    absorbedor.resumen(&anclada.raiz).entero(anclada.secuencia);
+    absorbedor
+        .resumen(&anclada.raiz)
+        .resumen(&anclada.vlans)
+        .entero(anclada.secuencia);
     absorbedor.finalizar().bytes().to_vec()
 }
 
@@ -402,6 +418,7 @@ impl Inventario {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RaizVerificada {
     raiz: Resumen,
+    vlans: Resumen,
     secuencia: u64,
 }
 
@@ -464,6 +481,7 @@ impl RaizVerificada {
 
         Ok(Self {
             raiz: anclada.raiz,
+            vlans: anclada.vlans,
             secuencia: anclada.secuencia,
         })
     }
@@ -499,6 +517,17 @@ impl RaizVerificada {
     #[must_use]
     pub const fn secuencia(&self) -> u64 {
         self.secuencia
+    }
+
+    /// Resumen de la tabla de segmentos que esta firma ancla.
+    ///
+    /// Lo consume
+    /// [`TablaVlanVerificada::verificar_e_instanciar`](crate::vlan::TablaVlanVerificada::verificar_e_instanciar),
+    /// que es el unico modo de convertir una tabla leida de disco en una tabla
+    /// utilizable.
+    #[must_use]
+    pub const fn vlans(&self) -> Resumen {
+        self.vlans
     }
 }
 
