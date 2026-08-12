@@ -5,7 +5,33 @@
 **Fecha:** 11 de agosto de 2026
 **Área designada:** Agente
 **Entidad:** PremosCorp
-**Estado:** **Diseño. Pendiente de ratificación.**
+**Estado:** **Ratificado, implementado y verificado por observación.** Cierra PA-81; abre PA-91
+
+## Observación (12 de agosto de 2026)
+
+Arrancando con `--interfaz noexiste`:
+
+```text
+$ ps aux | grep -c "[e]je-agente"   → 3   (vivo)
+$ ls -ln /tmp/eje/agente.sock       → srw-rw---- 1 0 1000
+{"...","capturaNoDisponible":true,"accionAdministrativa":true,"..."}
+```
+
+El agente que antes moría llevándose la escucha se declara ciego y sigue
+contestando. La condición sale además por syslog con la gravedad más alta
+(`EMISIBLES`, §2), que es lo único que hace admisible que siga vivo.
+
+### PA-91 — la barrera que falta
+
+`Condiciones` creció a nueve campos y `EMISIBLES` se quedó en siete durante
+varios turnos sin que **ninguna prueba protestara**. Y si se hubiera olvidado la
+línea de `valor_de`, tampoco: `EMISIBLES` nombraría la condición, `valor_de`
+devolvería `None` y no se emitiría jamás, en silencio.
+
+Las ocho emisibles son las nueve condiciones menos `salidaNoDisponible` —la que
+no puede emitirse por definición— y esa relación no la comprueba nadie. Es la
+misma familia que PA-20 y PA-75.
+
 
 - **Depende de:** RPT-034 (servicio continuo), RPT-036 (rechazo con motivo), RPT-046 (observación real)
 - **Aborda:** PA-81

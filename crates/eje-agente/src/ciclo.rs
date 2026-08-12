@@ -163,6 +163,24 @@ impl<D: Despacho> Ciclo<D> {
         }
     }
 
+    /// Declara si el sensor esta observando. RPT-047 §4, PA-81.
+    ///
+    /// # Por que es un interruptor y no un dato del almacen
+    ///
+    /// Que la captura este abierta es un hecho de fuera del ciclo: lo sabe quien
+    /// intenta abrirla. El almacen solo sabe de lo que llego, y **lo que llego
+    /// cuando nadie mira es identico a lo que llega en una red tranquila**: cero
+    /// tramas. Sin este interruptor las dos situaciones son indistinguibles
+    /// desde dentro, y el panel pintaria una observacion normal con el sensor
+    /// ciego.
+    ///
+    /// Se fija en cada vuelta, antes de la vuelta, incluso cuando no cambia: un
+    /// estado que solo se fija al cambiar es un estado que se queda pegado si
+    /// alguien olvida el camino de vuelta.
+    pub const fn declarar_captura(&mut self, disponible: bool) {
+        self.captura_no_disponible = !disponible;
+    }
+
     /// Registro tal como esta ahora.
     #[must_use]
     pub const fn registro(&self) -> &RegistroEvidencia {
@@ -386,7 +404,12 @@ impl<D: Despacho> Ciclo<D> {
         // conoce— y el resultado del envio lo rellena despues.
         // `salidaNoDisponible` no viaja nunca por syslog, asi que el orden no
         // altera lo que sale (RPT-032 §4).
-        let base = condiciones(estado, &self.almacen, &self.registro, self.captura_no_disponible);
+        let base = condiciones(
+            estado,
+            &self.almacen,
+            &self.registro,
+            self.captura_no_disponible,
+        );
         let mut salida_bien = self
             .emisor
             .as_mut()

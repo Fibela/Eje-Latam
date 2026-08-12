@@ -333,7 +333,19 @@ fn ejecutar() -> Result<(), ErrorAgente> {
         }
     };
 
-    let mut fuente = abrir(&opciones.interfaz)?;
+    // RPT-047, PA-81. `abrir` deja de propagarse con `?`.
+    //
+    // Antes, un fallo de captura mataba el proceso y se llevaba la escucha que
+    // se acababa de abrir tres lineas mas arriba. El momento en que mas falta
+    // hace la consola era justo aquel en que el agente ya no estaba.
+    let mut fuente = match abrir(&opciones.interfaz) {
+        Ok(fuente) => Some(fuente),
+        Err(error) => {
+            println!("Captura            : NO DISPONIBLE ({error})");
+            println!("  !! ESTE SENSOR NO ESTA OBSERVANDO. Se reintenta cada vuelta.");
+            None
+        }
+    };
 
     // PA-68. El ciclo vive en la biblioteca, donde se puede ejercitar N vueltas
     // en pruebas sin levantar un demonio. Aqui queda solo lo que exige una
@@ -350,12 +362,39 @@ fn ejecutar() -> Result<(), ErrorAgente> {
         // argumento, con lo que congelarlo dejo de poder hacerse por descuido.
         let instante = ahora();
 
+        // Reintento por vuelta. Una interfaz que aparece tarde —arranque del
+        // sistema, cable reconectado— debe recuperarse sola, sin que nadie
+        // reinicie el agente.
+        if fuente.is_none() {
+            if let Ok(recuperada) = abrir(&opciones.interfaz) {
+                println!("Captura            : RESTABLECIDA");
+                fuente = Some(recuperada);
+            }
+        }
+
         let mut observaciones: Vec<Observacion> = Vec::new();
         let mut ilegibles = 0u64;
+        let mut perdida: Option<String> = None;
         let inicio = Instant::now();
 
         while (observaciones.len() as u64) < opciones.tramas {
-            let Some(trama) = fuente.siguiente(PLAZO)? else {
+            // La fuente puede no existir (nunca abrio) o desaparecer en marcha
+            // (alguien retiro la interfaz). Ninguno de los dos casos propaga:
+            // los dos se declaran y se reintentan.
+            let intento = match fuente.as_mut() {
+                Some(activa) => activa.siguiente(PLAZO),
+                None => break,
+            };
+
+            let siguiente = match intento {
+                Ok(valor) => valor,
+                Err(error) => {
+                    perdida = Some(error.to_string());
+                    break;
+                }
+            };
+
+            let Some(trama) = siguiente else {
                 // Red silenciosa. No es fallo, pero tampoco conviene esperar
                 // indefinidamente en un recorrido de comprobacion.
                 println!("(sin tramas en {PLAZO:?}; se detiene la observacion)");
@@ -382,10 +421,34 @@ fn ejecutar() -> Result<(), ErrorAgente> {
         // La perdida del nucleo se traslada al almacen ANTES de concluir nada:
         // sin esto, menos protocolos vistos se leerian como ausencia de riesgo
         // (RPT-018 §4).
-        let estadisticas = fuente.estadisticas()?;
-        if estadisticas.hay_perdida() {
+        //
+        // Sin captura NO se fabrican estadisticas en cero. Cero descartes dice
+        // «vista completa», y sin captura no hay vista completa: no hay vista.
+        // La ausencia se representa como ausencia y `capturaNoDisponible` es la
+        // que carga con el significado (RPT-047 §3).
+        let estadisticas = match fuente.as_ref() {
+            Some(activa) => Some(activa.estadisticas()?),
+            None => None,
+        };
+        if estadisticas
+            .as_ref()
+            .is_some_and(eje_captura::Estadisticas::hay_perdida)
+        {
             ciclo.anotar_perdida();
         }
+
+        if let Some(detalle) = perdida {
+            println!("Captura            : PERDIDA EN MARCHA ({detalle})");
+            fuente = None;
+        }
+
+        // Despues de capturar y en TODAS las vueltas, no solo al cambiar.
+        //
+        // El ciclo no puede deducir esto del almacen: cero tramas con la
+        // captura caida y cero tramas en una red tranquila son el MISMO dato.
+        // Un estado que solo se fija al cambiar se queda pegado el dia que
+        // alguien olvide el camino de vuelta.
+        ciclo.declarar_captura(fuente.is_some());
 
         let mut vistos: BTreeMap<DireccionEnlace, u64> = BTreeMap::new();
         for observacion in &observaciones {
@@ -400,15 +463,19 @@ fn ejecutar() -> Result<(), ErrorAgente> {
             inicio.elapsed()
         );
         println!("Tramas ilegibles   : {ilegibles}");
-        println!(
-            "Descartes del nucleo: {} (vista {})",
-            estadisticas.descartadas,
-            if estadisticas.hay_perdida() {
-                "INCOMPLETA"
-            } else {
-                "completa"
-            }
-        );
+        match &estadisticas {
+            Some(datos) => println!(
+                "Descartes del nucleo: {} (vista {})",
+                datos.descartadas,
+                if datos.hay_perdida() {
+                    "INCOMPLETA"
+                } else {
+                    "completa"
+                }
+            ),
+            // Ni «0» ni «completa»: no se sabe, porque no se miro.
+            None => println!("Descartes del nucleo: SIN CAPTURA (no hay vista)"),
+        }
         println!("Dispositivos       : {}", vistos.len());
         println!();
 

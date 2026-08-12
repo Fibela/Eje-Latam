@@ -275,11 +275,24 @@ impl Transicion {
 /// **`salidaNoDisponible` no figura**, y no por olvido: es la condicion que dice
 /// que no se puede emitir. Emitirla exigiria el canal que acaba de fallar.
 /// Viaja solo por IPC, que es donde VIS-04 la consulta (RPT-032 §4).
-const EMISIBLES: [(&str, bool); 7] = [
+const EMISIBLES: [(&str, bool); 8] = [
     ("inventarioSuprimido", true),
     ("inventarioNoVerifica", true),
     ("observacionSaturada", false),
     ("capturaConPerdida", false),
+    // RPT-047 §2, PA-81. La mas grave de las ocho, y la que justifica que el
+    // agente siga vivo cuando no puede capturar.
+    //
+    // Un proceso muerto lo reinicia el supervisor y alguien se entera. Un agente
+    // vivo que no observa puede pasar por sano durante meses: el proceso existe,
+    // el socket responde, el panel pinta. Cambiar «muere ruidosamente» por «vive
+    // en silencio» solo es admisible si esto sale por syslog con la gravedad de
+    // una amenaza incontenible.
+    //
+    // Con `false` aqui, las herramientas del cliente leerian una red muy
+    // tranquila mientras el sensor esta ciego. Ese es exactamente el fallo que
+    // este producto existe para no tener.
+    ("capturaNoDisponible", true),
     ("accionAdministrativa", false),
     // `registroSaturado` viaja con la gravedad de la manipulacion sin serlo. El
     // segundo campo no dice "esto es un ataque" sino "esto no puede esperar al
@@ -305,6 +318,7 @@ fn valor_de(condiciones: &Condiciones, identificador: &str) -> Option<bool> {
         "inventarioNoVerifica" => Some(condiciones.inventario_no_verifica),
         "observacionSaturada" => Some(condiciones.observacion_saturada),
         "capturaConPerdida" => Some(condiciones.captura_con_perdida),
+        "capturaNoDisponible" => Some(condiciones.captura_no_disponible),
         "accionAdministrativa" => Some(condiciones.accion_administrativa),
         "registroSaturado" => Some(condiciones.registro_saturado),
         "evidenciaEnRiesgo" => Some(condiciones.evidencia_en_riesgo),
@@ -535,5 +549,104 @@ impl<D: Despacho> Emisor<D> {
 
         self.anteriores = Some(*condiciones);
         todo_bien
+    }
+}
+
+#[cfg(test)]
+mod pruebas_emisibles {
+    #![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
+
+    use super::{Condiciones, EMISIBLES, valor_de};
+
+    /// Toda condicion sale al SIEM salvo la que no puede emitirse.
+    ///
+    /// # Por que existe esta prueba
+    ///
+    /// PA-91. `Condiciones` crecio a nueve campos y `EMISIBLES` se quedo en
+    /// siete durante varios turnos **sin que nada protestara**. El defecto no es
+    /// ruidoso: una condicion que no figura aqui se calcula, se sirve por el
+    /// puente, se pinta en VIS-04 — y no sale nunca hacia el SIEM del cliente.
+    /// Quien vigile por syslog vera una red tranquila.
+    ///
+    /// # Como obliga
+    ///
+    /// La desestructuracion es exhaustiva y **sin `..`**. Anadir un decimo campo
+    /// a `Condiciones` deja de compilar aqui, y quien lo anada tiene que decidir
+    /// a proposito si va al SIEM o si es otra excepcion. No se puede olvidar,
+    /// que es la unica forma de que no se olvide.
+    #[test]
+    fn toda_condicion_sale_al_siem_salvo_la_que_no_puede() {
+        let condiciones = Condiciones {
+            inventario_suprimido: true,
+            inventario_no_verifica: true,
+            observacion_saturada: true,
+            captura_con_perdida: true,
+            captura_no_disponible: true,
+            accion_administrativa: true,
+            salida_no_disponible: true,
+            registro_saturado: true,
+            evidencia_en_riesgo: true,
+        };
+
+        let Condiciones {
+            inventario_suprimido,
+            inventario_no_verifica,
+            observacion_saturada,
+            captura_con_perdida,
+            captura_no_disponible,
+            accion_administrativa,
+            salida_no_disponible,
+            registro_saturado,
+            evidencia_en_riesgo,
+        } = condiciones;
+
+        let todas = [
+            ("inventarioSuprimido", inventario_suprimido),
+            ("inventarioNoVerifica", inventario_no_verifica),
+            ("observacionSaturada", observacion_saturada),
+            ("capturaConPerdida", captura_con_perdida),
+            ("capturaNoDisponible", captura_no_disponible),
+            ("accionAdministrativa", accion_administrativa),
+            ("salidaNoDisponible", salida_no_disponible),
+            ("registroSaturado", registro_saturado),
+            ("evidenciaEnRiesgo", evidencia_en_riesgo),
+        ];
+
+        for (identificador, valor) in todas {
+            let emitida = EMISIBLES.iter().any(|(nombre, _)| *nombre == identificador);
+
+            // `valor_de` debe mapear EXACTAMENTE lo emisible: ni menos —una
+            // condicion que `EMISIBLES` nombra y `valor_de` no conoce se queda
+            // apagada para siempre, que es el aviso de su propia documentacion—
+            // ni mas, porque un mapeo que sobra sugiere que algo se emite y no
+            // se emite.
+            assert_eq!(
+                valor_de(&condiciones, identificador),
+                if emitida { Some(valor) } else { None },
+                "'{identificador}': `valor_de` y `EMISIBLES` no dicen lo mismo"
+            );
+
+            if identificador == "salidaNoDisponible" {
+                // La unica excepcion, y no es una decision de estilo: emitirla
+                // exigiria el canal que acaba de fallar. Llega solo por el
+                // puente, que es donde VIS-04 la consulta.
+                assert!(
+                    !emitida,
+                    "'salidaNoDisponible' no puede salir por el canal que fallo"
+                );
+            } else {
+                assert!(
+                    emitida,
+                    "'{identificador}' no figura en EMISIBLES: se calcula, se sirve \
+                     y NO llega al SIEM del cliente"
+                );
+            }
+        }
+
+        assert_eq!(
+            EMISIBLES.len(),
+            todas.len() - 1,
+            "EMISIBLES debe cubrir todas las condiciones menos salidaNoDisponible"
+        );
     }
 }
