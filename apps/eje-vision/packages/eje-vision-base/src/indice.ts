@@ -53,3 +53,12 @@ export type {
   ResumenPostura,
   Severidad,
 } from "./vistas/vis-04-panel-confianza-cero/indice.js";
+
+export {
+  PREFIJO_RECHAZO,
+  conDatos,
+  desdeFallo,
+  esObservacion,
+  listaVacia,
+} from "./vista/estado-panel.js";
+export type { EstadoPanel } from "./vista/estado-panel.js";
