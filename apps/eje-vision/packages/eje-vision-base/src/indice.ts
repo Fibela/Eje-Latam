@@ -62,3 +62,9 @@ export {
   listaVacia,
 } from "./vista/estado-panel.js";
 export type { EstadoPanel } from "./vista/estado-panel.js";
+
+export { leerSinAgente } from "./vista/sin-agente.js";
+export type { LecturaSinAgente } from "./vista/sin-agente.js";
+
+export { componerCabecera } from "./vista/cabecera.js";
+export type { Cabecera, Urgencia } from "./vista/cabecera.js";

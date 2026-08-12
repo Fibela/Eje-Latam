@@ -61,6 +61,45 @@ export class ErrorEnlace extends Error {
 }
 
 /**
+ * Causas de que una petición no obtenga respuesta.
+ *
+ * # Por qué hay un código además del texto
+ *
+ * PA-93. El texto de estos errores está escrito para un técnico —«el socket
+ * existe y no hay nadie escuchando»— y es exactamente lo que hace falta en un
+ * registro o en una terminal. En la pantalla de un operador de planta no sirve
+ * de nada.
+ *
+ * La traducción a lenguaje de operador **no se hace aquí**: hacerla aquí
+ * perdería el diagnóstico forense. Se hace en la capa base, que es donde vive la
+ * presentación, y necesita algo estable con lo que decidir. Ese algo es este
+ * código; el texto sigue viajando detrás, intacto.
+ *
+ * Un solo sitio decide la causa. Dos capas la leen a su manera.
+ */
+export const CAUSAS = {
+  /** El fichero del socket existe y no hay nadie detrás. */
+  sinEscucha: "sin-escucha",
+  /** El socket no existe en esa ruta. */
+  sinSocket: "sin-socket",
+  /** El socket existe y esta consola no puede abrirlo. */
+  sinPermiso: "sin-permiso",
+  /** El agente aceptó la conexión y no contestó a tiempo. */
+  sinRespuesta: "sin-respuesta",
+  /** El agente estaba y cerró sin responder. */
+  colgado: "colgado",
+  /** El conducto no se pudo ni abrir. */
+  noAbre: "no-abre",
+  /** Cualquier otro fallo del transporte. */
+  transporte: "transporte",
+} as const;
+
+/** Antepone la causa al texto, en un formato que la capa base sabe leer. */
+function conCausa(causa: string, texto: string): string {
+  return `[${causa}] ${texto}`;
+}
+
+/**
  * Traduce un fallo del conducto a algo que un técnico pueda accionar.
  *
  * ## Por qué esto no es cosmética
@@ -79,24 +118,29 @@ function diagnosticar(error: Error): string {
   const codigo = (error as { code?: unknown }).code;
 
   if (codigo === "ECONNREFUSED") {
-    return (
+    return conCausa(
+      CAUSAS.sinEscucha,
       "el socket existe y no hay nadie escuchando: el agente no está en " +
-      "marcha y dejó su fichero atrás. Arranca 'eje-agente'"
+        "marcha y dejó su fichero atrás. Arranca 'eje-agente'",
     );
   }
   if (codigo === "ENOENT") {
-    return "no existe el socket: el agente nunca llegó a abrirlo en esta ruta";
+    return conCausa(
+      CAUSAS.sinSocket,
+      "no existe el socket: el agente nunca llegó a abrirlo en esta ruta",
+    );
   }
   if (codigo === "EACCES") {
     // RPT-046, PA-82: el socket se crea en 0600. Si el agente corre como
     // servicio y la consola en la sesión del operador, esto es lo que pasa.
-    return (
+    return conCausa(
+      CAUSAS.sinPermiso,
       "sin permiso sobre el socket: el agente lo creó para su propio usuario " +
-      "y esta consola corre como otro (PA-82)"
+        "y esta consola corre como otro (PA-82)",
     );
   }
 
-  return `el conducto falló: ${error.message}`;
+  return conCausa(CAUSAS.transporte, `el conducto falló: ${error.message}`);
 }
 
 /**
@@ -131,7 +175,10 @@ export function pedir(
       cerrar();
       fallar(
         new ErrorEnlace(
-          `el agente no respondió a «${canal}» en ${esperaMs} ms`,
+          conCausa(
+            CAUSAS.sinRespuesta,
+            `el agente no respondió a «${canal}» en ${esperaMs} ms`,
+          ),
         ),
       );
     }, esperaMs);
@@ -155,7 +202,11 @@ export function pedir(
       conducto = abrir();
     } catch (error) {
       clearTimeout(vencimiento);
-      fallar(new ErrorEnlace(`no se pudo abrir el conducto: ${String(error)}`));
+      fallar(
+        new ErrorEnlace(
+          conCausa(CAUSAS.noAbre, `no se pudo abrir el conducto: ${String(error)}`),
+        ),
+      );
       return;
     }
 
@@ -198,7 +249,7 @@ export function pedir(
       // agente estaba y colgó— y el mensaje debe permitir distinguirlo.
       fallar(
         new ErrorEnlace(
-          `el agente cerró la conexión sin responder a «${canal}»` +
+          conCausa(CAUSAS.colgado, `el agente cerró la conexión sin responder a «${canal}»`) +
             (acumulador.pendientes > 0
               ? `; quedaron ${acumulador.pendientes} byte(s) de un marco incompleto`
               : ""),
