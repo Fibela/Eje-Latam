@@ -351,6 +351,22 @@ registro = "Condiciones"
 nombre = "capturaConPerdida"
 tipo = "booleano"
 
+# Anadido en RPT-047 (PA-81). El agente moria cuando la captura no podia
+# abrirse, y se llevaba la escucha con el: el momento en que mas falta hace la
+# consola era justo aquel en que el agente ya no estaba.
+#
+# No se reutiliza `capturaConPerdida`. Aquella dice «observo y se me escapan
+# tramas»; esta dice que no hay observacion. Colapsarlas es como un operador
+# concluye que en un segmento no paso nada, cuando nadie estaba mirando.
+#
+# El motivo —privilegios, interfaz inexistente, interfaz desaparecida— no viaja
+# en la condicion: va en el asiento de ALM-01 que anota la transicion y en la
+# linea de syslog, que es donde se diagnostica.
+[[campo]]
+registro = "Condiciones"
+nombre = "capturaNoDisponible"
+tipo = "booleano"
+
 # Anadido en RPT-028 (PA-43). Al cablear los manejadores aparecio que DOS
 # estados de arranque que exigen alerta no tenian por donde llegar al operador:
 # `FormatoObsoleto` (RPT-022, actualizacion rutinaria que caduco el inventario)

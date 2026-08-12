@@ -99,6 +99,21 @@ export interface Condiciones {
   /** La captura perdió tramas y la vista de la red está incompleta. */
   readonly capturaConPerdida: boolean;
   /**
+   * **No hay captura en absoluto**: este sensor no está observando.
+   *
+   * RPT-047, PA-81. Distinta de `capturaConPerdida`: aquélla dice que la vista
+   * es incompleta, ésta dice que no hay vista. VIS-04 no debe presentarlas
+   * juntas — un operador que las confunda concluirá que en ese segmento no pasó
+   * nada, cuando lo cierto es que nadie estaba mirando.
+   *
+   * Es la condición que debe verse antes que ninguna otra: mientras esté
+   * activa, todo lo demás que muestre el panel es de antes.
+   *
+   * El motivo —privilegios, interfaz inexistente, interfaz desaparecida— no
+   * viaja aquí: está en el asiento de ALM-01 que anota la transición.
+   */
+  readonly capturaNoDisponible: boolean;
+  /**
    * El almacén exige una acción del administrador, sin indicio de ataque.
    *
    * Cubre `FormatoObsoleto` (RPT-022) y `SinClaveAprovisionada` (RPT-024): dos
@@ -301,6 +316,7 @@ export const CAMPOS_CONDICIONES = [
   ["inventarioNoVerifica", "booleano"],
   ["observacionSaturada", "booleano"],
   ["capturaConPerdida", "booleano"],
+  ["capturaNoDisponible", "booleano"],
   ["accionAdministrativa", "booleano"],
   ["salidaNoDisponible", "booleano"],
   ["registroSaturado", "booleano"],

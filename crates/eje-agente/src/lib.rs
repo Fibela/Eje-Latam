@@ -269,7 +269,7 @@ mod pruebas {
             EstadoArranque::FormatoObsoleto { encontrada: 1 },
             EstadoArranque::SinClaveAprovisionada,
         ] {
-            let vigentes = condiciones(&estado, &observacion, &RegistroEvidencia::nuevo());
+            let vigentes = condiciones(&estado, &observacion, &RegistroEvidencia::nuevo(), false);
 
             assert!(vigentes.accion_administrativa, "{estado:?} debe avisar");
             assert!(
@@ -292,7 +292,7 @@ mod pruebas {
                 detalle: "prueba".to_owned(),
             },
         ] {
-            let vigentes = condiciones(&estado, &observacion, &RegistroEvidencia::nuevo());
+            let vigentes = condiciones(&estado, &observacion, &RegistroEvidencia::nuevo(), false);
 
             assert!(vigentes.hay_manipulacion());
             assert!(
@@ -310,6 +310,7 @@ mod pruebas {
             &EstadoArranque::PrimerArranque,
             &AlmacenObservacion::nuevo(),
             &RegistroEvidencia::nuevo(),
+            false,
         );
 
         assert!(!vigentes.hay_degradacion());
@@ -734,6 +735,7 @@ mod pruebas {
             inventario_no_verifica: false,
             observacion_saturada: false,
             captura_con_perdida: false,
+            captura_no_disponible: false,
             accion_administrativa: false,
             salida_no_disponible: false,
             registro_saturado: false,
@@ -1264,6 +1266,7 @@ mod pruebas {
             &EstadoArranque::PrimerArranque,
             &observacion,
             &RegistroEvidencia::nuevo(),
+            false,
         );
 
         assert!(vigentes.captura_con_perdida);

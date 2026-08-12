@@ -224,6 +224,36 @@ pub struct Condiciones {
     pub observacion_saturada: bool,
     /// La captura perdio tramas y la vista de la red esta incompleta.
     pub captura_con_perdida: bool,
+    /// **No hay captura en absoluto**: este sensor no esta observando.
+    ///
+    /// RPT-047, PA-81.
+    ///
+    /// # Por que no es `captura_con_perdida`
+    ///
+    /// Aquella dice «observo y se me escapan tramas»; la vista es **incompleta**.
+    /// Esta dice que no hay vista. Colapsarlas seria afirmar que se ve mal
+    /// cuando no se ve nada, y es como un operador concluye que en ese segmento
+    /// no paso nada (RPT-036 §6).
+    ///
+    /// # Por que el motivo no viaja aqui
+    ///
+    /// Privilegios, interfaz inexistente e interfaz desaparecida en marcha son
+    /// tres remedios distintos, y el motivo importa. Pero `Condiciones` describe
+    /// **lo que es verdad ahora**, con una forma uniforme que seis sitios
+    /// comprueban; un texto que carece de sentido mientras la condicion es falsa
+    /// no pertenece a esa forma.
+    ///
+    /// El motivo viaja donde se diagnostica: en el asiento de ALM-01 que anota
+    /// la transicion y en la linea de syslog. VIS-04 muestra que no se observa;
+    /// el porque esta a un clic, en el registro.
+    ///
+    /// # Y por que esto no puede parecer un agente sano
+    ///
+    /// Un proceso muerto lo reinicia el supervisor y alguien se entera. Un
+    /// agente vivo que no observa puede pasar por bueno durante meses. Por eso
+    /// esta condicion **se emite tambien por syslog con la gravedad mas alta**:
+    /// que el sensor deje de mirar es un incidente, no un aviso.
+    pub captura_no_disponible: bool,
     /// El almacen exige una accion del administrador, sin indicio de ataque.
     ///
     /// # Por que no cabe en las otras cuatro
@@ -286,6 +316,7 @@ impl Condiciones {
             || self.inventario_no_verifica
             || self.observacion_saturada
             || self.captura_con_perdida
+            || self.captura_no_disponible
             || self.accion_administrativa
             || self.salida_no_disponible
             || self.registro_saturado
@@ -353,11 +384,12 @@ pub const CAMPOS_RESPUESTA_ALERTAS: [(&str, &str); 2] =
     [("primerDisponible", "entero"), ("sucesos", "lista")];
 
 /// Campos de [`Condiciones`].
-pub const CAMPOS_CONDICIONES: [(&str, &str); 8] = [
+pub const CAMPOS_CONDICIONES: [(&str, &str); 9] = [
     ("inventarioSuprimido", "booleano"),
     ("inventarioNoVerifica", "booleano"),
     ("observacionSaturada", "booleano"),
     ("capturaConPerdida", "booleano"),
+    ("capturaNoDisponible", "booleano"),
     ("accionAdministrativa", "booleano"),
     ("salidaNoDisponible", "booleano"),
     ("registroSaturado", "booleano"),

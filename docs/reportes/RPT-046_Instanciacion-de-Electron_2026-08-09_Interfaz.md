@@ -241,6 +241,33 @@ Dos cosas para la próxima:
 - Node contabiliza esto como **`cancelled`, no como `fail`**. La línea de resumen
   decía `fail 0`. Quien mire sólo esa cifra da la suite por buena.
 
+### 11.4. PA-82 cerrado por observación, y la ventana abierta
+
+```text
+srw-rw---- 1 0 1000  /tmp/eje/agente.sock
+```
+
+Propietario `root`, grupo del operador, modo `0660`. El agente captura con
+privilegios; la consola conecta sin ellos. Es lo que RPT-002 §9.3 llamaba
+«socket Unix con ACL» y hasta hoy no existía.
+
+La ventana de Electron arrancó y pintó las nueve condiciones, con
+`accionAdministrativa` en rojo — el mismo `true` que el agente llevaba toda la
+tarde imprimiendo en su bucle, llegando por fin a una pantalla.
+
+Los **dos saltos** funcionaron a la vez: renderer → preload → proceso principal
+→ socket → agente, y vuelta.
+
+**Y un detalle que vale tanto como el cierre.** El puesto de diagnóstico
+distingue `undefined` de `false` y pinta «AUSENTE EN LA RESPUESTA» en rojo. La
+fila `capturaNoDisponible` mostró **`no`**, no «ausente»: el noveno campo
+añadido ese mismo día cruzó el cable entero, serializado por Rust y recibido por
+TypeScript, sin que nadie lo comprobara a mano.
+
+Un panel que pintara los campos ausentes como «no» habría dicho que todo iba
+bien exactamente igual. Esa distinción de una línea es la diferencia entre
+observar y suponer.
+
 ## 12. Puntos abiertos añadidos tras la observación
 
 | ID | Punto | Prioridad |

@@ -136,6 +136,11 @@ pub struct Ciclo<D> {
     /// cola aparte seria el agotamiento de memoria de RPT-018 §6 con otro nombre,
     /// y ademas con el disco lleno crecer empeora el siguiente intento.
     riesgo_desde: Option<u64>,
+    /// El sensor no esta observando. RPT-047, PA-81.
+    ///
+    /// Vive en el ciclo y no se deriva del almacen porque el almacen solo sabe
+    /// de lo que llego; que la captura no se pueda abrir es un hecho de fuera.
+    captura_no_disponible: bool,
 }
 
 impl<D: Despacho> Ciclo<D> {
@@ -154,6 +159,7 @@ impl<D: Despacho> Ciclo<D> {
             evidencia,
             perfil,
             riesgo_desde: None,
+            captura_no_disponible: false,
         }
     }
 
@@ -380,7 +386,7 @@ impl<D: Despacho> Ciclo<D> {
         // conoce— y el resultado del envio lo rellena despues.
         // `salidaNoDisponible` no viaja nunca por syslog, asi que el orden no
         // altera lo que sale (RPT-032 §4).
-        let base = condiciones(estado, &self.almacen, &self.registro);
+        let base = condiciones(estado, &self.almacen, &self.registro, self.captura_no_disponible);
         let mut salida_bien = self
             .emisor
             .as_mut()

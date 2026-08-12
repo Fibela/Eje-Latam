@@ -531,9 +531,16 @@ pub fn condiciones(
     estado: &EstadoArranque,
     observacion: &AlmacenObservacion,
     registro: &RegistroEvidencia,
+    captura_no_disponible: bool,
 ) -> Condiciones {
     Condiciones {
         salida_no_disponible: false,
+        // RPT-047, PA-81. Entra como PARAMETRO y no se rellena despues como
+        // `salida_no_disponible`: aquel se pospone porque es el resultado de
+        // emitir, y emitir necesita estas condiciones —seria circular—. Este no
+        // tiene esa excusa. Un campo que se fija despues es un campo que alguien
+        // olvidara fijar, y el olvido se lee como «la captura va bien».
+        captura_no_disponible,
         inventario_suprimido: matches!(estado, EstadoArranque::Supresion { .. }),
         inventario_no_verifica: matches!(estado, EstadoArranque::NoVerifica { .. }),
         observacion_saturada: observacion.pegajoso_saturado(),

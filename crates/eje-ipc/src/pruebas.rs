@@ -458,6 +458,7 @@ fn las_constantes_estan_atadas_a_los_structs() {
         inventario_no_verifica,
         observacion_saturada,
         captura_con_perdida,
+        captura_no_disponible,
         accion_administrativa,
         salida_no_disponible,
         registro_saturado,
@@ -467,6 +468,7 @@ fn las_constantes_estan_atadas_a_los_structs() {
         inventario_no_verifica: false,
         observacion_saturada: false,
         captura_con_perdida: false,
+        captura_no_disponible: false,
         accion_administrativa: false,
         salida_no_disponible: false,
         registro_saturado: false,
@@ -477,12 +479,13 @@ fn las_constantes_estan_atadas_a_los_structs() {
         inventario_no_verifica,
         observacion_saturada,
         captura_con_perdida,
+        captura_no_disponible,
         accion_administrativa,
         salida_no_disponible,
         registro_saturado,
         evidencia_en_riesgo,
     );
-    assert_eq!(CAMPOS_CONDICIONES.len(), 8);
+    assert_eq!(CAMPOS_CONDICIONES.len(), 9);
 }
 
 #[test]
@@ -492,6 +495,7 @@ fn las_condiciones_distinguen_lo_degradado_de_lo_normal() {
         inventario_no_verifica: false,
         observacion_saturada: false,
         captura_con_perdida: false,
+        captura_no_disponible: false,
         accion_administrativa: false,
         salida_no_disponible: false,
         registro_saturado: false,
@@ -516,6 +520,12 @@ fn las_condiciones_distinguen_lo_degradado_de_lo_normal() {
         },
         Condiciones {
             captura_con_perdida: true,
+            ..normal
+        },
+        // RPT-047. Sin esta entrada la prueba afirmaria «cada condicion basta
+        // por si sola» dejando fuera justo la que dice que el sensor no mira.
+        Condiciones {
+            captura_no_disponible: true,
             ..normal
         },
         Condiciones {
@@ -546,6 +556,7 @@ fn la_manipulacion_no_se_confunde_con_la_accion_administrativa() {
         inventario_no_verifica: false,
         observacion_saturada: false,
         captura_con_perdida: false,
+        captura_no_disponible: false,
         accion_administrativa: false,
         salida_no_disponible: false,
         registro_saturado: false,
@@ -578,6 +589,12 @@ fn la_manipulacion_no_se_confunde_con_la_accion_administrativa() {
         },
         Condiciones {
             captura_con_perdida: true,
+            ..normal
+        },
+        // RPT-047. Sin esta entrada la prueba afirmaria «cada condicion basta
+        // por si sola» dejando fuera justo la que dice que el sensor no mira.
+        Condiciones {
+            captura_no_disponible: true,
             ..normal
         },
     ] {
