@@ -18,6 +18,7 @@ export type {
   NodoInventario,
   PuenteEje,
   ResultadoConsulta,
+  RespuestaAlertas,
   SucesoAlerta,
 } from "./ipc/puente.js";
 export {
@@ -71,3 +72,11 @@ export type { Cabecera, Urgencia } from "./vista/cabecera.js";
 
 export { componerSucesos } from "./vista/sucesos.js";
 export type { VistaSucesos } from "./vista/sucesos.js";
+
+export {
+  BITACORA_INICIAL,
+  SUCESOS_EN_MEMORIA,
+  esperaSugerida,
+  incorporar,
+} from "./vista/bitacora.js";
+export type { Bitacora } from "./vista/bitacora.js";
