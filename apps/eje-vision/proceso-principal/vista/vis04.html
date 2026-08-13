@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Eje-Visión — VIS-04</title>
+    <!--
+      VIS-04. RPT-048.
+
+      Sin `<script>` en línea: la CSP de RPT-004 §6.1 no lleva 'unsafe-inline'.
+      Sin recursos remotos: 'connect-src none'. Todo sale de disco.
+
+      El orden del cuerpo NO es estético (RPT-048 §2). La cabecera va primero y
+      ocupa el ancho porque hay estados que cambian cómo hay que leer todo lo
+      demás; como fila número cinco de una tabla, invitarían a leer el resto
+      como si fuera actual.
+    -->
+    <style>
+      :root {
+        --fondo: #0e1116;
+        --texto: #d8dee4;
+        --tenue: #7d8895;
+        --grave: #f2385a;
+        --aviso: #e8a33d;
+        --calma: #3fb87f;
+      }
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 0;
+        padding: 1.5rem 2rem;
+        background: var(--fondo);
+        color: var(--texto);
+      }
+      h1 {
+        font-size: 0.85rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--tenue);
+        margin: 2rem 0 0.6rem;
+      }
+      h1:first-of-type { margin-top: 1.5rem; }
+
+      /* Ancho completo y arriba del todo. RPT-048 §2. */
+      .cabecera {
+        border-left: 4px solid var(--tenue);
+        padding: 0.9rem 1.1rem;
+        border-radius: 3px;
+        background: #161b22;
+      }
+      .cabecera.critica { border-color: var(--grave); background: #2a0f16; }
+      .cabecera.atencion { border-color: var(--aviso); background: #2a2110; }
+      .cabecera b { font-size: 1.15rem; display: block; }
+      .cabecera .detalle { color: var(--tenue); margin-top: 0.3rem; }
+
+      /* Mientras `datosDeAntes` esté activo, el resto se apaga. No es adorno:
+         es lo que impide leer un tablero congelado como el estado actual. */
+      body.de-antes main { opacity: 0.45; }
+      #marca-de-antes {
+        color: var(--grave);
+        font-size: 0.8rem;
+        margin-top: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      table { border-collapse: collapse; width: 100%; max-width: 46rem; }
+      td { padding: 0.3rem 0; border-bottom: 1px solid #1e242c; }
+      td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+      .activa { color: var(--grave); font-weight: 700; }
+      .inactiva { color: var(--calma); }
+      .roto { color: var(--aviso); font-weight: 700; }
+      .sin-dato { color: var(--tenue); font-style: italic; }
+
+      ul { list-style: none; padding: 0; max-width: 46rem; }
+      li { padding: 0.5rem 0; border-bottom: 1px solid #1e242c; }
+      .detalle { color: var(--tenue); font-size: 0.85rem; margin-top: 0.2rem; }
+      #salvedad, #salto {
+        color: var(--aviso);
+        font-size: 0.85rem;
+        margin: 0.5rem 0;
+        max-width: 46rem;
+      }
+      #salto { color: var(--grave); font-weight: 600; }
+      footer { color: var(--tenue); font-size: 0.75rem; margin-top: 2rem; }
+    </style>
+  </head>
+  <body>
+    <div class="cabecera" id="cabecera" hidden>
+      <b id="cabecera-titulo"></b>
+      <div class="detalle" id="cabecera-detalle"></div>
+    </div>
+    <div id="marca-de-antes" hidden>
+      Lo que sigue es de antes. No describe el estado actual del segmento.
+    </div>
+
+    <main>
+      <h1>Condiciones</h1>
+      <table id="condiciones"></table>
+
+      <h1>Alertas registradas</h1>
+      <p id="salto" hidden></p>
+      <p id="salvedad" hidden></p>
+      <ul id="sucesos"></ul>
+    </main>
+
+    <!--
+      PA-101. El texto inicial declara el estado ROTO, no un estado neutro.
+      Si el modulo no arranca —ruta mal, CSP, error de sintaxis— la ventana
+      pinta este HTML y nada mas, y hasta ahora eso era indistinguible de un
+      tablero sin datos. `vis04.js` lo sustituye en su primera vuelta; si nunca
+      lo sustituye, se lee.
+
+      Es RPT-006 §4 aplicado a la propia herramienta: no se sabe no es no hay.
+    -->
+    <footer>
+      Eje-Visión · VIS-04 ·
+      <span id="sello" class="roto">EL MÓDULO DE LA VISTA NO ARRANCÓ</span>
+    </footer>
+
+    <script type="module" src="./vis04.js"></script>
+  </body>
+</html>

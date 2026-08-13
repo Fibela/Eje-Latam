@@ -141,10 +141,14 @@ export async function arrancar(): Promise<void> {
     abrirConducto,
   );
 
+  // VIS-04 por omision; el puesto de diagnostico solo si se pide a proposito.
+  // Al reves seria un producto que arranca en modo desarrollo por descuido.
+  const vista = process.env["EJE_VISTA"] === "diagnostico" ? "indice.html" : "vis04.html";
+
   const ventana = await montarVentanaPrincipal(
     fabricar,
     join(AQUI, "preload.cjs"),
-    join(AQUI, "..", "vista", "indice.html"),
+    join(AQUI, "..", "vista", vista),
   );
 
   // La ventana nace con `show: false`; se enseña cuando hay algo que enseñar.
