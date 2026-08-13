@@ -375,13 +375,29 @@ pub struct RespuestaAlertas {
     /// desde el cero y recibe 10001 sabe que esos diez mil existieron y estan
     /// archivados — no perdidos, no inexistentes.
     pub primer_disponible: u64,
+    /// **La respuesta se corto**: hay asientos posteriores sin entregar.
+    ///
+    /// RPT-049, PA-96.
+    ///
+    /// `primer_disponible` cubria el lado antiguo —«lo de antes esta
+    /// archivado»— y nadie cubria el nuevo. Quien recibia 256 sucesos no tenia
+    /// forma de saber si eran todos o el principio de dos mil, salvo adivinar
+    /// por el tamano del lote.
+    ///
+    /// Acotar la respuesta **sin decirlo** convierte un rechazo ruidoso en una
+    /// lista silenciosamente incompleta, que es peor: el operador la lee como
+    /// el historico entero.
+    pub hay_mas: bool,
     /// Alertas que caben en esta respuesta, desde `desdeAsiento` exclusive.
     pub sucesos: Vec<SucesoAlerta>,
 }
 
 /// Campos de [`RespuestaAlertas`].
-pub const CAMPOS_RESPUESTA_ALERTAS: [(&str, &str); 2] =
-    [("primerDisponible", "entero"), ("sucesos", "lista")];
+pub const CAMPOS_RESPUESTA_ALERTAS: [(&str, &str); 3] = [
+    ("primerDisponible", "entero"),
+    ("hayMas", "booleano"),
+    ("sucesos", "lista"),
+];
 
 /// Campos de [`Condiciones`].
 pub const CAMPOS_CONDICIONES: [(&str, &str); 9] = [

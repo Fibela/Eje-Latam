@@ -377,7 +377,8 @@ impl<D: Despacho> Ciclo<D> {
                 &PeticionAlertas {
                     desde_asiento: avance,
                 },
-            );
+            )
+            .sucesos;
             // `consultar` filtra por `> desde_asiento`, asi que el ultimo asiento
             // del lote es estrictamente mayor que `avance` y el bucle progresa.
             let Some(ultimo) = lote.last() else { break };

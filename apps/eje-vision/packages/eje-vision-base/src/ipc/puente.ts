@@ -300,12 +300,21 @@ export const CAMPOS_SUCESO_ALERTA = [
 export interface RespuestaAlertas {
   /** Asiento más antiguo que sobrevive en disco. */
   readonly primerDisponible: number;
+  /**
+   * **La respuesta se cortó**: hay asientos posteriores sin entregar.
+   *
+   * RPT-049, PA-96. `primerDisponible` dice qué falta por detrás; esto dice qué
+   * falta por delante. VIS-04 no puede presentar la lista como el histórico
+   * entero mientras esto sea `true`.
+   */
+  readonly hayMas: boolean;
   /** Alertas de esta respuesta, desde `desdeAsiento` exclusive. */
   readonly sucesos: readonly SucesoAlerta[];
 }
 
 export const CAMPOS_RESPUESTA_ALERTAS = [
   ["primerDisponible", "entero"],
+  ["hayMas", "booleano"],
   ["sucesos", "lista"],
 ] as const satisfies readonly (readonly [keyof RespuestaAlertas, string])[];
 

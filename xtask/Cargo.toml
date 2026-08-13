@@ -11,6 +11,7 @@ authors.workspace = true
 
 [dependencies]
 eje-ipc = { path = "../crates/eje-ipc" }
+eje-almacen = { path = "../crates/eje-almacen" }
 regex = "1"
 sha2 = "0.10"
 

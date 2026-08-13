@@ -12,6 +12,7 @@
 mod cobertura;
 mod exclusion;
 mod guardian;
+mod sembrar;
 mod tablero;
 mod vectores;
 mod vectores_ipc;
@@ -43,6 +44,7 @@ fn main() -> ExitCode {
         "tablero" => ejecutar_tablero(),
         "cobertura" => ejecutar_cobertura(),
         "vectores-ipc" => ejecutar_vectores_ipc(),
+        "sembrar" => ejecutar_sembrar(&argumentos),
         "ayuda" | "--help" | "-h" => {
             ayuda();
             ExitCode::SUCCESS
@@ -270,6 +272,43 @@ fn ejecutar_cobertura() -> ExitCode {
 ///
 /// RPT-045 §3. El codificador de Rust es el que manda; el fichero es el ancla
 /// que impide que el cliente de TypeScript se desvie sin que nadie lo note.
+/// `cargo xtask sembrar <ruta> [cuantos]`
+///
+/// Fabrica un registro de evidencia para ejercitar la fragmentacion de marcos.
+/// Vive en `xtask` a proposito: es una herramienta de desarrollo y no se
+/// distribuye con el producto.
+fn ejecutar_sembrar(argumentos: &[String]) -> ExitCode {
+    let Some(ruta) = argumentos.get(1) else {
+        eprintln!("uso: cargo xtask sembrar <ruta-del-registro> [cuantos] [relleno]");
+        eprintln!("ejemplo: cargo xtask sembrar /tmp/eje/evidencia.alm 300 4000");
+        return ExitCode::FAILURE;
+    };
+
+    let Ok(cuantos) = argumentos
+        .get(2)
+        .map_or(Ok(2_000), |texto| texto.parse::<u64>())
+    else {
+        eprintln!("el numero de asientos debe ser un entero");
+        return ExitCode::FAILURE;
+    };
+
+    let Ok(relleno) = argumentos
+        .get(3)
+        .map_or(Ok(0), |texto| texto.parse::<usize>())
+    else {
+        eprintln!("el relleno debe ser un entero (bytes por asiento)");
+        return ExitCode::FAILURE;
+    };
+
+    match sembrar::sembrar(std::path::Path::new(ruta), cuantos, relleno) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn ejecutar_vectores_ipc() -> ExitCode {
     let raiz = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

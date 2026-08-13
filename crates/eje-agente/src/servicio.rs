@@ -165,12 +165,14 @@ impl Atiende for Manejadores<'_> {
                 let peticion: eje_ipc::mensajes::PeticionAlertas = serde_json::from_slice(carga)
                     .map_err(|error| format!("peticion de alertas ilegible: {error}"))?;
 
+                let lote = crate::alertas::consultar(self.registro, &peticion);
                 let respuesta = eje_ipc::mensajes::RespuestaAlertas {
                     primer_disponible: crate::alertas::primer_disponible(
                         self.evidencia,
                         self.registro,
                     ),
-                    sucesos: crate::alertas::consultar(self.registro, &peticion),
+                    hay_mas: lote.hay_mas,
+                    sucesos: lote.sucesos,
                 };
                 serde_json::to_vec(&respuesta)
                     .map_err(|error| format!("no se pudo serializar la respuesta: {error}"))

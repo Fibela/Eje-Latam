@@ -175,7 +175,7 @@ mod pruebas {
         // El hueco que PA-43 cierra: antes el veredicto se calculaba y no salia
         // de la funcion que lo calculaba.
         let registro = registro_con(1);
-        let sucesos = consultar(&registro, &PeticionAlertas { desde_asiento: 0 });
+        let sucesos = consultar(&registro, &PeticionAlertas { desde_asiento: 0 }).sucesos;
 
         assert_eq!(sucesos.len(), 1);
         assert_eq!(sucesos[0].asiento, 1);
@@ -195,7 +195,7 @@ mod pruebas {
         // no lo hace (RPT-019 §7.3).
         let registro = registro_con(5);
 
-        for suceso in consultar(&registro, &PeticionAlertas { desde_asiento: 0 }) {
+        for suceso in consultar(&registro, &PeticionAlertas { desde_asiento: 0 }).sucesos {
             let asiento = registro
                 .asiento(suceso.asiento)
                 .expect("el asiento debe existir en el registro");
@@ -211,7 +211,7 @@ mod pruebas {
         // consumidor que continua donde lo dejo viera la misma alerta dos veces,
         // y una alerta repetida ensena a ignorarlas.
         let registro = registro_con(5);
-        let sucesos = consultar(&registro, &PeticionAlertas { desde_asiento: 3 });
+        let sucesos = consultar(&registro, &PeticionAlertas { desde_asiento: 3 }).sucesos;
 
         assert_eq!(sucesos.len(), 2);
         assert_eq!(sucesos[0].asiento, 4);
@@ -219,16 +219,65 @@ mod pruebas {
     }
 
     #[test]
-    fn una_consulta_no_devuelve_mas_de_lo_que_cabe_en_un_marco() {
-        // Sin cota, pedir el registro entero chocaria contra el limite de
-        // `eje-ipc` y el consumidor no recibiria NADA en lugar de un lote.
+    fn una_consulta_no_devuelve_mas_asientos_de_los_que_marca_la_cota() {
+        // Renombrada en RPT-049. Antes se llamaba
+        // `una_consulta_no_devuelve_mas_de_lo_que_cabe_en_un_marco` y NO
+        // comprobaba eso: contaba elementos, no bytes. El nombre prometia la
+        // propiedad que el agente incumplia, que es la clase de prueba mas
+        // peligrosa que hay — la que hace creer que algo esta cubierto.
+        //
+        // La propiedad del marco la comprueba ahora la prueba de abajo.
         let registro = registro_con(SUCESOS_POR_CONSULTA as u64 + 10);
-        let sucesos = consultar(&registro, &PeticionAlertas { desde_asiento: 0 });
+        let lote = consultar(&registro, &PeticionAlertas { desde_asiento: 0 });
 
-        assert_eq!(sucesos.len(), SUCESOS_POR_CONSULTA);
+        assert_eq!(lote.sucesos.len(), SUCESOS_POR_CONSULTA);
+        assert!(lote.hay_mas, "quedaron diez fuera y hay que decirlo");
         assert_eq!(
-            sucesos[0].asiento, 1,
+            lote.sucesos[0].asiento, 1,
             "el lote empieza por el mas antiguo, no por el mas nuevo"
+        );
+    }
+
+    #[test]
+    fn una_respuesta_con_detalles_largos_sigue_cabiendo_en_un_marco() {
+        // PA-96, observado en campo (RPT-049). Con detalles de 4 KB, 256 sucesos
+        // ocupaban 1 071 690 bytes y `enmarcar` rechazaba la respuesta ENTERA.
+        // Como el cliente vuelve a pedir desde el mismo sitio, el rechazo se
+        // repetia para siempre: el canal de alertas quedaba inservible con la
+        // evidencia intacta en disco.
+        //
+        // Esta prueba enmarca la respuesta DE VERDAD. Contar elementos no habria
+        // detectado nada, que es exactamente lo que paso durante meses.
+        let mut registro = RegistroEvidencia::nuevo();
+        let detalle = "d".repeat(8 * 1024);
+        for numero in 1..=300u64 {
+            registro
+                .anexar(
+                    numero as i64,
+                    ClaseEvento::DeteccionAnomalia,
+                    "nodo",
+                    &detalle,
+                )
+                .expect("cabe en el registro");
+        }
+
+        let lote = consultar(&registro, &PeticionAlertas { desde_asiento: 0 });
+        assert!(lote.hay_mas, "con 300 asientos de 8 KB no caben todos");
+        assert!(!lote.sucesos.is_empty(), "tiene que entregar algo, no nada");
+
+        let respuesta = eje_ipc::mensajes::RespuestaAlertas {
+            primer_disponible: 1,
+            hay_mas: lote.hay_mas,
+            sucesos: lote.sucesos,
+        };
+        let cuerpo = serde_json::to_vec(&respuesta).expect("serializa");
+
+        // El camino real: componer la respuesta y enmarcarla. Si esto falla, el
+        // cliente recibe un rechazo en lugar de sus alertas.
+        let carga = eje_ipc::componer_respuesta(&cuerpo).expect("cabe como respuesta");
+        assert!(
+            eje_ipc::enmarcar(&carga).is_ok(),
+            "la respuesta no cabe en un marco: el canal quedaria inservible"
         );
     }
 
@@ -244,7 +293,11 @@ mod pruebas {
             .anexar(2, ClaseEvento::SelloEmitido, "agente", "sello")
             .expect("cabe");
 
-        assert!(consultar(&registro, &PeticionAlertas { desde_asiento: 0 }).is_empty());
+        assert!(
+            consultar(&registro, &PeticionAlertas { desde_asiento: 0 })
+                .sucesos
+                .is_empty()
+        );
 
         for asiento in registro.asientos() {
             assert!(suceso_desde(asiento).is_none());
@@ -338,7 +391,7 @@ mod pruebas {
             panic!("un registro recien escrito debe verificar");
         };
 
-        let sucesos = consultar(&recuperado, &PeticionAlertas { desde_asiento: 0 });
+        let sucesos = consultar(&recuperado, &PeticionAlertas { desde_asiento: 0 }).sucesos;
         assert_eq!(sucesos.len(), 3);
         assert_eq!(sucesos[2].asiento, 3);
         assert_eq!(sucesos[0].dispositivo, "00:1b:21:00:00:01");
@@ -352,7 +405,7 @@ mod pruebas {
         let mut registro = analizar(&serializar(&registro_con(2))).expect("verifica");
         anotar_incontenible(&mut registro, 9_000, &MAC, &incontenible());
 
-        let sucesos = consultar(&registro, &PeticionAlertas { desde_asiento: 2 });
+        let sucesos = consultar(&registro, &PeticionAlertas { desde_asiento: 2 }).sucesos;
 
         assert_eq!(sucesos.len(), 1);
         assert_eq!(sucesos[0].asiento, 3, "la serie no reinicia");

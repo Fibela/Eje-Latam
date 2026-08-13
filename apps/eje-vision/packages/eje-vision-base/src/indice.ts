@@ -68,3 +68,6 @@ export type { LecturaSinAgente } from "./vista/sin-agente.js";
 
 export { componerCabecera } from "./vista/cabecera.js";
 export type { Cabecera, Urgencia } from "./vista/cabecera.js";
+
+export { componerSucesos } from "./vista/sucesos.js";
+export type { VistaSucesos } from "./vista/sucesos.js";

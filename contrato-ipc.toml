@@ -322,6 +322,18 @@ registro = "RespuestaAlertas"
 nombre = "primerDisponible"
 tipo = "entero"
 
+# Anadido en RPT-049 (PA-96). `primerDisponible` cubria el lado antiguo —«lo de
+# antes esta archivado»— y nadie cubria el nuevo: quien recibia 256 sucesos no
+# tenia forma de saber si eran todos o el principio de dos mil.
+#
+# Acotar la respuesta sin decirlo convierte un rechazo ruidoso en una lista
+# silenciosamente incompleta, que es peor: el operador la lee como el historico
+# entero.
+[[campo]]
+registro = "RespuestaAlertas"
+nombre = "hayMas"
+tipo = "booleano"
+
 [[campo]]
 registro = "RespuestaAlertas"
 nombre = "sucesos"

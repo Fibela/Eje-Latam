@@ -1607,6 +1607,7 @@ dependencies = [
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "eje-almacen",
  "eje-ipc",
  "regex",
  "sha2",

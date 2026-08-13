@@ -498,16 +498,82 @@ pub fn suceso_desde(asiento: &Asiento) -> Option<SucesoAlerta> {
 /// alerta mas rapido de lo que VIS-04 consume acumularia en una cola que alguien
 /// tendria que acotar, y acotarla significa **descartar alertas**. Con consulta,
 /// el registro es la cola y ya esta acotado por disco.
+/// Espacio reservado para el envoltorio de la respuesta y el marco.
+///
+/// RPT-049, PA-96. El codigo de respuesta, el prefijo de longitud, las claves
+/// del objeto y `primerDisponible` ocupan mucho menos que esto; el margen es
+/// deliberadamente holgado porque equivocarse por defecto aqui vuelve a dejar el
+/// canal inservible, y equivocarse por exceso solo entrega unas alertas menos.
+const MARGEN_ENVOLTORIO: usize = 8 * 1024;
+
+/// Presupuesto de bytes para los sucesos de una respuesta.
+const PRESUPUESTO_SUCESOS: usize = eje_ipc::LONGITUD_MAXIMA_MARCO - MARGEN_ENVOLTORIO;
+
+/// Lo que cabe en una respuesta, y si quedo algo fuera.
+pub struct Lote {
+    /// Sucesos entregados.
+    pub sucesos: Vec<SucesoAlerta>,
+    /// Hay asientos posteriores que no caben en esta respuesta.
+    pub hay_mas: bool,
+}
+
+/// Manejador de `consultar-alertas`. Devuelve lo que **cabe**, y si quedo mas.
+///
+/// # Dos cotas, y la que faltaba
+///
+/// [`SUCESOS_POR_CONSULTA`] acota el numero de elementos. Eso era todo lo que
+/// habia, y no bastaba: con detalles largos, 256 sucesos se pasan del marco y
+/// `enmarcar` rechaza la respuesta entera. Como el cliente vuelve a pedir desde
+/// el mismo sitio, el rechazo se repite **para siempre** y el canal de alertas
+/// queda inservible, con la evidencia intacta en un disco al que nadie llega.
+///
+/// Se observo en campo (RPT-049, PA-96) y ninguna prueba lo veia, pese a que
+/// habia una llamada `una_consulta_no_devuelve_mas_de_lo_que_cabe_en_un_marco`.
+///
+/// # Por que se devuelve `hay_mas`
+///
+/// Acotar sin decirlo cambia un rechazo ruidoso por una lista silenciosamente
+/// incompleta, que es peor: el operador la lee como el historico entero.
 #[must_use]
-pub fn consultar(registro: &RegistroEvidencia, peticion: &PeticionAlertas) -> Vec<SucesoAlerta> {
-    registro
-        .asientos()
-        .iter()
+pub fn consultar(registro: &RegistroEvidencia, peticion: &PeticionAlertas) -> Lote {
+    let mut sucesos = Vec::new();
+    let mut gastado = 0usize;
+    let mut hay_mas = false;
+
+    for asiento in registro.asientos() {
         // Exclusivo: quien pide «desde el 7» ya tiene el 7.
-        .filter(|asiento| asiento.numero > peticion.desde_asiento)
-        .filter_map(suceso_desde)
-        .take(SUCESOS_POR_CONSULTA)
-        .collect()
+        if asiento.numero <= peticion.desde_asiento {
+            continue;
+        }
+
+        let Some(suceso) = suceso_desde(asiento) else {
+            continue;
+        };
+
+        if sucesos.len() >= SUCESOS_POR_CONSULTA {
+            hay_mas = true;
+            break;
+        }
+
+        // Se mide lo que ocupa DE VERDAD al serializar, no una estimacion.
+        //
+        // Acotar solo por numero de elementos era el defecto de PA-96: con
+        // detalles largos, 256 sucesos se pasaban del marco y `enmarcar`
+        // rechazaba la respuesta entera. Como el cliente siempre pide desde el
+        // mismo sitio, el canal quedaba inservible **para siempre**, con las
+        // alertas intactas en un disco al que nadie podia llegar.
+        let ocupa = serde_json::to_vec(&suceso).map_or(usize::MAX, |bytes| bytes.len() + 1);
+
+        if gastado.saturating_add(ocupa) > PRESUPUESTO_SUCESOS {
+            hay_mas = true;
+            break;
+        }
+
+        gastado += ocupa;
+        sucesos.push(suceso);
+    }
+
+    Lote { sucesos, hay_mas }
 }
 
 /// Manejador de `obtener-condiciones`.
