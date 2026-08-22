@@ -157,6 +157,29 @@ impl Emisor {
         Ok(siguiente)
     }
 
+    /// Firma una configuracion del sensor. RPT-074, PA-79.
+    ///
+    /// # Por que devuelve la firma y no el fichero
+    ///
+    /// El fichero lo compone [`guardian_cc::configuracion::serializar`], que es
+    /// quien conoce la disposicion en disco. Si esta funcion produjera bytes,
+    /// habria **dos** sitios que saben como se escribe una configuracion, y el
+    /// dia que uno cambie el otro emitira ficheros que el sensor rechazara como
+    /// manipulados.
+    ///
+    /// Se firma el mensaje canonico, no los bytes: dos codificaciones del mismo
+    /// contenido no pueden dar firmas distintas.
+    #[must_use]
+    pub fn firmar_configuracion(
+        &self,
+        valores: &guardian_cc::configuracion::Valores,
+    ) -> motor_pqc::firma_hibrida::FirmaHibrida {
+        motor_pqc::firma_hibrida::firmar(
+            &self.firmante,
+            &guardian_cc::configuracion::mensaje_de_configuracion(valores),
+        )
+    }
+
     /// Emite un manifiesto firmado.
     ///
     /// El orden canonico y el rechazo de duplicados los impone

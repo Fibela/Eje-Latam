@@ -194,6 +194,107 @@ pub fn desde_raiz(raiz: &Path) -> Result<Vec<Punto>, String> {
         .map_err(|error| format!("no se pudo leer {}: {error}", ruta.display()))
 }
 
+/// Identificadores citados en `docs/` que **no figuran en el tablero**.
+///
+/// RPT-060, PA-108.
+///
+/// # Por que hacia falta
+///
+/// El tablero se quedo en PA-76 mientras los reportes acunaban treinta y nueve
+/// identificadores nuevos. Nadie lo noto porque nada lo comprobaba: este comando
+/// contaba lo que habia y lo presentaba como el total del proyecto.
+///
+/// La herramienta no mentia sobre lo que leia. **El sitio que lee habia dejado
+/// de escribirse**, que es la misma familia de defecto que este proyecto lleva
+/// persiguiendo en el codigo: una fuente unica que alguien deja de alimentar
+/// sigue pareciendo una fuente unica.
+///
+/// # Que cuenta como cita
+///
+/// Cualquier `PA-nn` en cualquier `.md` bajo `docs/`. Se prefiere pasarse a
+/// quedarse corto: un identificador citado de mas obliga a escribir una fila, y
+/// uno citado de menos es el que se pierde.
+///
+/// # Errores
+///
+/// Devuelve el motivo si `docs/` no se puede recorrer.
+pub fn citados_sin_fila(raiz: &Path, puntos: &[Punto]) -> Result<Vec<String>, String> {
+    let mut citados: Vec<String> = Vec::new();
+    recoger_citas(&raiz.join("docs"), &mut citados)?;
+
+    citados.sort();
+    citados.dedup();
+    citados.retain(|cita| {
+        !puntos
+            .iter()
+            .any(|punto| punto.identificador.as_str() == cita.as_str())
+    });
+
+    Ok(citados)
+}
+
+/// Recorre un directorio y acumula los identificadores citados en sus `.md`.
+fn recoger_citas(directorio: &Path, citados: &mut Vec<String>) -> Result<(), String> {
+    let entradas = std::fs::read_dir(directorio)
+        .map_err(|error| format!("no se pudo leer {}: {error}", directorio.display()))?;
+
+    for entrada in entradas {
+        let entrada = entrada.map_err(|error| format!("entrada ilegible: {error}"))?;
+        let ruta = entrada.path();
+
+        if ruta.is_dir() {
+            recoger_citas(&ruta, citados)?;
+            continue;
+        }
+        if ruta.extension().is_none_or(|extension| extension != "md") {
+            continue;
+        }
+
+        let contenido = std::fs::read_to_string(&ruta)
+            .map_err(|error| format!("no se pudo leer {}: {error}", ruta.display()))?;
+        citados.extend(citas_de(&contenido));
+    }
+
+    Ok(())
+}
+
+/// Identificadores `PA-nn` que aparecen en un texto.
+///
+/// Reutiliza la regla de sufijo de [`identificador_de`]: `PA-14a` es un
+/// identificador propio y no una mencion de `PA-14`.
+fn citas_de(contenido: &str) -> Vec<String> {
+    let mut encontrados = Vec::new();
+    let mut resto = contenido;
+
+    while let Some(posicion) = resto.find("PA-") {
+        let cola = &resto[posicion + 3..];
+        let digitos: String = cola.chars().take_while(char::is_ascii_digit).collect();
+        resto = cola;
+
+        if digitos.is_empty() {
+            continue;
+        }
+
+        let tras_digitos = &cola[digitos.len()..];
+        let sufijo: String = tras_digitos
+            .chars()
+            .take_while(char::is_ascii_lowercase)
+            .take(1)
+            .collect();
+
+        // Una letra suelta detras del numero es sufijo de particion; dos o mas
+        // son una palabra pegada, y entonces esto no era un identificador.
+        let tras_sufijo = &tras_digitos[sufijo.len()..];
+        if tras_sufijo.starts_with(char::is_alphabetic) {
+            continue;
+        }
+
+        encontrados.push(format!("PA-{digitos}{sufijo}"));
+    }
+
+    encontrados
+}
+
 #[cfg(test)]
 mod pruebas {
     #![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]

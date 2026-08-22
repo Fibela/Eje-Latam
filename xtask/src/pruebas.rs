@@ -6,7 +6,21 @@
 use std::path::Path;
 
 use crate::exclusion::lineas_de_prueba;
-use crate::guardian::{Hallazgo, analizar, comprobaciones};
+use crate::guardian::{Comprobacion, Hallazgo, analizar, comprobaciones};
+
+/// Los patrones del guardian, con la garantia de que hay alguno.
+///
+/// La asercion no es ceremonia: con la lista vacia, **toda** prueba de este
+/// fichero pasaria sin comprobar nada. Un verificador que no puede verificar no
+/// se lee como conforme (RPT-006 §4).
+fn patrones() -> Vec<Comprobacion> {
+    let patrones = comprobaciones().unwrap_or_else(|_| Vec::new());
+    assert!(
+        !patrones.is_empty(),
+        "sin patrones, cualquier fuente pasaria por limpia"
+    );
+    patrones
+}
 
 fn etiquetas(fuente: &str) -> Vec<&'static str> {
     let comprobaciones = comprobaciones().unwrap_or_else(|_| Vec::new());
@@ -245,6 +259,96 @@ fn no_soportado_es_admisible_y_no_implementado_no() {
     // `NoSoportado` describe una operacion que no existe por diseno.
     assert!(hay_hallazgos("pub enum E { NoImplementado }"));
     assert!(!hay_hallazgos("pub enum E { NoSoportado }"));
+}
+
+// ---------------------------------------------------------------------------
+// El guardian mira el codigo, no la prosa — RPT-076, PA-129
+// ---------------------------------------------------------------------------
+
+/// Un marcador de trabajo pendiente **sigue** cazandose, y vive en un comentario.
+///
+/// Es la prueba que estuvo a punto de perderse. Al quitar los comentarios para
+/// arreglar los falsos positivos, esta comprobacion —cuyo patron es literalmente
+/// `//\s*TODO`— habria dejado de encontrar nada, en silencio y para siempre.
+///
+/// Lo cazo la prueba de categorias que ya existia. De ahi que cada comprobacion
+/// declare su ambito en lugar de compartir uno.
+#[test]
+fn un_marcador_pendiente_se_caza_aunque_este_en_un_comentario() {
+    let hallazgos = analizar(
+        Path::new("pendiente.rs"),
+        "pub fn a() -> u8 { 1 } // TODO: revisar el techo\n",
+        &patrones(),
+    );
+
+    assert_eq!(
+        hallazgos.len(),
+        1,
+        "un marcador pendiente vive en un comentario: mirarlo en el codigo seria \
+         no mirarlo nunca. {hallazgos:?}"
+    );
+    assert_eq!(hallazgos[0].etiqueta, "Marcadores de trabajo pendiente");
+}
+
+/// Un comentario que **explica** un patron prohibido no lo comete.
+///
+/// El guardian acuso dos veces en dos dias a la prosa que explica el diseño. La
+/// salida facil era reescribir la prosa; esta prueba fija la otra.
+#[test]
+fn un_patron_citado_en_un_comentario_no_es_un_hallazgo() {
+    let fuente = "\
+// Este estado degradado no es un mock: se declara en lugar de fingir.
+/* Y tampoco hay un 127.0.0.1 por omision, que seria peor. */
+pub fn honesta() -> u8 {
+    7
+}
+";
+
+    let hallazgos = analizar(Path::new("prosa.rs"), fuente, &patrones());
+
+    assert!(
+        hallazgos.is_empty(),
+        "el guardian acusa a la prosa que lo explica: {hallazgos:?}"
+    );
+}
+
+/// Y una cadena **si** se sigue mirando.
+///
+/// Es la mitad que impide que el arreglo se convierta en un guardian ciego: lo
+/// que no es codigo es el comentario; una cadena literal si lo es, y
+/// `bind("127.0.0.1:5514")` es exactamente lo que la regla existe para cazar.
+#[test]
+fn un_punto_final_dentro_de_una_cadena_sigue_siendo_un_hallazgo() {
+    let fuente = "\
+pub fn escuchar() -> &'static str {
+    \"127.0.0.1:5514\"
+}
+";
+
+    let hallazgos = analizar(Path::new("cadena.rs"), fuente, &patrones());
+
+    assert_eq!(
+        hallazgos.len(),
+        1,
+        "una cadena es codigo y debe seguir cazandose: {hallazgos:?}"
+    );
+}
+
+/// Codigo y comentario en la misma linea: se mira lo de la izquierda.
+///
+/// Sin esto, bastaria con poner un comentario detras para esconder cualquier
+/// violacion — que es como un guardian se vuelve decorativo.
+#[test]
+fn el_codigo_anterior_a_un_comentario_sigue_mirandose() {
+    let fuente = "\
+pub fn escuchar() -> &'static str {
+    \"127.0.0.1:5514\" // aqui no hay nada que ver
+}
+";
+
+    let hallazgos = analizar(Path::new("mixta.rs"), fuente, &patrones());
+
+    assert_eq!(hallazgos.len(), 1, "{hallazgos:?}");
 }
 
 #[test]

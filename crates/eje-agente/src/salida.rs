@@ -231,14 +231,265 @@ pub fn linea_de_suceso(suceso: &SucesoAlerta, instante_utc: i64, maquina: &str) 
 /// guarda la serie; si el registro local retrocede o su extremo deja de coincidir
 /// con el que se anoto para ese asiento, la discrepancia se ve **fuera** del
 /// equipo comprometido, que es el unico sitio donde puede verse.
+/// # Y por que declara la interfaz
+///
+/// RPT-061, PA-115. La serie que guarda el colector se indexa por quien la
+/// emite, y hasta hoy eso era solo el `HOSTNAME`. Dos agentes en un mismo
+/// servidor perimetral —un sensor por segmento— entrelazaban sus series: sus
+/// registros son independientes y de longitudes distintas, asi que el cotejo
+/// leia un registro que encoge y **acusaba de recorte a dos sensores intactos**.
+///
+/// Se observo en ejecucion real antes de corregirlo (RPT-061 §3).
 #[must_use]
-pub fn linea_de_sello(numero: u64, sello: &str, instante_utc: i64, maquina: &str) -> Vec<u8> {
+pub fn linea_de_sello(datos: &DatosSello<'_>) -> Vec<u8> {
+    let DatosSello {
+        numero,
+        sello,
+        instante_utc,
+        maquina,
+        interfaz,
+    } = *datos;
+
     componer(
         Gravedad::Informativo,
         instante_utc,
         maquina,
         "sello-de-evidencia",
-        &format!("sello={sello} asiento={numero}"),
+        &format!(
+            "sello={sello} asiento={numero} interfaz={}",
+            sanear(interfaz)
+        ),
+    )
+}
+
+/// Todo lo que una linea de sello necesita saber.
+///
+/// Con nombres por el mismo motivo que [`DatosLatido`]: `maquina` e `interfaz`
+/// son los dos `&str`, e invertirlos compilaria sin una queja y volveria a
+/// colapsar la identidad que PA-115 acaba de separar.
+#[derive(Debug, Clone, Copy)]
+pub struct DatosSello<'a> {
+    /// Ultimo asiento del registro.
+    pub numero: u64,
+    /// Extremo de la cadena de resumenes, en hexadecimal.
+    pub sello: &'a str,
+    /// Instante para la marca de tiempo de RFC 5424.
+    pub instante_utc: i64,
+    /// Maquina, para el campo `HOSTNAME`.
+    pub maquina: &'a str,
+    /// Interfaz que vigila este agente.
+    pub interfaz: &'a str,
+}
+
+/// Intervalo por omision entre latidos, en milisegundos.
+///
+/// RPT-052 §5, PA-104. **Es una hipotesis declarada, no una medida.**
+///
+/// Pocos intervalos levantan a la sala de madrugada por un corte de diez
+/// segundos; muchos dejan un sensor muerto sin detectar justo ese tiempo. No hay
+/// cifra correcta sin medir la red del cliente, que es PA-41 con otro nombre.
+///
+/// Por eso el valor **viaja dentro del propio latido**: el colector no tiene que
+/// suponerlo, y cuando pase a configuracion firmada (PA-79) el cambio no rompe
+/// nada al otro lado.
+pub const INTERVALO_LATIDO_MS: i64 = 60_000;
+
+/// Que ocurrio con el latido en una vuelta. RPT-052, PA-104.
+///
+/// # Por que cuatro estados y no un booleano
+///
+/// Desde fuera del proceso, «no tocaba», «no hay colector» y «tocaba y no pude»
+/// producen exactamente lo mismo: **ninguna linea**. Por dentro son tres cosas
+/// distintas, y una de ellas es un sensor mudo.
+///
+/// Colapsarlas en un `bool` haria que el resumen por pantalla dijera «sin
+/// latido» en los tres casos y que el operador no pudiera distinguir el
+/// funcionamiento normal de la averia. Es RPT-006 §4 aplicado al latido: no se
+/// sabe no es no hay, y no toca no es no puedo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Latido {
+    /// Salio hacia el colector en esta vuelta.
+    Emitido,
+    /// Aun no habia pasado el intervalo. Es el caso normal y no es un fallo.
+    NoTocaba,
+    /// Este agente no tiene colector configurado, asi que no late nunca.
+    ///
+    /// No es una averia del canal: es una decision de despliegue. Un agente sin
+    /// colector **no esta cubierto por PA-105**, y decirlo aqui es lo que
+    /// impide que alguien lo instale creyendo que la sala lo vigila.
+    SinColector,
+    /// Tocaba latir y el despacho fallo.
+    ///
+    /// El instante no se marca, asi que la vuelta siguiente lo reintenta.
+    NoSePudo,
+}
+
+/// Interpreta el valor de `--syslog`: una cadena vacia **no es un destino**.
+///
+/// RPT-064, PA-118.
+///
+/// # Por que existe esta funcion de tres lineas
+///
+/// `systemd` no tiene condicionales en `ExecStart`, y `${VARIABLE}` se sustituye
+/// como **un argumento, vacio incluido** —a diferencia de `$VARIABLE`, que se
+/// parte en palabras—. Asi que una unidad con `--syslog ${EJE_COLECTOR}` y la
+/// variable vacia entregaba literalmente `--syslog ""`.
+///
+/// Esa unidad ya no existe: desde RPT-077 el colector sale de la configuracion
+/// firmada y `ExecStart` no lo pasa. La funcion **sigue haciendo falta**, y por
+/// una razon distinta: el campo firmado tambien puede venir vacio, que es un
+/// despliegue legitimo (RPT-054 §1), y las dos vias tienen que significar lo
+/// mismo. Borrarla habria devuelto la mentira de abajo por la puerta nueva.
+///
+/// Sin esto, el agente lo tomaba por un colector configurado que no responde:
+///
+/// ```text
+/// Salida de alertas  :
+/// salidaNoDisponible : true     <- averia
+/// sinColector        : false    <- MENTIRA
+/// ```
+///
+/// Y esas dos cosas mandan al tecnico a sitios distintos (RPT-055 §3): una a
+/// llamar a quien mantiene el SIEM, otra a terminar la instalacion. La decima
+/// condicion, anulada por un fichero de configuracion.
+///
+/// # No es una correccion de conveniencia
+///
+/// `Some("")` **nunca** es un estado legitimo: `"".to_socket_addrs()` no puede
+/// resolver jamas. Es un estado imposible que solo puede existir por el camino
+/// que lo trajo, y esto lo elimina en la frontera en lugar de dejarlo entrar.
+///
+/// Quien llama lo declara por pantalla: no se sustituye en silencio.
+#[must_use]
+pub fn colector_declarado(valor: &str) -> Option<&str> {
+    let limpio = valor.trim();
+    if limpio.is_empty() {
+        None
+    } else {
+        Some(limpio)
+    }
+}
+
+/// Todo lo que una linea de latido necesita saber.
+///
+/// Los campos van con nombre precisamente porque varios tienen el mismo tipo:
+/// `maquina` e `interfaz` son los dos `&str`, y son el par que PA-113 acaba de
+/// separar. Ver [`linea_de_latido`].
+#[derive(Debug, Clone, Copy)]
+pub struct DatosLatido<'a> {
+    /// Ultimo asiento del registro de evidencia.
+    pub numero: u64,
+    /// Extremo de la cadena de resumenes, en hexadecimal.
+    pub sello: &'a str,
+    /// Condiciones vigentes. Solo viajan las emisibles.
+    pub condiciones: &'a Condiciones,
+    /// Cada cuanto promete latir este sensor.
+    pub intervalo_ms: i64,
+    /// Numero de este latido en la serie del sensor.
+    pub contador: u64,
+    /// Instante para la marca de tiempo de RFC 5424.
+    pub instante_utc: i64,
+    /// Maquina, para el campo `HOSTNAME`.
+    pub maquina: &'a str,
+    /// Interfaz que vigila este agente.
+    pub interfaz: &'a str,
+}
+
+/// Compone la linea de latido: prueba de vida **con estado**.
+///
+/// # Por que no basta «estoy vivo»
+///
+/// RPT-052 §3. Un latido que solo dice que existe obliga a la sala a preguntar
+/// lo demas por un camino que no tiene. Un sensor vivo y **ciego**
+/// (`capturaNoDisponible`) debe verse desde la sala, y hoy no se ve.
+///
+/// # El par (asiento, sello) NO prueba vida, y esto corrige a RPT-052 §4
+///
+/// Aquel reporte dijo que el par repetido es sospechoso porque el asiento es
+/// monotono y el extremo cambia con el. **Eso es falso para un sensor en calma**,
+/// que es justo el caso para el que existe el latido: sin alertas nuevas el
+/// registro no crece, el extremo no cambia, y dos latidos legitimos separados por
+/// horas llevan exactamente el mismo par.
+///
+/// Con la regla de RPT-052 §4 tal cual, todo sensor tranquilo quedaria marcado
+/// como sospechoso. Y al reves, lo grave: un atacante que capture **un** latido y
+/// lo reproduzca mantiene la sala en verde para siempre, porque el par sigue
+/// siendo el correcto.
+///
+/// # Por eso lleva un contador propio
+///
+/// `latido=N` es monotono **en calma tambien**: cuenta latidos, no asientos. Un
+/// mensaje repetido tal cual trae un `N` ya visto y se reconoce.
+///
+/// Lo que esto **no** compra: no detiene a quien reproduzca incrementando el
+/// contador. Eso exigiria firmar cada latido con una clave que el atacante no
+/// tenga, y RPT-038 §2 explica por que una clave local no sirve. La barrera que
+/// pone el contador es que el atacante tenga que **seguir emitiendo**, no que le
+/// baste con grabar un paquete. Queda anotado como PA-112.
+///
+/// # Por que declara su propio intervalo
+///
+/// Para que la ausencia sea calculable sin acuerdos implicitos. El colector no
+/// deduce cuanto esperar: se lo dicen.
+///
+/// # Por que los datos van en un registro y no en ocho parametros
+///
+/// Clippy lo pidio con `too_many_arguments`, y el aviso vale doble aqui: ocho
+/// argumentos seguidos son ocho oportunidades de invertir dos, y el par que mas
+/// duele es justo `(maquina, interfaz)`. Cambiarlos de sitio **compila sin una
+/// queja** y vuelve a colapsar la identidad —esta vez al reves— sin que ninguna
+/// comprobacion de tipos lo note. Los nombres del registro lo impiden.
+///
+/// # Y por que declara su interfaz
+///
+/// RPT-059, PA-113. La identidad del sensor en la sala era solo el `HOSTNAME`, y
+/// eso es correcto para una maquina con un sensor. Un servidor perimetral con un
+/// agente por segmento —el despliegue normal en una planta grande— tiene varios,
+/// y todos dirian llamarse igual: **el latido de uno taparia la muerte del
+/// otro**.
+///
+/// Es el mismo error que RPT-058 §2, un escalon mas arriba: alli se tomo una
+/// parte (la interfaz) por el todo, aqui se tomaba el todo (la maquina) por la
+/// parte. La identidad es el par.
+#[must_use]
+pub fn linea_de_latido(datos: &DatosLatido<'_>) -> Vec<u8> {
+    let DatosLatido {
+        numero,
+        sello,
+        condiciones,
+        intervalo_ms,
+        contador,
+        instante_utc,
+        maquina,
+        interfaz,
+    } = *datos;
+
+    // Las condiciones activas, por nombre. Enumerar tambien las inactivas
+    // engordaria cada latido sin decir nada nuevo; lo que importa es que la
+    // lista este, aunque venga vacia, porque «vacia» es una afirmacion.
+    let activas: Vec<&str> = EMISIBLES
+        .iter()
+        .filter(|(nombre, _)| valor_de(condiciones, nombre) == Some(true))
+        .map(|(nombre, _)| *nombre)
+        .collect();
+
+    componer(
+        // Informativo: un latido normal no es una alerta. Lo que alerta es su
+        // AUSENCIA, y eso lo decide el colector (PA-105).
+        Gravedad::Informativo,
+        instante_utc,
+        maquina,
+        "latido-de-sensor",
+        &format!(
+            "latido={contador} interfaz={} sello={sello} asiento={numero} \
+             intervaloMs={intervalo_ms} condiciones={}",
+            sanear(interfaz),
+            if activas.is_empty() {
+                "ninguna".to_owned()
+            } else {
+                activas.join(",")
+            }
+        ),
     )
 }
 
@@ -272,10 +523,28 @@ impl Transicion {
 
 /// Condiciones que se emiten, con su identificador y si acusan a alguien.
 ///
-/// **`salidaNoDisponible` no figura**, y no por olvido: es la condicion que dice
-/// que no se puede emitir. Emitirla exigiria el canal que acaba de fallar.
-/// Viaja solo por IPC, que es donde VIS-04 la consulta (RPT-032 §4).
-const EMISIBLES: [(&str, bool); 8] = [
+/// **Faltan dos, y ninguna por olvido.**
+///
+/// `salidaNoDisponible` es la condicion que dice que no se puede emitir:
+/// emitirla exigiria el canal que acaba de fallar (RPT-032 §4).
+///
+/// `sinColector` dice que no hay canal en absoluto (RPT-054 §4, PA-109). Un
+/// agente sin colector no puede avisar de que no tiene colector.
+///
+/// Las dos viajan solo por IPC, que es donde VIS-04 las consulta. La segunda,
+/// ademas, la declaran el instalador y `journald`, que son los unicos sitios
+/// donde un sensor mudo puede decir algo.
+///
+/// # Y por que `escuchaNoDisponible` SI esta
+///
+/// RPT-070, PA-125. Las dos ausentes describen **el canal de syslog mismo**, y
+/// por eso no pueden viajar por el. Aquella describe **el otro canal**: cuando la
+/// escucha local cae, syslog es justo lo que sigue funcionando.
+///
+/// Es ademas el unico camino posible. Lo que podria contar que la consola no
+/// conecta es la consola, que es lo que no conecta. Sin esta linea, un sensor
+/// vivo e inalcanzable seria invisible tambien para la sala.
+const EMISIBLES: [(&str, bool); 11] = [
     ("inventarioSuprimido", true),
     ("inventarioNoVerifica", true),
     ("observacionSaturada", false),
@@ -294,6 +563,20 @@ const EMISIBLES: [(&str, bool); 8] = [
     // este producto existe para no tener.
     ("capturaNoDisponible", true),
     ("accionAdministrativa", false),
+    // RPT-070, PA-125. Con gravedad alta y sin acusar a nadie: nadie toco nada,
+    // pero el tecnico no puede preguntarle al sensor y la sala solo se entera por
+    // aqui. Un sensor vivo e inalcanzable pasa por sano mientras dure, que es el
+    // mismo argumento de `capturaNoDisponible` aplicado al puente.
+    ("escuchaNoDisponible", true),
+    // RPT-074, PA-79. Sin acusar: un sensor sin configuracion firmada esta en un
+    // estado legitimo de desarrollo, y la sala tiene que poder distinguir cuantos
+    // de su flota lo estan. Es un aviso, no un incidente.
+    ("configuracionSinFirmar", false),
+    // Esta si con gravedad alta, y tampoco acusando. Mismo criterio que
+    // `registroSaturado`: la firma rota apunta a manipulacion, pero una maquina
+    // ajena o una clave rotada dan la misma condicion y no son un ataque. El
+    // motivo viaja en el diario, donde se diagnostica.
+    ("configuracionNoVerifica", true),
     // `registroSaturado` viaja con la gravedad de la manipulacion sin serlo. El
     // segundo campo no dice "esto es un ataque" sino "esto no puede esperar al
     // lunes", y un sensor que dejo de registrar amenazas no puede.
@@ -309,21 +592,26 @@ const EMISIBLES: [(&str, bool); 8] = [
 /// Valor de una condicion por su identificador.
 ///
 /// Devuelve `None` para un identificador que no corresponde a ningun campo. Es
-/// deliberado: un `_ => false` haria que una condicion mal escrita en
+/// deliberado: un `false` de consuelo haria que una condicion mal escrita en
 /// [`EMISIBLES`] pareciera apagada **para siempre**, y una condicion que nunca
 /// se activa no la echa de menos nadie.
+///
+/// Devuelve `Some` para **las trece**, incluidas las dos que no se emiten: esto es
+/// un accesor y no una politica. Quien decide que sale es [`EMISIBLES`], en un
+/// solo sitio y con el motivo escrito.
 fn valor_de(condiciones: &Condiciones, identificador: &str) -> Option<bool> {
-    match identificador {
-        "inventarioSuprimido" => Some(condiciones.inventario_suprimido),
-        "inventarioNoVerifica" => Some(condiciones.inventario_no_verifica),
-        "observacionSaturada" => Some(condiciones.observacion_saturada),
-        "capturaConPerdida" => Some(condiciones.captura_con_perdida),
-        "capturaNoDisponible" => Some(condiciones.captura_no_disponible),
-        "accionAdministrativa" => Some(condiciones.accion_administrativa),
-        "registroSaturado" => Some(condiciones.registro_saturado),
-        "evidenciaEnRiesgo" => Some(condiciones.evidencia_en_riesgo),
-        _ => None,
-    }
+    // Se busca en `Condiciones::enumerar` en lugar de repetir la lista aqui.
+    // Esta funcion tenia su propio `match`, y ese `match` se quedo dos
+    // condiciones por detras del contrato durante varios turnos (PA-91).
+    //
+    // Las dos no emisibles se excluyen despues, en `EMISIBLES`, y no callandolas
+    // aqui: si `valor_de` mintiera sobre su existencia, la barrera de PA-91 no
+    // podria comprobar que la exclusion es deliberada.
+    condiciones
+        .enumerar()
+        .into_iter()
+        .find(|(nombre, _)| *nombre == identificador)
+        .map(|(_, valor)| valor)
 }
 
 /// Condiciones que cambiaron entre dos ciclos.
@@ -446,17 +734,43 @@ pub struct Emisor<D> {
     anteriores: Option<Condiciones>,
     /// Ultimo sello **efectivamente entregado** al colector.
     ultimo_sello: Option<(u64, String)>,
+    /// Instante del ultimo latido enviado con exito. RPT-052, PA-104.
+    ///
+    /// `None` hasta el primero: un agente recien arrancado late en su primera
+    /// vuelta, sin esperar un intervalo. Lo contrario dejaria una ventana de
+    /// silencio justo al arrancar, que es cuando mas probable es que algo este
+    /// mal configurado.
+    ultimo_latido: Option<i64>,
+    /// Latidos **entregados** hasta ahora. RPT-057, PA-105.
+    ///
+    /// Se incrementa solo tras un envio correcto, asi que la serie que ve el
+    /// colector es contigua. Un hueco en ella significa que se perdio una linea
+    /// en transito, que es informacion y no ruido.
+    ///
+    /// Vuelve a cero al reiniciar el proceso. El colector no puede distinguir eso
+    /// de una repeticion, y lo declara como tal en lugar de elegir: ver
+    /// `eje-vigia`.
+    latidos: u64,
     maquina: String,
+    /// Interfaz que este agente vigila. RPT-059, PA-113.
+    ///
+    /// Viaja en el latido porque la identidad del sensor en la sala es el par
+    /// (maquina, interfaz): varios agentes en un mismo servidor perimetral
+    /// comparten `HOSTNAME` y no son el mismo sensor.
+    interfaz: String,
 }
 
 impl<D: Despacho> Emisor<D> {
     /// Emisor sobre el despacho dado.
-    pub fn nuevo(despacho: D, maquina: &str) -> Self {
+    pub fn nuevo(despacho: D, maquina: &str, interfaz: &str) -> Self {
         Self {
             despacho,
             anteriores: None,
             ultimo_sello: None,
+            ultimo_latido: None,
+            latidos: 0,
             maquina: maquina.to_owned(),
+            interfaz: interfaz.to_owned(),
         }
     }
 
@@ -491,7 +805,13 @@ impl<D: Despacho> Emisor<D> {
 
         if self
             .despacho
-            .enviar(&linea_de_sello(numero, sello, instante_utc, &self.maquina))
+            .enviar(&linea_de_sello(&DatosSello {
+                numero,
+                sello,
+                instante_utc,
+                maquina: &self.maquina,
+                interfaz: &self.interfaz,
+            }))
             .is_err()
         {
             return false;
@@ -499,6 +819,79 @@ impl<D: Despacho> Emisor<D> {
 
         self.ultimo_sello = Some((numero, sello.to_owned()));
         true
+    }
+
+    /// Emite el latido si toca, segun el intervalo. RPT-052, PA-104.
+    ///
+    /// # Por que no reutiliza `sellar`
+    ///
+    /// `sellar` emite **solo si el extremo cambio**, y esta escrito asi a
+    /// proposito (RPT-032 §3). En un sensor tranquilo el extremo no cambia
+    /// nunca, asi que el sello **no sale** — que es exactamente el caso
+    /// indistinguible que PA-104 existe para cubrir.
+    ///
+    /// Las dos conductas son correctas en su contexto: no repetir transiciones,
+    /// y latir siempre. Por eso se separan en lugar de cambiar una por otra.
+    ///
+    /// # El fallo no se traga, pero tampoco se acumula
+    ///
+    /// Si el envio falla, el instante **no** se marca: el proximo ciclo lo
+    /// reintenta. Un latido perdido no se reenvia despues —seria mentir sobre
+    /// cuando estaba vivo— pero tampoco hace que el agente deje de intentarlo.
+    ///
+    /// Distingue los tres desenlaces que un `bool` confundiria: ver [`Latido`].
+    pub fn latir(
+        &mut self,
+        numero: u64,
+        sello: &str,
+        condiciones: &Condiciones,
+        intervalo_ms: i64,
+        ahora_ms: i64,
+        instante_utc: i64,
+    ) -> Latido {
+        // `is_some_and` y no un `let` encadenado: eso exige Rust 1.88 y el
+        // proyecto fija 1.85 como minimo (MSRV).
+        //
+        // El transcurrido tiene que ser positivo ADEMAS de corto. El reloj que
+        // llega aqui es de pared, no monotono: un ajuste horario o un `ntpd` que
+        // corrige hacia atras da un transcurrido negativo, y un simple
+        // `< intervalo_ms` lo leeria como «acabo de latir». El agente se quedaria
+        // callado justo lo que dure el salto —horas, si el salto es de horas—
+        // mientras la sala lo da por muerto. Ante la duda se late de mas.
+        if self
+            .ultimo_latido
+            .is_some_and(|ultimo| (0..intervalo_ms).contains(&ahora_ms.saturating_sub(ultimo)))
+        {
+            return Latido::NoTocaba;
+        }
+
+        // El contador se reserva y **solo se consume si el envio funciona**: asi
+        // la serie que llega al colector es contigua, y un hueco en ella significa
+        // que alguien perdio una linea por el camino. Quemar el numero en un
+        // intento fallido produciria huecos que no significan nada, y un hueco que
+        // a veces es normal deja de poder mirarse.
+        let contador = self.latidos.saturating_add(1);
+
+        if self
+            .despacho
+            .enviar(&linea_de_latido(&DatosLatido {
+                numero,
+                sello,
+                condiciones,
+                intervalo_ms,
+                contador,
+                instante_utc,
+                maquina: &self.maquina,
+                interfaz: &self.interfaz,
+            }))
+            .is_err()
+        {
+            return Latido::NoSePudo;
+        }
+
+        self.latidos = contador;
+        self.ultimo_latido = Some(ahora_ms);
+        Latido::Emitido
     }
 
     /// Emite los sucesos nuevos y las transiciones de condicion.
@@ -556,7 +949,257 @@ impl<D: Despacho> Emisor<D> {
 mod pruebas_emisibles {
     #![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
 
-    use super::{Condiciones, EMISIBLES, valor_de};
+    use super::{
+        Condiciones, DatosLatido, EMISIBLES, INTERVALO_LATIDO_MS, linea_de_latido, valor_de,
+    };
+
+    /// Las trece condiciones a cierto, para ejercitar todas las salidas a la vez.
+    fn todas_encendidas() -> Condiciones {
+        Condiciones {
+            inventario_suprimido: true,
+            inventario_no_verifica: true,
+            observacion_saturada: true,
+            captura_con_perdida: true,
+            captura_no_disponible: true,
+            accion_administrativa: true,
+            salida_no_disponible: true,
+            sin_colector: true,
+            escucha_no_disponible: true,
+            configuracion_sin_firmar: true,
+            configuracion_no_verifica: true,
+            registro_saturado: true,
+            evidencia_en_riesgo: true,
+        }
+    }
+
+    /// El latido nombra lo emisible, ni una mas ni una menos.
+    ///
+    /// # Por que no basta con la barrera de PA-91
+    ///
+    /// Aquella ata `EMISIBLES` a `Condiciones`. Esta ata **la linea que sale al
+    /// cable** a `EMISIBLES`, que es otra superficie: el latido lleva su propia
+    /// lista de nombres, y hasta ahora nada comprobaba que fuera la misma.
+    ///
+    /// PA-106. La sala solo ve esta linea. Si aqui faltara una condicion, el
+    /// tecnico en sitio la veria por IPC y el operador de sala no, y los dos
+    /// creerian estar mirando el mismo sensor.
+    #[test]
+    fn el_latido_nombra_lo_emisible_y_calla_lo_que_no_puede_salir() {
+        let linea = String::from_utf8_lossy(&linea_de_latido(&DatosLatido {
+            numero: 7,
+            sello: "abc",
+            condiciones: &todas_encendidas(),
+            intervalo_ms: INTERVALO_LATIDO_MS,
+            contador: 1,
+            instante_utc: 0,
+            maquina: "sensor-1",
+            interfaz: "eth0",
+        }))
+        .into_owned();
+
+        let lista = linea
+            .split("condiciones=")
+            .nth(1)
+            .expect("el latido declara las condiciones vigentes")
+            .trim()
+            .to_owned();
+        let nombradas: Vec<&str> = lista.split(',').collect();
+
+        for (nombre, _) in EMISIBLES {
+            assert!(
+                nombradas.contains(&nombre),
+                "'{nombre}' es emisible y no viaja en el latido: la sala no lo vera nunca"
+            );
+        }
+        assert_eq!(
+            nombradas.len(),
+            EMISIBLES.len(),
+            "el latido nombra algo que no esta en EMISIBLES: {nombradas:?}"
+        );
+
+        // Y las dos que no pueden salir no salen tampoco por aqui. Se comprueba
+        // sobre la linea entera y no sobre la lista: un latido que las llevara en
+        // cualquier otro campo seria el mismo fallo.
+        assert!(
+            !linea.contains("salidaNoDisponible") && !linea.contains("sinColector"),
+            "una condicion no emisible viajo en el latido: {linea}"
+        );
+    }
+
+    /// Un sensor al que nadie puede preguntar **si** llega a la sala.
+    ///
+    /// RPT-070, PA-125. Es la afirmacion entera del punto, y por eso tiene prueba
+    /// propia en lugar de confiarse a la de arriba: aquella comprueba que todo lo
+    /// emisible viaja, y pasaria igual si `escuchaNoDisponible` estuviera del
+    /// otro lado de la lista.
+    ///
+    /// La situacion que se ejercita es exactamente la observada en RPT-069 §3: el
+    /// agente vive, observa, registra y emite; lo unico que no tiene es escucha
+    /// local. Si esta linea no saliera, **nadie en ningun sitio** lo sabria — la
+    /// consola no puede contarlo porque es lo que no conecta.
+    #[test]
+    fn un_sensor_incomunicado_lo_dice_por_el_canal_que_le_queda() {
+        let solo_sin_escucha = Condiciones {
+            escucha_no_disponible: true,
+            configuracion_sin_firmar: false,
+            configuracion_no_verifica: false,
+            inventario_suprimido: false,
+            inventario_no_verifica: false,
+            observacion_saturada: false,
+            captura_con_perdida: false,
+            captura_no_disponible: false,
+            accion_administrativa: false,
+            salida_no_disponible: false,
+            sin_colector: false,
+            registro_saturado: false,
+            evidencia_en_riesgo: false,
+        };
+
+        let linea = String::from_utf8_lossy(&linea_de_latido(&DatosLatido {
+            numero: 3,
+            sello: "abc",
+            condiciones: &solo_sin_escucha,
+            intervalo_ms: INTERVALO_LATIDO_MS,
+            contador: 5,
+            instante_utc: 0,
+            maquina: "sensor-1",
+            interfaz: "eth0",
+        }))
+        .into_owned();
+
+        assert!(
+            linea.contains("condiciones=escuchaNoDisponible"),
+            "un sensor sin escucha local seria invisible tambien para la sala: {linea}"
+        );
+    }
+
+    /// La sala se entera de que un sensor corre sin configuracion firmada.
+    ///
+    /// RPT-074, PA-79. Es lo que convierte esta condicion en algo mas que una
+    /// nota local: sin ella, saber cuantos sensores de una flota estan
+    /// aprovisionados exigiria visitarlos uno a uno.
+    ///
+    /// Las dos se emiten a proposito. `configuracionSinFirmar` describe un estado
+    /// legitimo de despliegue y `configuracionNoVerifica` uno que exige mirar el
+    /// diario, y **ninguna de las dos describe el canal de syslog**, que es el
+    /// unico motivo por el que una condicion no puede viajar.
+    #[test]
+    fn la_configuracion_sin_firmar_llega_a_la_sala() {
+        let base = Condiciones {
+            inventario_suprimido: false,
+            inventario_no_verifica: false,
+            observacion_saturada: false,
+            captura_con_perdida: false,
+            captura_no_disponible: false,
+            accion_administrativa: false,
+            salida_no_disponible: false,
+            sin_colector: false,
+            escucha_no_disponible: false,
+            configuracion_sin_firmar: true,
+            configuracion_no_verifica: false,
+            registro_saturado: false,
+            evidencia_en_riesgo: false,
+        };
+
+        let linea = String::from_utf8_lossy(&linea_de_latido(&DatosLatido {
+            numero: 1,
+            sello: "abc",
+            condiciones: &base,
+            intervalo_ms: INTERVALO_LATIDO_MS,
+            contador: 1,
+            instante_utc: 0,
+            maquina: "sensor-1",
+            interfaz: "eth0",
+        }))
+        .into_owned();
+
+        assert!(
+            linea.contains("condiciones=configuracionSinFirmar"),
+            "la sala no puede saber que sensores corren sin firmar: {linea}"
+        );
+
+        // Y la otra, por el mismo camino y con la otra semantica.
+        let rota = Condiciones {
+            configuracion_sin_firmar: false,
+            configuracion_no_verifica: true,
+            ..base
+        };
+
+        let linea = String::from_utf8_lossy(&linea_de_latido(&DatosLatido {
+            numero: 1,
+            sello: "abc",
+            condiciones: &rota,
+            intervalo_ms: INTERVALO_LATIDO_MS,
+            contador: 1,
+            instante_utc: 0,
+            maquina: "sensor-1",
+            interfaz: "eth0",
+        }))
+        .into_owned();
+
+        assert!(
+            linea.contains("condiciones=configuracionNoVerifica"),
+            "{linea}"
+        );
+    }
+
+    /// Un colector vacio es ausencia de colector, no un colector roto.
+    ///
+    /// RPT-064, PA-118. Observado en `systemd` real: `--syslog ${VARIABLE}` con
+    /// la variable vacia entrega `--syslog ""`, y el agente lo tomaba por un
+    /// colector configurado que no responde.
+    #[test]
+    fn un_colector_vacio_no_es_un_colector() {
+        use super::colector_declarado;
+
+        assert_eq!(colector_declarado(""), None);
+        assert_eq!(colector_declarado("   "), None, "ni con espacios");
+        assert_eq!(colector_declarado("\t\n"), None, "ni con blancos raros");
+
+        assert_eq!(colector_declarado("127.0.0.1:5514"), Some("127.0.0.1:5514"));
+        assert_eq!(
+            colector_declarado("  siem.hospital:514  "),
+            Some("siem.hospital:514"),
+            "y el que hay se limpia de los blancos que trae el fichero"
+        );
+    }
+
+    /// En calma la lista viene vacia, y lo dice.
+    ///
+    /// «ninguna» es una afirmacion: dice que se miraron las ocho y no habia
+    /// ninguna activa. Un campo ausente diria que no se miro.
+    #[test]
+    fn en_calma_el_latido_afirma_que_no_hay_ninguna() {
+        let calma = Condiciones {
+            inventario_suprimido: false,
+            inventario_no_verifica: false,
+            observacion_saturada: false,
+            captura_con_perdida: false,
+            captura_no_disponible: false,
+            accion_administrativa: false,
+            salida_no_disponible: false,
+            sin_colector: false,
+            escucha_no_disponible: false,
+            configuracion_sin_firmar: false,
+            configuracion_no_verifica: false,
+            registro_saturado: false,
+            evidencia_en_riesgo: false,
+        };
+
+        let linea = String::from_utf8_lossy(&linea_de_latido(&DatosLatido {
+            numero: 1,
+            sello: "abc",
+            condiciones: &calma,
+            intervalo_ms: 60_000,
+            contador: 1,
+            instante_utc: 0,
+            maquina: "sensor-1",
+            interfaz: "eth0",
+        }))
+        .into_owned();
+
+        assert!(linea.contains("condiciones=ninguna"), "{linea}");
+    }
 
     /// Toda condicion sale al SIEM salvo la que no puede emitirse.
     ///
@@ -570,69 +1213,54 @@ mod pruebas_emisibles {
     ///
     /// # Como obliga
     ///
-    /// La desestructuracion es exhaustiva y **sin `..`**. Anadir un decimo campo
-    /// a `Condiciones` deja de compilar aqui, y quien lo anada tiene que decidir
-    /// a proposito si va al SIEM o si es otra excepcion. No se puede olvidar,
-    /// que es la unica forma de que no se olvide.
+    /// La lista sale de `Condiciones::enumerar`, cuya desestructuracion es
+    /// exhaustiva y **sin `..`**: un campo nuevo en `Condiciones` deja de
+    /// compilar alli, y en cuanto compila aparece aqui y obliga a decidir si va
+    /// al SIEM o si es otra excepcion. No se puede olvidar, que es la unica forma
+    /// de que no se olvide.
+    ///
+    /// Desde RPT-058 los diez nombres se escriben en un solo sitio. Antes esta
+    /// prueba los repetia, con lo que la barrera y la cosa vigilada estaban
+    /// escritas por la misma mano.
     #[test]
     fn toda_condicion_sale_al_siem_salvo_la_que_no_puede() {
-        let condiciones = Condiciones {
-            inventario_suprimido: true,
-            inventario_no_verifica: true,
-            observacion_saturada: true,
-            captura_con_perdida: true,
-            captura_no_disponible: true,
-            accion_administrativa: true,
-            salida_no_disponible: true,
-            registro_saturado: true,
-            evidencia_en_riesgo: true,
-        };
+        let condiciones = todas_encendidas();
 
-        let Condiciones {
-            inventario_suprimido,
-            inventario_no_verifica,
-            observacion_saturada,
-            captura_con_perdida,
-            captura_no_disponible,
-            accion_administrativa,
-            salida_no_disponible,
-            registro_saturado,
-            evidencia_en_riesgo,
-        } = condiciones;
+        // La lista sale de `Condiciones::enumerar`, que es ahora el unico sitio
+        // donde se escriben los diez nombres. Repetirlos aqui era tener la
+        // barrera y la cosa vigilada escritas por la misma mano.
+        let todas = condiciones.enumerar();
 
-        let todas = [
-            ("inventarioSuprimido", inventario_suprimido),
-            ("inventarioNoVerifica", inventario_no_verifica),
-            ("observacionSaturada", observacion_saturada),
-            ("capturaConPerdida", captura_con_perdida),
-            ("capturaNoDisponible", captura_no_disponible),
-            ("accionAdministrativa", accion_administrativa),
-            ("salidaNoDisponible", salida_no_disponible),
-            ("registroSaturado", registro_saturado),
-            ("evidenciaEnRiesgo", evidencia_en_riesgo),
-        ];
+        // Las dos excepciones se nombran aqui, una sola vez, y el resto de la
+        // prueba se deriva de esta lista. Una tercera excepcion futura tendra que
+        // escribirse en este sitio y con su motivo al lado: la barrera protege
+        // contra el olvido, no contra la decision.
+        const NO_EMISIBLES: [&str; 2] = ["salidaNoDisponible", "sinColector"];
 
         for (identificador, valor) in todas {
             let emitida = EMISIBLES.iter().any(|(nombre, _)| *nombre == identificador);
 
-            // `valor_de` debe mapear EXACTAMENTE lo emisible: ni menos —una
+            // `valor_de` conoce LAS DIEZ. Es un accesor, no una politica: una
             // condicion que `EMISIBLES` nombra y `valor_de` no conoce se queda
-            // apagada para siempre, que es el aviso de su propia documentacion—
-            // ni mas, porque un mapeo que sobra sugiere que algo se emite y no
-            // se emite.
+            // apagada para siempre, que es el aviso de su propia documentacion.
+            //
+            // Desde RPT-058 se deriva de `Condiciones::enumerar`, asi que esto
+            // comprueba que la derivacion cubre el identificador de verdad y no
+            // uno parecido.
             assert_eq!(
                 valor_de(&condiciones, identificador),
-                if emitida { Some(valor) } else { None },
-                "'{identificador}': `valor_de` y `EMISIBLES` no dicen lo mismo"
+                Some(valor),
+                "'{identificador}': `valor_de` no lo conoce"
             );
 
-            if identificador == "salidaNoDisponible" {
-                // La unica excepcion, y no es una decision de estilo: emitirla
-                // exigiria el canal que acaba de fallar. Llega solo por el
-                // puente, que es donde VIS-04 la consulta.
+            if NO_EMISIBLES.contains(&identificador) {
+                // Las dos excepciones, y ninguna es una decision de estilo:
+                // `salidaNoDisponible` exigiria el canal que acaba de fallar y
+                // `sinColector` un canal que no existe. Llegan solo por el
+                // puente, que es donde VIS-04 las consulta.
                 assert!(
                     !emitida,
-                    "'salidaNoDisponible' no puede salir por el canal que fallo"
+                    "'{identificador}' no puede salir por un canal que no responde"
                 );
             } else {
                 assert!(
@@ -645,8 +1273,8 @@ mod pruebas_emisibles {
 
         assert_eq!(
             EMISIBLES.len(),
-            todas.len() - 1,
-            "EMISIBLES debe cubrir todas las condiciones menos salidaNoDisponible"
+            todas.len() - NO_EMISIBLES.len(),
+            "EMISIBLES debe cubrir todas las condiciones menos las no emisibles"
         );
     }
 }

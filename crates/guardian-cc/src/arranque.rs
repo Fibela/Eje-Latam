@@ -48,32 +48,102 @@ use crate::revocacion::{ArchivoRevocaciones, RegistroRevocaciones};
 pub const MAGICO_CENTINELA: &[u8; 8] = b"EJE-CEN1";
 
 /// Version del formato de centinela.
-pub const VERSION_CENTINELA: u16 = 1;
+///
+/// # La version 1 se rechaza, y no es rigidez
+///
+/// RPT-078, PA-79. La 1 llevaba **una sola** marca de agua, la del inventario.
+/// Aceptarla ahora seria aceptar un fichero que no dice nada de la secuencia de
+/// configuracion, y eso se lee como «sin establecer» — es decir, **un fichero de
+/// 18 bytes escrito a mano deja pasar cualquier configuracion antigua y bien
+/// firmada**. Admitir el formato viejo seria abrir por compatibilidad el mismo
+/// agujero que este campo viene a cerrar.
+///
+/// Se puede permitir porque no hay ningun sensor desplegado. Cuando lo haya, la
+/// migracion tendra que ser una operacion deliberada del emisor, no una lectura
+/// tolerante del agente.
+pub const VERSION_CENTINELA: u16 = 2;
 
 /// Longitud exacta del fichero de centinela.
-const LONGITUD_CENTINELA: usize = 8 + 2 + 8;
+///
+/// Cada marca lleva **presencia y valor por separado**, como el grupo del socket
+/// en la configuracion firmada: sin la presencia, «sin establecer» y «establecida
+/// en cero» darian los mismos bytes y son cosas distintas.
+const LONGITUD_CENTINELA: usize = 8 + 2 + (1 + 8) + (1 + 8);
+
+/// Directorio volatil donde vive el socket, por omision. RPT-067, PA-120.
+///
+/// `/run` es `tmpfs`: se vacia en cada arranque. Eso no es un detalle de estilo,
+/// es lo que **erradica por construccion** el socket huerfano — un fichero que
+/// sobrevive al proceso y hace que el cliente reciba `ECONNREFUSED` sobre algo
+/// que existe.
+pub const DIRECTORIO_SOCKET_POR_OMISION: &str = "/run/eje-latam";
+
+/// Nombre del socket. No es configurable a proposito.
+///
+/// Se puede mover el **directorio**, nunca el fichero. Si la ruta completa fuera
+/// configurable, nada impediria apuntarla de vuelta al directorio de evidencia y
+/// deshacer la separacion sin que ninguna comprobacion se enterase.
+const NOMBRE_SOCKET: &str = "agente.sock";
 
 /// Rutas del almacen local.
 ///
 /// Se recibe un **directorio**, no rutas sueltas: codificar tres rutas
 /// independientes invita a que una de ellas apunte a otro sitio tras un cambio
 /// de configuracion.
+///
+/// # Por que hay dos directorios y no uno
+///
+/// RPT-067, PA-120. Lo persistente y lo volatil tienen ciclos de vida distintos
+/// y no deben compartir sitio:
+///
+/// - `directorio` guarda lo que **tiene que sobrevivir** al reinicio: inventario,
+///   centinela, registro de evidencia, ancla.
+/// - `directorio_socket` guarda lo que **no debe sobrevivirlo**: el socket.
+///
+/// La consecuencia que importa no es estetica. Con los dos juntos,
+/// `ReadWritePaths=/var/lib/eje-latam` autoriza a la vez la escritura de
+/// evidencia y la creacion del socket, y medir el aislamiento del servicio no
+/// distingue una cosa de la otra. Separados, la medicion es de una sola cosa.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RutasAlmacen {
     directorio: PathBuf,
+    directorio_socket: PathBuf,
 }
 
 impl RutasAlmacen {
-    /// Rutas bajo el directorio de datos indicado.
+    /// Rutas bajo el directorio de datos indicado, con el socket en
+    /// [`DIRECTORIO_SOCKET_POR_OMISION`].
     #[must_use]
-    pub const fn nuevo(directorio: PathBuf) -> Self {
-        Self { directorio }
+    pub fn nuevo(directorio: PathBuf) -> Self {
+        Self {
+            directorio,
+            directorio_socket: PathBuf::from(DIRECTORIO_SOCKET_POR_OMISION),
+        }
+    }
+
+    /// Igual, con el directorio del socket puesto a mano.
+    ///
+    /// Existe para el desarrollo sin privilegios: crear `/run/eje-latam` exige
+    /// root, y obligar a `sudo` para levantar la consola de diagnostico haria
+    /// que nadie la levantara.
+    #[must_use]
+    pub const fn con_directorio_socket(directorio: PathBuf, directorio_socket: PathBuf) -> Self {
+        Self {
+            directorio,
+            directorio_socket,
+        }
     }
 
     /// Directorio de datos.
     #[must_use]
     pub fn directorio(&self) -> &Path {
         &self.directorio
+    }
+
+    /// Directorio volatil donde se abre el socket.
+    #[must_use]
+    pub fn directorio_socket(&self) -> &Path {
+        &self.directorio_socket
     }
 
     /// Inventario firmado.
@@ -112,12 +182,14 @@ impl RutasAlmacen {
 
     /// Socket de escucha local (RPT-035, PA-41).
     ///
-    /// Cuelga del mismo directorio que todo lo demas. RPT-002 §9.3 prohibe el
-    /// puerto TCP local: un servicio en `localhost` es alcanzable por cualquier
-    /// proceso y por cualquier pagina que el usuario visite.
+    /// **No** cuelga del directorio de datos: vive en el volatil (RPT-067,
+    /// PA-120). RPT-002 §9.3 sigue prohibiendo el puerto TCP local — un servicio
+    /// en `localhost` es alcanzable por cualquier proceso y por cualquier pagina
+    /// que el usuario visite—, y esto no lo cambia: sigue siendo un socket de
+    /// dominio Unix, sólo que en otro sitio.
     #[must_use]
     pub fn socket(&self) -> PathBuf {
-        self.directorio.join("agente.sock")
+        self.directorio_socket.join(NOMBRE_SOCKET)
     }
 
     /// Ancla del extremo de la cadena de evidencia (RPT-033, PA-57).
@@ -165,17 +237,114 @@ pub enum ErrorArranque {
     Disco(#[from] ErrorDisco),
 }
 
+/// Las marcas de agua de este sensor, **en un solo fichero**.
+///
+/// RPT-078, PA-79 paso 5.
+///
+/// # Por que dos contadores y no uno
+///
+/// El inventario y la configuracion firmada se emiten a ritmos distintos y por
+/// motivos distintos. Con un contador compartido, publicar un inventario nuevo
+/// subiria la marca y dejaria fuera configuraciones legitimas mas bajas — y al
+/// reves. Serian dos series acopladas por casualidad de implementacion.
+///
+/// # Por que un solo fichero y no dos
+///
+/// RPT-017. Dispersar el estado de seguridad invita a que una escritura sobreviva
+/// y la otra no. Aqui las dos marcas viajan en la misma escritura atomica: o
+/// avanzan las dos o no avanza ninguna.
+///
+/// Y hay un motivo mas concreto. `aceptar_inventario` escribia el fichero
+/// **entero** desde la secuencia del inventario. Con una segunda marca dentro y
+/// un segundo escritor ingenuo, aceptar un inventario habria borrado la marca de
+/// configuracion en silencio, dejando entrar cualquier configuracion antigua. Por
+/// eso los dos `aceptar_*` releen el disco y funden, en lugar de componer el
+/// fichero desde lo que traen en la mano.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Centinelas {
+    /// Secuencia mas alta de inventario aceptada. RPT-012 §4.4, PA-27.
+    pub inventario: Centinela,
+    /// Secuencia mas alta de configuracion firmada aceptada. RPT-074 §5.
+    pub configuracion: Centinela,
+}
+
+impl Centinelas {
+    /// Ninguna de las dos series ha empezado. Es lo que significa que el fichero
+    /// no exista.
+    pub const SIN_ESTABLECER: Self = Self {
+        inventario: Centinela::SinEstablecer,
+        configuracion: Centinela::SinEstablecer,
+    };
+
+    /// Las mismas marcas con la del inventario sustituida.
+    #[must_use]
+    pub const fn con_inventario(self, marca: Centinela) -> Self {
+        Self {
+            inventario: marca,
+            configuracion: self.configuracion,
+        }
+    }
+
+    /// Las mismas marcas con la de configuracion sustituida.
+    #[must_use]
+    pub const fn con_configuracion(self, marca: Centinela) -> Self {
+        Self {
+            inventario: self.inventario,
+            configuracion: marca,
+        }
+    }
+
+    /// Si ninguna de las dos series ha empezado.
+    #[must_use]
+    pub const fn vacio(self) -> bool {
+        self.inventario.secuencia().is_none() && self.configuracion.secuencia().is_none()
+    }
+}
+
+/// Serializa una marca: presencia y valor.
+fn escribir_marca(salida: &mut Vec<u8>, marca: Centinela) {
+    match marca.secuencia() {
+        Some(secuencia) => {
+            salida.push(1);
+            salida.extend_from_slice(&secuencia.to_be_bytes());
+        }
+        // Los ocho bytes van a cero y no a basura: dos ficheros que dicen lo
+        // mismo tienen que ser el mismo fichero, o `analizar` no puede rechazar
+        // la segunda codificacion.
+        None => salida.extend_from_slice(&[0u8; 9]),
+    }
+}
+
+/// Lee una marca de nueve bytes.
+///
+/// `None` significa que los bytes no son una marca valida, no que la marca este
+/// sin establecer: eso lo dice la bandera de presencia.
+fn leer_marca(bytes: &[u8]) -> Option<Centinela> {
+    let (presencia, valor) = bytes.split_first()?;
+    let valor: [u8; 8] = valor.try_into().ok()?;
+
+    match *presencia {
+        // Ausente **y** con el valor a cero. Un cero de presencia con valor
+        // encima seria una segunda forma de escribir «sin establecer», y la
+        // segunda forma es siempre por donde se cuela algo.
+        0 if valor == [0u8; 8] => Some(Centinela::SinEstablecer),
+        1 => Some(Centinela::Establecido(u64::from_be_bytes(valor))),
+        _ => None,
+    }
+}
+
 /// Serializa el centinela.
 ///
-/// **La ausencia del fichero es [`Centinela::SinEstablecer`]**, asi que ese
-/// estado no se representa en disco. Un fichero que existe siempre declara una
-/// secuencia; lo contrario permitiria dos codificaciones del mismo estado.
+/// **La ausencia del fichero es [`Centinelas::SIN_ESTABLECER`]**, asi que ese
+/// estado no se representa en disco: serializarlo produce bytes que su propio
+/// analizador rechaza. Ver [`analizar_centinela`].
 #[must_use]
-pub fn serializar_centinela(secuencia: u64) -> Vec<u8> {
+pub fn serializar_centinela(centinelas: Centinelas) -> Vec<u8> {
     let mut salida = Vec::with_capacity(LONGITUD_CENTINELA);
     salida.extend_from_slice(MAGICO_CENTINELA);
     salida.extend_from_slice(&VERSION_CENTINELA.to_be_bytes());
-    salida.extend_from_slice(&secuencia.to_be_bytes());
+    escribir_marca(&mut salida, centinelas.inventario);
+    escribir_marca(&mut salida, centinelas.configuracion);
     salida
 }
 
@@ -183,9 +352,11 @@ pub fn serializar_centinela(secuencia: u64) -> Vec<u8> {
 ///
 /// # Errores
 ///
-/// [`ErrorArranque::CentinelaCorrupto`] ante longitud, magico o version que no
-/// cuadren.
-pub fn analizar_centinela(bytes: &[u8]) -> Result<Centinela, ErrorArranque> {
+/// [`ErrorArranque::CentinelaCorrupto`] ante longitud, magico, version o marcas
+/// que no cuadren — incluido **un fichero que no afirma ninguna de las dos
+/// series**: eso ya lo dice la ausencia del fichero, y admitir las dos formas
+/// dejaria escribir un centinela que no dice nada donde habia uno que decia algo.
+pub fn analizar_centinela(bytes: &[u8]) -> Result<Centinelas, ErrorArranque> {
     if bytes.len() != LONGITUD_CENTINELA || &bytes[..8] != MAGICO_CENTINELA {
         return Err(ErrorArranque::CentinelaCorrupto);
     }
@@ -194,10 +365,22 @@ pub fn analizar_centinela(bytes: &[u8]) -> Result<Centinela, ErrorArranque> {
         return Err(ErrorArranque::CentinelaCorrupto);
     }
 
-    let mut secuencia = [0u8; 8];
-    secuencia.copy_from_slice(&bytes[10..18]);
+    let (Some(inventario), Some(configuracion)) =
+        (leer_marca(&bytes[10..19]), leer_marca(&bytes[19..28]))
+    else {
+        return Err(ErrorArranque::CentinelaCorrupto);
+    };
 
-    Ok(Centinela::Establecido(u64::from_be_bytes(secuencia)))
+    let centinelas = Centinelas {
+        inventario,
+        configuracion,
+    };
+
+    if centinelas.vacio() {
+        return Err(ErrorArranque::CentinelaCorrupto);
+    }
+
+    Ok(centinelas)
 }
 
 /// Resultado del arranque, que **es** el proveedor de inventario.
@@ -377,10 +560,10 @@ impl ProveedorInventario for EstadoArranque {
 /// # Errores
 ///
 /// [`ErrorArranque::CentinelaCorrupto`] o [`ErrorArranque::Disco`].
-pub fn cargar_centinela(rutas: &RutasAlmacen) -> Result<Centinela, ErrorArranque> {
+pub fn cargar_centinela(rutas: &RutasAlmacen) -> Result<Centinelas, ErrorArranque> {
     match leer(&rutas.centinela()) {
         Ok(bytes) => analizar_centinela(&bytes),
-        Err(ErrorDisco::NoExiste { .. }) => Ok(Centinela::SinEstablecer),
+        Err(ErrorDisco::NoExiste { .. }) => Ok(Centinelas::SIN_ESTABLECER),
         Err(error) => Err(ErrorArranque::Disco(error)),
     }
 }
@@ -470,7 +653,7 @@ pub fn aprovisionar_clave(
 /// ficheros de clave existe y esta mal formado.
 pub fn arrancar_con_almacen(
     rutas: &RutasAlmacen,
-) -> Result<(EstadoArranque, Centinela), ErrorArranque> {
+) -> Result<(EstadoArranque, Centinelas), ErrorArranque> {
     let operativa = cargar_clave(&rutas.clave_operativa(), DominioClave::Cliente)?;
     let recuperacion = cargar_clave(
         &rutas.clave_recuperacion(),
@@ -478,17 +661,21 @@ pub fn arrancar_con_almacen(
     )?;
 
     let Some(operativa) = operativa else {
-        let centinela = cargar_centinela(rutas)?;
+        let centinelas = cargar_centinela(rutas)?;
 
         // Sin clave no se puede verificar nada, pero el centinela sigue
         // distinguiendo la instalacion a medias del borrado. Si alguna vez se
         // acepto un inventario, hubo clave; que ya no este es supresion.
-        let estado = match centinela.secuencia() {
+        //
+        // Se mira la marca del INVENTARIO y no las dos: un sensor que solo tuvo
+        // configuracion firmada nunca tuvo inventario, y leer su marca como
+        // prueba de que lo hubo acusaria de supresion a una instalacion a medias.
+        let estado = match centinelas.inventario.secuencia() {
             None => EstadoArranque::SinClaveAprovisionada,
             Some(secuencia_conocida) => EstadoArranque::Supresion { secuencia_conocida },
         };
 
-        return Ok((estado, centinela));
+        return Ok((estado, centinelas));
     };
 
     // La de recuperacion puede faltar sin que eso impida arrancar: solo sirve
@@ -515,37 +702,37 @@ pub fn arrancar(
     rutas: &RutasAlmacen,
     operativa: &ClaveInventario,
     recuperacion: Option<&ClaveInventario>,
-) -> Result<(EstadoArranque, Centinela), ErrorArranque> {
-    let centinela = cargar_centinela(rutas)?;
+) -> Result<(EstadoArranque, Centinelas), ErrorArranque> {
+    let centinelas = cargar_centinela(rutas)?;
     let revocaciones = cargar_revocaciones(rutas, recuperacion)?;
 
     let bytes = match leer(&rutas.inventario()) {
         Ok(bytes) => bytes,
         Err(ErrorDisco::NoExiste { .. }) => {
             // Aqui se decide todo. Ver la tabla del encabezado.
-            let estado = match centinela.secuencia() {
+            let estado = match centinelas.inventario.secuencia() {
                 None => EstadoArranque::PrimerArranque,
                 Some(secuencia_conocida) => EstadoArranque::Supresion { secuencia_conocida },
             };
-            return Ok((estado, centinela));
+            return Ok((estado, centinelas));
         }
         Err(error) => return Err(ErrorArranque::Disco(error)),
     };
 
-    match InventarioLocal::cargar(&bytes, operativa, centinela, &revocaciones) {
-        Ok(inventario) => Ok((EstadoArranque::Operativo(Box::new(inventario)), centinela)),
+    match InventarioLocal::cargar(&bytes, operativa, centinelas.inventario, &revocaciones) {
+        Ok(inventario) => Ok((EstadoArranque::Operativo(Box::new(inventario)), centinelas)),
 
         // El formato obsoleto se separa antes de llegar a `NoVerifica`. Sin este
         // brazo, actualizar el agente pareceria un ataque en cada sitio a la vez.
         Err(ErrorCarga::Formato(ErrorFormato::FormatoObsoleto { encontrada })) => {
-            Ok((EstadoArranque::FormatoObsoleto { encontrada }, centinela))
+            Ok((EstadoArranque::FormatoObsoleto { encontrada }, centinelas))
         }
 
         Err(error) => Ok((
             EstadoArranque::NoVerifica {
                 detalle: error.to_string(),
             },
-            centinela,
+            centinelas,
         )),
     }
 }
@@ -562,17 +749,61 @@ pub fn arrancar(
 /// Al reves —inventario primero— se actuaria sobre un inventario cuya secuencia
 /// no quedo registrada, reabriendo la ventana de reversion.
 ///
+/// # Por que relee el disco antes de escribir
+///
+/// RPT-078. El fichero de centinela lleva **dos** marcas desde el paso 5. Componer
+/// el fichero entero desde la secuencia del inventario —como hacia esta funcion,
+/// cuando solo habia una— borraria la marca de configuracion en silencio, y a
+/// partir de ahi cualquier configuracion antigua y bien firmada entraria. El
+/// merge ocurre aqui y no en quien llama, porque un parametro se puede pasar
+/// caducado y esto no.
+///
 /// # Errores
 ///
-/// [`ErrorArranque::Disco`] si alguna escritura falla.
+/// [`ErrorArranque::Disco`] si alguna escritura falla, y
+/// [`ErrorArranque::CentinelaCorrupto`] si el centinela que hay no se entiende.
+/// **No se sobrescribe un centinela corrupto**: puede ser un ataque en curso, y
+/// pisarlo destruiria la unica prueba de que lo hubo.
 pub fn aceptar_inventario(
     rutas: &RutasAlmacen,
     bytes: &[u8],
     secuencia: u64,
-) -> Result<Centinela, ErrorArranque> {
-    escribir_atomico(&rutas.centinela(), &serializar_centinela(secuencia))?;
+) -> Result<Centinelas, ErrorArranque> {
+    let centinelas = cargar_centinela(rutas)?.con_inventario(Centinela::Establecido(secuencia));
+
+    escribir_atomico(&rutas.centinela(), &serializar_centinela(centinelas))?;
     escribir_atomico(&rutas.inventario(), bytes)?;
-    Ok(Centinela::Establecido(secuencia))
+    Ok(centinelas)
+}
+
+/// Anota que se acepto una configuracion firmada con esta secuencia.
+///
+/// RPT-078, PA-79 paso 5.
+///
+/// # Solo la marca, y antes de obedecer
+///
+/// El fichero de configuracion no lo escribe el agente: lo deja el administrador
+/// en `/etc/eje-latam`. Aqui solo se avanza la marca, y **antes** de aplicar los
+/// parametros, por lo mismo que el centinela se escribe antes que el inventario:
+/// si el proceso muere en medio, queda la marca en N y la configuracion N sin
+/// aplicar. Al rearrancar se vuelve a presentar con `secuencia == aceptada`, que
+/// se admite porque la comparacion es `<` y no `<=`.
+///
+/// Al reves —obedecer y despues anotar— habria una ventana en la que el sensor ya
+/// corre con una configuracion cuya secuencia no consta, que es exactamente donde
+/// vive el ataque de reversion.
+///
+/// # Errores
+///
+/// [`ErrorArranque::Disco`] o [`ErrorArranque::CentinelaCorrupto`].
+pub fn aceptar_configuracion(
+    rutas: &RutasAlmacen,
+    secuencia: u64,
+) -> Result<Centinelas, ErrorArranque> {
+    let centinelas = cargar_centinela(rutas)?.con_configuracion(Centinela::Establecido(secuencia));
+
+    escribir_atomico(&rutas.centinela(), &serializar_centinela(centinelas))?;
+    Ok(centinelas)
 }
 
 /// Persiste el registro de revocaciones.

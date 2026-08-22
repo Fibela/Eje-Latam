@@ -137,6 +137,65 @@ export interface Condiciones {
    */
   readonly salidaNoDisponible: boolean;
   /**
+   * Este agente **no tiene colector configurado**: no emite ni late.
+   *
+   * RPT-054 §4, PA-109. Distinta de `salidaNoDisponible`: aquélla es una avería
+   * que se resuelve sola cuando la red vuelve; ésta dice que nunca hubo
+   * colector, no se arregla esperando y se responde configurando, no llamando a
+   * quien mantiene el SIEM.
+   *
+   * **Segunda condición que no viaja por syslog**, y por una imposibilidad: un
+   * agente sin colector no puede avisar de que no tiene colector.
+   *
+   * Para el técnico en sitio significa: el sensor funciona y la sala no lo ve.
+   * Nadie fuera notará si se apaga.
+   */
+  readonly sinColector: boolean;
+  /**
+   * **La escucha local no está abierta**: ninguna consola puede conectarse.
+   *
+   * RPT-070, PA-125. Se observó ocurriendo, no razonando: en `systemd` real el
+   * conjunto acotado de capacidades impedía asignar el grupo al socket, y el
+   * sensor arrancaba sin escucha. Las diez condiciones de entonces decían, todas,
+   * que estaba sano.
+   *
+   * **Ésta sí viaja por syslog**, al revés que las dos anteriores. Aquéllas
+   * describen el canal de syslog mismo; ésta describe el otro canal, y cuando la
+   * escucha local cae, syslog es lo que sigue funcionando.
+   *
+   * # Por qué VIS-04 casi nunca la verá encendida
+   *
+   * Porque para verla hay que estar conectado, y si está encendida no se puede
+   * estar. Llega en dos casos: una consulta que alcanzó al agente justo antes de
+   * que la escucha cayera, y una segunda escucha —otro agente en la misma
+   * máquina— que sí responde. Fuera de ahí, quien se entera es la sala.
+   */
+  readonly escuchaNoDisponible: boolean;
+  /**
+   * **Este sensor corre sin configuración firmada.**
+   *
+   * RPT-074, PA-79. Sus parámetros salen de la línea de órdenes, así que quien
+   * controle el arranque puede alargar la ventana de silencio que la sala
+   * vigila, apuntarlo a otro segmento o cambiarle el nombre.
+   *
+   * **No es un fallo**: es un estado legítimo de desarrollo y de forense. Lo que
+   * no puede es pasar desapercibido, y por eso VIS-04 la muestra.
+   */
+  readonly configuracionSinFirmar: boolean;
+  /**
+   * **Hay configuración firmada y el agente NO la acepta.**
+   *
+   * RPT-074, PA-79. Distinta de `configuracionSinFirmar` y no por matiz: aquélla
+   * dice «todavía no se ha aprovisionado» y ésta dice «hay una y no vale».
+   * Colapsarlas mandaría a emitir una configuración cuando lo que hay es alguien
+   * que tocó el fichero.
+   *
+   * VIS-04 **no debe presentarla como manipulación**, aunque la firma rota apunte
+   * a ello: una configuración emitida para otra máquina o una clave rotada dan la
+   * misma condición y no son un ataque. El motivo está en el diario del sensor.
+   */
+  readonly configuracionNoVerifica: boolean;
+  /**
    * El registro de evidencia está lleno y **ya no admite alertas**.
    *
    * RPT-039, PA-72. Es la más grave de las siete: las otras seis dicen que algo
@@ -328,6 +387,10 @@ export const CAMPOS_CONDICIONES = [
   ["capturaNoDisponible", "booleano"],
   ["accionAdministrativa", "booleano"],
   ["salidaNoDisponible", "booleano"],
+  ["sinColector", "booleano"],
+  ["escuchaNoDisponible", "booleano"],
+  ["configuracionSinFirmar", "booleano"],
+  ["configuracionNoVerifica", "booleano"],
   ["registroSaturado", "booleano"],
   ["evidenciaEnRiesgo", "booleano"],
 ] as const satisfies readonly (readonly [keyof Condiciones, string])[];

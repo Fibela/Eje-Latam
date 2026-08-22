@@ -130,7 +130,13 @@ fn entrecomillado(linea: &str, prefijo: &str) -> Option<String> {
 }
 
 /// Resumen SHA-256 en hexadecimal.
-fn resumir(bytes: &[u8]) -> String {
+///
+/// Compartida con [`crate::empaquetar`] (RPT-073, PA-126): el manifiesto de
+/// integridad del artefacto necesita exactamente esto. Vive aqui por haber
+/// llegado antes, no por pertenecer a los vectores; duplicarla habria sido la
+/// septima lista escrita a mano de la semana, y ademas una en la que dos copias
+/// podrian discrepar en el formato del hexadecimal sin que nada lo notara.
+pub(crate) fn resumir(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
 
     let digestion = Sha256::digest(bytes);

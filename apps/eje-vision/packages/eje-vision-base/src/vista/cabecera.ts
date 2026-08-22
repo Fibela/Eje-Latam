@@ -8,7 +8,7 @@
  * lo demás**:
  *
  * - **Sin captura**: el sensor no está observando. Todo lo que muestre la
- *   pantalla es de antes. Como fila número cinco entre nueve, invita a leer el
+ *   pantalla es de antes. Como fila número cinco entre diez, invita a leer el
  *   resto como si fuera actual — que es el zombi de RPT-047 §2 reapareciendo en
  *   la capa visual.
  * - **Sin agente**: no hay con quién hablar. Lo de la pantalla es de la última
@@ -82,7 +82,7 @@ export function componerCabecera(estado: EstadoPanel<Condiciones>): Cabecera {
 
   if (estado.clase !== "datos") {
     // `vacio` y `noServido` no tienen sentido para las condiciones: el agente
-    // siempre devuelve las nueve. Si llega uno de estos, algo cambió en el
+    // siempre devuelve las trece. Si llega uno de estos, algo cambió en el
     // contrato y decirlo es mejor que elegir una rama al azar.
     return {
       urgencia: "critica",
@@ -130,13 +130,85 @@ export function componerCabecera(estado: EstadoPanel<Condiciones>): Cabecera {
     };
   }
 
-  // La única que no viaja por syslog: si nadie mira esta pantalla, nadie lo
-  // sabe. Por eso sube a la cabecera aunque no sea la más grave.
+  // Una de las dos que no viajan por syslog: si nadie mira esta pantalla, nadie
+  // lo sabe. Por eso sube a la cabecera aunque no sea la más grave.
   if (condiciones.salidaNoDisponible) {
     return {
       urgencia: "atencion",
       titulo: "Las alertas no están saliendo de este equipo",
       detalle: "El colector no responde. Esta pantalla es lo único que lo sabe.",
+      datosDeAntes: false,
+    };
+  }
+
+  // La otra, y va **después**: una avería en curso es más urgente que una
+  // instalación incompleta. Si las dos estuvieran activas, «el colector no
+  // responde» sería engañoso —no hay colector al que responder—, pero eso no
+  // puede pasar: sin colector configurado no hay envío que falle.
+  //
+  // RPT-054 §4, PA-109. Este es el sitio donde el técnico que fue a la planta se
+  // entera, y el único: por definición no hay forma de contarlo hacia fuera.
+  if (condiciones.sinColector) {
+    return {
+      urgencia: "atencion",
+      titulo: "Este sensor no informa a ninguna sala",
+      detalle:
+        "No tiene colector configurado: vigila el segmento, pero nada sale de " +
+        "este equipo y nadie fuera notará si se apaga.",
+      datosDeAntes: false,
+    };
+  }
+
+  // RPT-070, PA-125. Va la última de las tres del canal, y no por menos grave:
+  // por lo raro que es verla. Para leer esta pantalla hay que estar conectado, y
+  // si esta condición está encendida no se puede estar.
+  //
+  // Llega en dos casos: una consulta que alcanzó al agente justo antes de que la
+  // escucha cayera, y un segundo agente en la misma máquina cuyo socket sí
+  // responde. Presentarla es barato y callarla dejaría al técnico mirando un
+  // panel que no explica por qué el otro sensor no aparece.
+  if (condiciones.escuchaNoDisponible) {
+    return {
+      urgencia: "atencion",
+      titulo: "Este sensor no admite consultas",
+      detalle:
+        "Su escucha local no está abierta: sigue vigilando y registrando, pero " +
+        "ninguna consola puede preguntarle nada. La sala sí se entera.",
+      datosDeAntes: false,
+    };
+  }
+
+  // RPT-074, PA-79. Después de las tres del canal, porque aquéllas dicen que el
+  // sensor no puede contar lo que ve y ésta dice que puede no estar viendo lo que
+  // alguien creyó haberle mandado mirar. Las primeras son mudez; ésta es duda.
+  //
+  // No se anuncia como incidente aunque la firma rota apunte a manipulación: una
+  // máquina ajena o una clave rotada dan lo mismo, y mandar a respuesta a
+  // incidentes por un error de despliegue es la fatiga de alertas de PA-45.
+  if (condiciones.configuracionNoVerifica) {
+    return {
+      urgencia: "atencion",
+      titulo: "La configuración de este sensor no verifica",
+      detalle:
+        "Hay un fichero firmado y el agente no lo acepta. El motivo está en el " +
+        "diario del sensor: firma, máquina o clave.",
+      datosDeAntes: false,
+    };
+  }
+
+  // La última de las tres, y la más leve de las tres: el sensor hace lo que se le
+  // pidió, sólo que quien se lo pidió no está firmado.
+  //
+  // Ocupa cabecera y no fila porque es exactamente la condición que se aprende a
+  // ignorar si se deja abajo, y su riesgo es que el estado degradado se vuelva el
+  // normal (RPT-074 §8).
+  if (condiciones.configuracionSinFirmar) {
+    return {
+      urgencia: "atencion",
+      titulo: "Este sensor corre sin configuración firmada",
+      detalle:
+        "Sus parámetros salen de la línea de órdenes: quien controle el arranque " +
+        "puede alargar la ventana de silencio que la sala vigila.",
       datosDeAntes: false,
     };
   }

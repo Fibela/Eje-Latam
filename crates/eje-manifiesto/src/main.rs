@@ -25,7 +25,7 @@
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
-use eje_manifiesto::entrada::Entrada;
+use eje_manifiesto::entrada::{ConfiguracionEntrada, Entrada};
 use eje_manifiesto::fragmento::{
     analizar as analizar_fragmento, huella_de, reunir_verificando,
     serializar as serializar_fragmento,
@@ -34,6 +34,7 @@ use eje_manifiesto::reposo_semilla::{LONGITUD_SAL, abrir, sellar};
 use eje_manifiesto::{Emisor, ErrorEmision};
 use guardian_cc::arranque::{RutasAlmacen, aprovisionar_clave};
 use guardian_cc::clave::analizar as analizar_clave;
+use guardian_cc::configuracion;
 use guardian_cc::inventario::DominioClave;
 use guardian_cc::revocacion::{
     Anotacion, ArchivoRevocaciones, CertificadoRevocacion, mensaje_de_certificado,
@@ -53,6 +54,8 @@ enum ErrorHerramienta {
          eje-manifiesto generar      --semilla <fichero> --almacen <directorio>\n  \
          eje-manifiesto emitir       --semilla <fichero> --entrada <toml> --salida <inv> \
          [--anterior <inv>]\n  \
+         eje-manifiesto configurar   --semilla <fichero> --entrada <toml> --salida <cfg> \
+         [--anterior <cfg>]\n  \
          eje-manifiesto recuperacion --fragmentos <prefijo> --almacen <directorio>\n  \
          eje-manifiesto revocar      --fragmento-uno <frg> --fragmento-dos <frg> \
          --almacen <directorio> --sucesora <pub> --corte <n>"
@@ -90,6 +93,14 @@ enum ErrorHerramienta {
     /// La emision fallo.
     #[error(transparent)]
     Emision(#[from] ErrorEmision),
+
+    /// La configuracion anterior no se pudo leer o no verifica. RPT-074, PA-79.
+    ///
+    /// Se propaga en lugar de tratarse como «no hay anterior»: caer a la serie
+    /// desde uno ante un fichero ilegible dejaria que borrarlo bastara para
+    /// rebobinar la secuencia, que es justo lo que la secuencia impide.
+    #[error("la configuracion anterior no verifica: {0}")]
+    ConfiguracionAnterior(#[from] guardian_cc::configuracion::ErrorConfiguracion),
 
     /// El aprovisionamiento de la clave publica fallo.
     #[error("no se pudo escribir la clave de verificacion: {detalle}")]
@@ -428,6 +439,85 @@ fn revocar(opciones: &Opciones) -> Result<(), ErrorHerramienta> {
     Ok(())
 }
 
+/// Emite la configuracion firmada de un sensor. RPT-074, PA-79.
+///
+/// # La secuencia no se escribe: se deduce de la anterior **verificada**
+///
+/// Un numero puesto a mano en el TOML permitiria retroceder la serie —volver a
+/// emitir la configuracion de la semana pasada, la del intervalo largo— sin que
+/// nada lo notara. Se lee la anterior con la clave de este mismo emisor y se
+/// suma uno; si no hay anterior, la serie empieza en uno.
+///
+/// # Y la anterior se verifica antes de creerle el numero
+///
+/// Es lo mismo que `secuencia_siguiente` hace con el inventario. Un fichero
+/// editado no decide que se emite despues.
+fn configurar(opciones: &Opciones) -> Result<(), ErrorHerramienta> {
+    let (Some(ruta_semilla), Some(ruta_entrada), Some(salida)) =
+        (&opciones.semilla, &opciones.entrada, &opciones.salida)
+    else {
+        return Err(ErrorHerramienta::Uso);
+    };
+
+    let frase = pedir_frase("la de esta semilla")?;
+    let emisor = Emisor::desde_semilla(abrir(&leer(ruta_semilla)?, &frase)?);
+
+    let texto = String::from_utf8_lossy(&leer(ruta_entrada)?).into_owned();
+    let entrada = ConfiguracionEntrada::analizar(&texto)?;
+
+    // La secuencia de la anterior, si existe. Se verifica contra **esta misma
+    // maquina**: una configuracion de otro sensor no puede continuar esta serie,
+    // y `analizar` ya lo comprueba.
+    let anterior = match &opciones.anterior {
+        Some(ruta) if ruta.exists() => {
+            let previa = configuracion::analizar(
+                &leer(ruta)?,
+                &emisor.como_clave_de_cliente(),
+                &entrada.maquina,
+                // Sin marca: la frescura es del SENSOR, y aqui no hay ninguno.
+                // El emisor no la puede consultar —vive en el almacen del sensor,
+                // a un pais de distancia— y comparar contra una inventada seria
+                // peor que no comparar. Lo que hace este comando es **avanzar** la
+                // serie desde la anterior; quien la comprueba es el agente
+                // (RPT-078, RPT-074 §5).
+                guardian_cc::inventario::Centinela::SinEstablecer,
+            )?;
+            Some(previa.secuencia)
+        }
+        _ => None,
+    };
+
+    let secuencia = match anterior {
+        Some(previa) => previa.checked_add(1).ok_or(ErrorHerramienta::Uso)?,
+        None => 1,
+    };
+
+    let valores = entrada.valores(secuencia)?;
+    let firma = emisor.firmar_configuracion(&valores);
+    escribir(salida, &configuracion::serializar(&valores, &firma))?;
+
+    println!("Configuracion firmada : {}", salida.display());
+    println!("Valida solo en        : {}", valores.maquina_esperada);
+    println!("Identidad en la sala  : {}", valores.nombre);
+    println!("Interfaz              : {}", valores.interfaz);
+    println!("Intervalo de latido   : {} ms", valores.intervalo_latido_ms);
+    println!("Secuencia             : {secuencia}");
+    println!();
+
+    if valores.colector.is_empty() {
+        println!("  !! SIN COLECTOR. Este sensor no informara a ninguna sala, y");
+        println!("     nadie fuera notara si se apaga (RPT-054 §4.1).");
+        println!();
+    }
+
+    println!(
+        "El agente la aceptara solo en '{}'.",
+        valores.maquina_esperada
+    );
+
+    Ok(())
+}
+
 fn main() -> Result<(), ErrorHerramienta> {
     let argumentos: Vec<String> = std::env::args().skip(1).collect();
     let Some((orden, resto)) = argumentos.split_first() else {
@@ -439,6 +529,7 @@ fn main() -> Result<(), ErrorHerramienta> {
     match orden.as_str() {
         "generar" => generar(&opciones),
         "emitir" => emitir(&opciones),
+        "configurar" => configurar(&opciones),
         "recuperacion" => recuperacion(&opciones),
         "revocar" => revocar(&opciones),
         _ => Err(ErrorHerramienta::Uso),

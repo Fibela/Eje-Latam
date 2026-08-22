@@ -405,6 +405,66 @@ registro = "Condiciones"
 nombre = "salidaNoDisponible"
 tipo = "booleano"
 
+# Anadido en RPT-054 (PA-109). Distinta de la anterior y no por matiz: aquella
+# dice que el colector existe y ahora no responde —una averia que se resuelve
+# sola cuando la red vuelve—; esta dice que NUNCA hubo colector. No se arregla
+# esperando: se configura.
+#
+# Colapsarlas mandaria al operador a investigar una caida de red inexistente, y
+# al reves haria pasar una caida real por una instalacion a medias.
+#
+# ESTA CONDICION TAMPOCO SE EMITE POR SYSLOG, y es la segunda que no puede: un
+# agente sin colector no puede avisar de que no tiene colector. El aviso viajaria
+# por el canal que no existe. Ademas de aqui, la declaran el instalador y
+# `journald`, que son los unicos sitios donde un sensor mudo puede decir algo.
+[[campo]]
+registro = "Condiciones"
+nombre = "sinColector"
+tipo = "booleano"
+
+# Anadido en RPT-070 (PA-125). NO se dedujo: se observo ocurriendo. En systemd
+# real, el conjunto acotado de capacidades impedia asignar el grupo al socket y
+# el sensor arrancaba sin escucha local. Las diez condiciones de entonces decian,
+# todas, que estaba sano (RPT-069 §4).
+#
+# ESTA CONDICION SI SE EMITE POR SYSLOG, y es lo que la distingue de las dos
+# anteriores. Aquellas describen el canal de syslog mismo y por eso no pueden
+# viajar por el; esta describe EL OTRO canal. Cuando la escucha local cae, syslog
+# es justamente lo que sigue funcionando.
+#
+# Y es el unico camino posible: lo que podria contar que la consola no conecta es
+# la consola, que es lo que no conecta.
+[[campo]]
+registro = "Condiciones"
+nombre = "escuchaNoDisponible"
+tipo = "booleano"
+
+# Anadidas en RPT-074 (PA-79). Dos y no una, por lo mismo que inventarioSuprimido
+# no es inventarioNoVerifica: «todavia no se ha aprovisionado» y «hay una y no
+# vale» mandan al tecnico a sitios distintos.
+#
+# LAS DOS SE EMITEN. Describen el estado del sensor, no el canal de syslog.
+#
+# `configuracionSinFirmar` es un estado LEGITIMO de desarrollo y forense: el
+# agente lanzado a mano es la herramienta con la que se observaron PA-123 y
+# PA-125. Lo que no puede es pasar desapercibido, y por eso existe esta condicion
+# en lugar de callar.
+[[campo]]
+registro = "Condiciones"
+nombre = "configuracionSinFirmar"
+tipo = "booleano"
+
+# `configuracionNoVerifica` NO cuenta como manipulacion, aunque la firma rota
+# apunte a ello: una configuracion emitida para otra maquina, una clave rotada o
+# un fichero corrupto por disco dan lo mismo, y presentarlas como incidente
+# mandaria al operador a respuesta a incidentes por un error de despliegue.
+#
+# Viaja con gravedad alta y sin acusar a nadie, como registroSaturado.
+[[campo]]
+registro = "Condiciones"
+nombre = "configuracionNoVerifica"
+tipo = "booleano"
+
 # Anadido en RPT-039 (PA-72). `anexar` no comprobaba el techo del formato: al
 # superar ASIENTOS_MAXIMOS se seguia anexando en memoria y el fichero resultante
 # NO se podia releer, con lo que el arranque siguiente lo apartaba acusando de

@@ -10,8 +10,11 @@
 //! ```
 
 mod cobertura;
+mod empaquetar;
 mod exclusion;
 mod guardian;
+mod instalador;
+mod manual;
 mod sembrar;
 mod tablero;
 mod vectores;
@@ -20,7 +23,7 @@ mod vectores_ipc;
 #[cfg(test)]
 mod pruebas;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const ROJO: &str = "\u{1b}[0;31m";
@@ -28,50 +31,209 @@ const VERDE: &str = "\u{1b}[0;32m";
 const GRIS: &str = "\u{1b}[0;90m";
 const FIN: &str = "\u{1b}[0m";
 
+/// Una orden de `xtask`: como se teclea, para que sirve y que ejecuta.
+///
+/// # Por que es una tabla y no un `match` con una ayuda al lado
+///
+/// RPT-066, PA-119. Este listado es la **unica** fuente: de aqui sale el
+/// despacho, de aqui sale `ayuda`, y contra esto se coteja `docs/Comandos.md`.
+///
+/// Mientras la ayuda fue una tira de `println!` aparte del `match`, nada impedia
+/// que una orden existiera sin anunciarse ni que se anunciara una que ya no
+/// existe. No es una posibilidad teorica: es la misma anatomia del tablero que
+/// conto 76 de 115 durante dos semanas (PA-108) y de las dos pruebas que nadie
+/// ejecutaba (PA-73). Tres indices escritos a mano, tres veces el mismo defecto.
+struct Orden {
+    /// Como se teclea.
+    nombre: &'static str,
+    /// Argumentos que admite, para la linea de ayuda. Vacio si no toma ninguno.
+    argumentos: &'static str,
+    /// Que hace, en una linea.
+    resumen: &'static str,
+    /// Recibe los argumentos **completos**, con el nombre de la orden en `[0]`.
+    ejecutar: fn(&[String]) -> ExitCode,
+}
+
+/// Todas las ordenes que `xtask` acepta. Fuente unica.
+const ORDENES: &[Orden] = &[
+    Orden {
+        nombre: "verificar",
+        argumentos: "[ruta]",
+        resumen: "Guardian de inconclusos (por defecto: crates)",
+        ejecutar: orden_verificar,
+    },
+    Orden {
+        nombre: "tablero",
+        argumentos: "",
+        resumen: "Recuento de puntos abiertos leido de RPT-002 §12",
+        ejecutar: orden_tablero,
+    },
+    Orden {
+        nombre: "cobertura",
+        argumentos: "",
+        resumen: "Comprueba que toda prueba escrita se ejecuta (PA-73)",
+        ejecutar: orden_cobertura,
+    },
+    Orden {
+        nombre: "manual",
+        argumentos: "",
+        resumen: "Paridad entre docs/Comandos.md y estas ordenes (PA-119)",
+        ejecutar: orden_manual,
+    },
+    Orden {
+        nombre: "empaquetar",
+        argumentos: "[ruta]",
+        resumen: "Artefacto headless, revisado sobre el disco (PA-107)",
+        ejecutar: orden_empaquetar,
+    },
+    Orden {
+        nombre: "probar-instalador",
+        argumentos: "",
+        resumen: "Caja de arena del instalador (PA-116). NO cubre PA-117",
+        ejecutar: orden_probar_instalador,
+    },
+    Orden {
+        nombre: "vectores",
+        argumentos: "[--actualizar]",
+        resumen: "Descarga y ancla los vectores ACVP y Wycheproof",
+        ejecutar: orden_vectores,
+    },
+    Orden {
+        nombre: "vectores-ipc",
+        argumentos: "",
+        resumen: "Regenera los vectores del formato de cable (RPT-045)",
+        ejecutar: orden_vectores_ipc,
+    },
+    Orden {
+        nombre: "sembrar",
+        argumentos: "<ruta> [cuantos] [relleno]",
+        resumen: "Fabrica un registro de evidencia para pruebas",
+        ejecutar: orden_sembrar,
+    },
+    Orden {
+        nombre: "ayuda",
+        argumentos: "",
+        resumen: "Muestra esta ayuda",
+        ejecutar: orden_ayuda,
+    },
+];
+
 fn main() -> ExitCode {
     let argumentos: Vec<String> = std::env::args().skip(1).collect();
-    let orden = argumentos.first().map(String::as_str).unwrap_or("ayuda");
+    let pedida = argumentos.first().map(String::as_str).unwrap_or("ayuda");
 
-    match orden {
-        "verificar" => {
-            let ruta = argumentos.get(1).map(String::as_str).unwrap_or("crates");
-            ejecutar_guardian(Path::new(ruta))
-        }
-        "vectores" => {
-            let actualizar = argumentos.iter().any(|a| a == "--actualizar");
-            ejecutar_vectores(actualizar)
-        }
-        "tablero" => ejecutar_tablero(),
-        "cobertura" => ejecutar_cobertura(),
-        "vectores-ipc" => ejecutar_vectores_ipc(),
-        "sembrar" => ejecutar_sembrar(&argumentos),
-        "ayuda" | "--help" | "-h" => {
-            ayuda();
-            ExitCode::SUCCESS
-        }
-        desconocido => {
-            eprintln!("{ROJO}Orden desconocida: '{desconocido}'{FIN}\n");
-            ayuda();
-            ExitCode::FAILURE
-        }
+    // `--help` y `-h` son alias y no ordenes: si estuvieran en ORDENES, la
+    // paridad con el manual exigiria documentarlos como si se tecleara
+    // `cargo xtask --help`, que no es como se invoca esto.
+    let nombre = match pedida {
+        "--help" | "-h" => "ayuda",
+        otro => otro,
+    };
+
+    if let Some(orden) = ORDENES.iter().find(|orden| orden.nombre == nombre) {
+        return (orden.ejecutar)(&argumentos);
     }
+
+    eprintln!("{ROJO}Orden desconocida: '{pedida}'{FIN}\n");
+    ayuda();
+    ExitCode::FAILURE
 }
 
 fn ayuda() {
     println!("Herramientas de desarrollo de Eje-Latam\n");
-    println!("  cargo xtask verificar [ruta]   Guardian de inconclusos (por defecto: crates)");
-    println!("  cargo xtask vectores           Descarga y ancla los vectores ACVP y Wycheproof");
-    println!(
-        "    --actualizar                 Reescribe el anclaje (usar solo tras cambiar FUENTES.toml)"
-    );
-    println!("  cargo xtask tablero            Recuento de puntos abiertos leido de RPT-002");
-    println!(
-        "  cargo xtask cobertura          Comprueba que toda prueba escrita se ejecuta (PA-73)"
-    );
-    println!(
-        "  cargo xtask vectores-ipc       Regenera los vectores del formato de cable (RPT-045)"
-    );
-    println!("  cargo xtask ayuda              Muestra esta ayuda");
+    for orden in ORDENES {
+        let invocacion = format!("cargo xtask {} {}", orden.nombre, orden.argumentos);
+        // El ancho sale de la invocacion mas larga, no de un numero elegido a
+        // ojo: `sembrar <ruta> [cuantos] [relleno]` desbordaba una columna de 40
+        // y rompia la alineacion de su propia linea.
+        let ancho = ORDENES
+            .iter()
+            .map(|orden| orden.nombre.len() + orden.argumentos.len() + "cargo xtask  ".len())
+            .max()
+            .unwrap_or(40);
+
+        println!(
+            "  {:<ancho$} {}",
+            invocacion.trim_end(),
+            orden.resumen,
+            ancho = ancho
+        );
+    }
+}
+
+fn orden_ayuda(_argumentos: &[String]) -> ExitCode {
+    ayuda();
+    ExitCode::SUCCESS
+}
+
+fn orden_verificar(argumentos: &[String]) -> ExitCode {
+    let ruta = argumentos.get(1).map(String::as_str).unwrap_or("crates");
+    ejecutar_guardian(Path::new(ruta))
+}
+
+fn orden_vectores(argumentos: &[String]) -> ExitCode {
+    ejecutar_vectores(argumentos.iter().any(|arg| arg == "--actualizar"))
+}
+
+fn orden_tablero(_argumentos: &[String]) -> ExitCode {
+    ejecutar_tablero()
+}
+
+fn orden_cobertura(_argumentos: &[String]) -> ExitCode {
+    ejecutar_cobertura()
+}
+
+fn orden_vectores_ipc(_argumentos: &[String]) -> ExitCode {
+    ejecutar_vectores_ipc()
+}
+
+fn orden_probar_instalador(_argumentos: &[String]) -> ExitCode {
+    ejecutar_probar_instalador()
+}
+
+fn orden_sembrar(argumentos: &[String]) -> ExitCode {
+    ejecutar_sembrar(argumentos)
+}
+
+fn orden_empaquetar(argumentos: &[String]) -> ExitCode {
+    ejecutar_empaquetar(argumentos)
+}
+
+/// Cotejo entre el manual de comandos y las ordenes que existen. RPT-066, PA-119.
+fn orden_manual(_argumentos: &[String]) -> ExitCode {
+    let raiz = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap_or(Path::new("."));
+
+    let nombres: Vec<&str> = ORDENES.iter().map(|orden| orden.nombre).collect();
+
+    println!("{GRIS}Manual de comandos contra las ordenes que existen{FIN}");
+
+    match manual::cotejar(raiz, &nombres) {
+        Ok(discrepancias) if discrepancias.is_empty() => {
+            println!(
+                "  {} orden(es), todas documentadas en docs/Comandos.md",
+                nombres.len()
+            );
+            println!();
+            println!("{VERDE}El manual y el binario dicen lo mismo.{FIN}");
+            ExitCode::SUCCESS
+        }
+        Ok(discrepancias) => {
+            for discrepancia in &discrepancias {
+                eprintln!("  {ROJO}{discrepancia}{FIN}");
+            }
+            eprintln!();
+            eprintln!("Un comando documentado que ya no existe manda a teclear algo que falla,");
+            eprintln!("y una orden sin documentar no la usa nadie mas que quien la escribio.");
+            ExitCode::FAILURE
+        }
+        // Ni verde ni rojo: no se sabe. RPT-006 §4.
+        Err(motivo) => {
+            eprintln!("  ComprobacionImposible: {motivo}");
+            ExitCode::from(3)
+        }
+    }
 }
 
 /// Imprime el recuento del tablero **leyendolo**, no de memoria.
@@ -112,7 +274,109 @@ fn ejecutar_tablero() -> ExitCode {
 
     println!("{GRIS}Pendientes: {}{FIN}", pendientes.join(", "));
 
-    ExitCode::SUCCESS
+    // PA-108. Sin esto, el tablero puede quedarse atras y el recuento seguir
+    // pareciendo el total del proyecto. Ocurrio: se quedo en PA-76 mientras los
+    // reportes acunaban treinta y nueve identificadores nuevos.
+    let huerfanos = match tablero::citados_sin_fila(raiz, &puntos) {
+        Ok(huerfanos) => huerfanos,
+        Err(motivo) => {
+            eprintln!("{ROJO}{motivo}{FIN}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if huerfanos.is_empty() {
+        println!();
+        println!("{VERDE}Todo identificador citado en docs/ tiene fila en el tablero.{FIN}");
+        return ExitCode::SUCCESS;
+    }
+
+    println!();
+    eprintln!(
+        "{ROJO}{} identificador(es) citados en docs/ y SIN fila en el tablero:{FIN}",
+        huerfanos.len()
+    );
+    for huerfano in &huerfanos {
+        eprintln!("  {huerfano}");
+    }
+    eprintln!();
+    eprintln!("Un punto que solo existe en el reporte que lo acuno no esta en ningun");
+    eprintln!("recuento, y desaparece en cuanto nadie recuerda haberlo escrito.");
+
+    ExitCode::FAILURE
+}
+
+/// Construye el artefacto headless y lo revisa. RPT-062, PA-107.
+fn ejecutar_empaquetar(argumentos: &[String]) -> ExitCode {
+    let raiz = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap_or(Path::new("."));
+    let destino = argumentos
+        .get(1)
+        .map_or_else(|| raiz.join("target/paquete/eje-agente"), PathBuf::from);
+
+    println!(
+        "{GRIS}Empaquetando el sensor headless en {}{FIN}",
+        destino.display()
+    );
+
+    match empaquetar::empaquetar(raiz, &destino) {
+        Ok(ficheros) => {
+            for fichero in &ficheros {
+                println!("  {fichero}");
+            }
+            println!();
+            println!("{VERDE}Artefacto revisado sobre el disco: nada prohibido.{FIN}");
+            // El aviso dice lo que falta HOY, no lo que faltaba. Decia «el
+            // formato sigue sin decidirse» y ese aviso acuno PA-126; al cerrar
+            // el formato paso a mentir en la direccion contraria, callando lo
+            // unico que de verdad falta (RPT-073 §11).
+            println!(
+                "{GRIS}El paquete lleva resumenes y NO firma: se comprueba que llega \
+                 entero, no de donde viene (PA-14a).{FIN}"
+            );
+            ExitCode::SUCCESS
+        }
+        Err(motivo) => {
+            eprintln!("{ROJO}{motivo}{FIN}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Caja de arena del instalador. RPT-063, PA-116.
+fn ejecutar_probar_instalador() -> ExitCode {
+    let raiz = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap_or(Path::new("."));
+
+    println!("{GRIS}Instalador contra un destino desechable{FIN}");
+
+    match instalador::probar(raiz) {
+        instalador::Resultado::Conforme(comprobado) => {
+            for afirmacion in &comprobado {
+                println!("  {VERDE}PASA{FIN}   {afirmacion}");
+            }
+            println!();
+            println!("{VERDE}El instalador respeta las rutas que se le dan.{FIN}");
+            println!(
+                "{GRIS}Esto NO dice nada del ciclo de vida del servicio: eso es PA-117 y \
+                 exige systemd como PID 1 (RPT-062 §5).{FIN}"
+            );
+            ExitCode::SUCCESS
+        }
+        instalador::Resultado::ViolacionDetectada(fallos) => {
+            for fallo in &fallos {
+                eprintln!("  {ROJO}FALLA{FIN}  {fallo}");
+            }
+            ExitCode::FAILURE
+        }
+        instalador::Resultado::ComprobacionImposible(motivo) => {
+            // Ni verde ni rojo: no se sabe. RPT-006 §4.
+            eprintln!("  ComprobacionImposible: {motivo}");
+            ExitCode::from(3)
+        }
+    }
 }
 
 fn ejecutar_vectores(actualizar: bool) -> ExitCode {

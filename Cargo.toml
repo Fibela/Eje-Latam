@@ -10,6 +10,9 @@ members = [
     "crates/eje-ipc",
     "crates/eje-captura",
     "crates/eje-manifiesto",
+    # RPT-057, PA-105. La otra mitad del latido: NO se despliega en el sensor,
+    # corre en la sala. Sin dependencias y sin acceso al almacen.
+    "crates/eje-vigia",
     "xtask",
 ]
 

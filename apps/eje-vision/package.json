@@ -17,7 +17,7 @@
     "verificar:frontera": "depcruise packages/eje-vision-base/src packages/eje-vision-empresarial/src proceso-principal/src --config .dependency-cruiser.cjs",
     "verificar:frontera:negativa": "node scripts/probar-frontera.mjs",
     "verificar:licencias": "license-checker --production --onlyAllow \"Apache-2.0;MIT;BSD-2-Clause;BSD-3-Clause;ISC;0BSD;CC0-1.0;Unlicense\" --start packages/eje-vision-base",
-    "probar": "npm run compilar && node --test \"proceso-principal/dist/pruebas/**/*.js\"",
+    "probar": "npm run compilar && node --test \"proceso-principal/dist/pruebas/**/*.prueba.js\"",
     "vis04": "npm run compilar && EJE_SOCKET=/tmp/eje/agente.sock electron proceso-principal/dist/principal.js",
     "diagnostico": "npm run compilar && EJE_SOCKET=/tmp/eje/agente.sock EJE_VISTA=diagnostico electron proceso-principal/dist/principal.js",
     "verificar": "npm run verificar:tipos && npm run verificar:frontera && npm run verificar:frontera:negativa && npm run probar"

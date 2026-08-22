@@ -15,5 +15,24 @@ eje-almacen = { path = "../crates/eje-almacen" }
 regex = "1"
 sha2 = "0.10"
 
+# Formato de distribucion del artefacto (RPT-073, PA-126). Se usan las cajas y no
+# `tar` del sistema porque `xtask` corre identico en Windows, Linux y CI
+# (RPT-003 §9.5): llamar al `tar` del sistema romperia eso el dia que alguien
+# empaquete desde Windows.
+tar = "0.4"
+flate2 = "1"
+
+# Solo para pruebas: la unidad declara `RuntimeDirectory=` y el agente tiene su
+# directorio de fabrica; que coincidan es una afirmacion que hay que comprobar,
+# no una coincidencia que mantener a mano (RPT-067, PA-120).
+[dev-dependencies]
+guardian-cc = { path = "../crates/guardian-cc" }
+
+# Y la plantilla `configuracion-sensor.toml.ejemplo` que viaja en el paquete la
+# tiene que analizar el MISMO codigo que la analizara el administrador (RPT-077).
+# Comprobar que contiene ciertas palabras dejaria pasar un campo mal escrito, y
+# ese fallo aparecería en la planta el día de la instalación.
+eje-manifiesto = { path = "../crates/eje-manifiesto" }
+
 [lints]
 workspace = true

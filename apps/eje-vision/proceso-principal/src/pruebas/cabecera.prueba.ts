@@ -21,6 +21,16 @@ const CALMA: Condiciones = {
   capturaNoDisponible: false,
   accionAdministrativa: false,
   salidaNoDisponible: false,
+  // Calma incluye tener colector: un sensor que no informa a nadie no está en
+  // calma, está sordo. Ver la prueba de PA-109 al final.
+  sinColector: false,
+  // Y tener escucha. RPT-070, PA-125: un sensor al que nadie puede preguntar no
+  // está en calma, está incomunicado.
+  escuchaNoDisponible: false,
+  // Y con configuracion firmada: un sensor cuyos parametros los decide
+  // quien controle el arranque no esta en calma (RPT-074, PA-79).
+  configuracionSinFirmar: false,
+  configuracionNoVerifica: false,
   registroSaturado: false,
   evidenciaEnRiesgo: false,
 };
@@ -81,12 +91,113 @@ describe("RPT-048 §2 — la cabecera decide cómo se lee todo lo demás", () =>
   });
 
   it("la salida caída sube a la cabecera aunque no sea la más grave", () => {
-    // Es la única condición que no viaja por syslog: si nadie mira esta
-    // pantalla, nadie se entera. Por eso no puede quedarse en la lista.
+    // Es una de las dos condiciones que no viajan por syslog: si nadie mira
+    // esta pantalla, nadie se entera. Por eso no puede quedarse en la lista.
     const cabecera = cabeceraDe({ ...CALMA, salidaNoDisponible: true });
 
     assert.equal(cabecera.urgencia, "atencion");
     assert.match(cabecera.detalle, /lo único que lo sabe/);
+  });
+
+  it("sin colector, el técnico en sitio se entera aquí o no se entera", () => {
+    // PA-109. La otra condición que no puede viajar por syslog, y por una
+    // imposibilidad: el aviso iría por el canal que no existe. Esta pantalla es
+    // el único sitio donde un sensor sordo puede decir que lo está.
+    const cabecera = cabeceraDe({ ...CALMA, sinColector: true });
+
+    assert.equal(cabecera.urgencia, "atencion");
+    assert.match(cabecera.detalle, /nadie fuera notará/);
+    assert.equal(
+      cabecera.datosDeAntes,
+      false,
+      "el sensor sigue observando: lo que no hace es contarlo fuera",
+    );
+  });
+
+  it("una avería en curso gana sobre una instalación incompleta", () => {
+    // Si las dos se anunciaran, «el colector no responde» sería lo que se lee, y
+    // sin colector configurado no hay colector que responda. El orden importa
+    // porque las dos frases mandan al técnico a sitios distintos.
+    const cabecera = cabeceraDe({
+      ...CALMA,
+      salidaNoDisponible: true,
+      sinColector: true,
+    });
+
+    assert.match(cabecera.titulo, /no están saliendo/);
+  });
+
+  it("sin escucha local se dice, aunque casi nunca pueda leerse aquí", () => {
+    // RPT-070, PA-125. La rama más rara del fichero: para leer esta pantalla hay
+    // que estar conectado, y si la condición está encendida no se puede estar.
+    //
+    // Tiene rama y prueba de todos modos por los dos casos en que sí llega: una
+    // consulta que alcanzó al agente justo antes de caer, y un segundo agente en
+    // la misma máquina cuyo socket responde. Sin esto, el técnico vería un panel
+    // que no explica por qué el otro sensor no aparece.
+    const cabecera = cabeceraDe({ ...CALMA, escuchaNoDisponible: true });
+
+    assert.equal(cabecera.urgencia, "atencion");
+    assert.match(cabecera.detalle, /ninguna consola puede preguntarle/);
+    assert.equal(
+      cabecera.datosDeAntes,
+      false,
+      "el sensor sigue observando y registrando: lo que no admite son preguntas",
+    );
+  });
+
+  it("la sala se entera de la escucha caída aunque la consola no", () => {
+    // La afirmación entera de PA-125, vista desde este lado. `sinColector` y
+    // `salidaNoDisponible` describen el canal de syslog y por eso sólo llegan
+    // aquí; `escuchaNoDisponible` describe el otro, y por eso sale por syslog.
+    //
+    // Es la única de las tres que este panel podría no ver nunca y que aun así
+    // no se pierde: quien se entera es la sala. Lo sujeta
+    // `un_sensor_incomunicado_lo_dice_por_el_canal_que_le_queda` en Rust; aquí se
+    // deja escrito para que nadie "arregle" la asimetría igualándolas.
+    const cabecera = cabeceraDe({ ...CALMA, escuchaNoDisponible: true });
+
+    assert.notEqual(cabecera.urgencia, "normal");
+  });
+
+  it("una configuración que no verifica se dice sin acusar a nadie", () => {
+    // RPT-074, PA-79. La firma rota apunta a manipulación, pero una máquina
+    // ajena o una clave rotada dan la misma condición y no son un ataque.
+    // Presentarla como incidente mandaría a respuesta a incidentes por un error
+    // de despliegue, que es la fatiga de alertas de PA-45.
+    const cabecera = cabeceraDe({ ...CALMA, configuracionNoVerifica: true });
+
+    assert.equal(cabecera.urgencia, "atencion");
+    assert.doesNotMatch(cabecera.detalle, /incidente|alter/);
+    assert.match(cabecera.detalle, /diario del sensor/);
+  });
+
+  it("correr sin configuración firmada ocupa cabecera, no una fila", () => {
+    // El riesgo de esta condición no es técnico: es que el estado degradado se
+    // vuelva el normal. Dejarla abajo entre trece filas es exactamente cómo se
+    // aprende a ignorarla (RPT-074 §8).
+    const cabecera = cabeceraDe({ ...CALMA, configuracionSinFirmar: true });
+
+    assert.equal(cabecera.urgencia, "atencion");
+    assert.match(cabecera.detalle, /ventana de silencio/);
+    assert.equal(
+      cabecera.datosDeAntes,
+      false,
+      "el sensor observa y registra: lo que no está firmado es qué se le pidió",
+    );
+  });
+
+  it("una configuración rota gana sobre una que sólo falta", () => {
+    // Las dos a la vez no pueden ocurrir —se derivan de un solo estado— pero si
+    // la vista las tratara como independientes, «no verifica» es la que manda a
+    // mirar el diario. El orden queda sujeto por si alguien las separa.
+    const cabecera = cabeceraDe({
+      ...CALMA,
+      configuracionSinFirmar: true,
+      configuracionNoVerifica: true,
+    });
+
+    assert.match(cabecera.titulo, /no verifica/);
   });
 
   it("una condición menor no ocupa la cabecera", () => {
@@ -109,7 +220,7 @@ describe("RPT-048 §2 — la cabecera decide cómo se lee todo lo demás", () =>
   });
 
   it("una respuesta inesperada se declara en lugar de elegir una rama", () => {
-    // El agente siempre devuelve las nueve condiciones. Si llega otra cosa, el
+    // El agente siempre devuelve las trece condiciones. Si llega otra cosa, el
     // contrato cambió, y decirlo es mejor que suponer.
     const cabecera = componerCabecera({ clase: "vacio" });
 

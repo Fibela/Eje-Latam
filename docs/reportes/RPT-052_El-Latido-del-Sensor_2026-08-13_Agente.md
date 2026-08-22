@@ -5,10 +5,12 @@
 **Fecha:** 13 de agosto de 2026
 **Área designada:** Agente
 **Entidad:** PremosCorp
-**Estado:** **Diseño. Pendiente de ratificación.**
+**Estado:** **Ratificado e implementado en RPT-053.** Los cinco puntos del §7
+siguen vigentes, incluido el quinto: PA-104 **no** se cierra con la emisión.
 
 - **Depende de:** RPT-038 (testigo externo), RPT-047 (degradación), RPT-051 (opción D)
-- **Aborda:** PA-104. Condiciona PA-84
+- **Aborda:** PA-104. Condiciona **PA-107** (empaquetado dual; este reporte lo
+  llamó PA-84 por error, ver RPT-053 §9)
 
 ---
 
@@ -103,7 +105,7 @@ Se cierra cuando alguien apaga un sensor y la sala se entera.
 
 | ID | Punto |
 |---|---|
-| **PA-105** | La detección de ausencia en el colector: qué la hace, dónde vive, quién la mantiene |
+| ~~PA-105~~ | ✅ Detector de referencia en RPT-057 |
 | PA-41 | La cadencia sigue sin medirse; el intervalo depende de ello |
 | PA-79 | El intervalo es el primer parámetro que exige configuración firmada |
 

@@ -23,7 +23,7 @@ import {
   incorporar,
 } from "../../packages/eje-vision-base/dist/indice.js";
 
-/** Nombres legibles de las nueve condiciones, en el orden del contrato. */
+/** Nombres legibles de las trece condiciones, en el orden del contrato. */
 const CONDICIONES = [
   ["capturaNoDisponible", "El sensor no está vigilando la red"],
   ["inventarioSuprimido", "Inventario suprimido"],
@@ -31,6 +31,13 @@ const CONDICIONES = [
   ["registroSaturado", "El registro de evidencia está lleno"],
   ["evidenciaEnRiesgo", "Hay alertas sin guardar en disco"],
   ["salidaNoDisponible", "Las alertas no salen de este equipo"],
+  ["sinColector", "Sin colector: este sensor no informa a ninguna sala"],
+  // RPT-070, PA-125. Rara de ver aquí —para leer esta pantalla hay que estar
+  // conectado— y aun así tiene fila: llega cuando la consulta alcanzó al agente
+  // justo antes de caer, y cuando otro agente de la misma máquina sí responde.
+  ["escuchaNoDisponible", "Sin escucha local: ninguna consola puede preguntarle"],
+  ["configuracionSinFirmar", "Configuracion sin firmar: los parametros salen de la linea de ordenes"],
+  ["configuracionNoVerifica", "Configuracion NO verifica: hay un fichero y el agente no lo acepta"],
   ["observacionSaturada", "Observación saturada"],
   ["capturaConPerdida", "Se están perdiendo tramas"],
   ["accionAdministrativa", "Requiere acción del administrador"],

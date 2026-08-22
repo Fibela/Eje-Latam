@@ -175,6 +175,16 @@ impl ClaveInventario {
         Self { clave, dominio }
     }
 
+    /// La clave, **para uso dentro del crate**.
+    ///
+    /// No es publica a proposito: quien la tenga desnuda puede verificar con ella
+    /// lo que quiera, y el dominio dejaria de significar nada. Los verificadores
+    /// viven en este crate y comprueban el dominio antes de llegar aqui
+    /// (RPT-011 §4, RPT-074 §5).
+    pub(crate) const fn clave(&self) -> &ClaveVerificacionHibrida {
+        &self.clave
+    }
+
     /// Dominio de custodia declarado.
     #[must_use]
     pub const fn dominio(&self) -> DominioClave {

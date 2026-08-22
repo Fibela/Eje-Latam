@@ -268,15 +268,132 @@ pub struct Condiciones {
     pub accion_administrativa: bool,
     /// El colector de syslog no responde y la alerta no sale del equipo.
     ///
-    /// # La unica condicion que no se puede emitir
+    /// # Una de las dos condiciones que no se pueden emitir
     ///
-    /// Las otras cinco viajan tambien por syslog hacia el SIEM del cliente. Esta
-    /// no: emitirla exigiria el canal que acaba de fallar. Llega solo por este
+    /// Las demas viajan tambien por syslog hacia el SIEM del cliente. Esta no:
+    /// emitirla exigiria el canal que acaba de fallar. Llega solo por este
     /// puente, que es donde VIS-04 la consulta.
     ///
     /// Existe porque un canal de alertas caido y uno silencioso son
     /// indistinguibles desde fuera, y RPT-006 §4 obliga a distinguirlos.
+    ///
+    /// La otra es [`Self::sin_colector`], por la misma imposibilidad.
     pub salida_no_disponible: bool,
+    /// Este agente **no tiene colector configurado**: no emite ni late.
+    ///
+    /// RPT-054 §4, PA-109.
+    ///
+    /// # Por que no es lo mismo que `salida_no_disponible`
+    ///
+    /// Aquella dice que el colector existe y ahora mismo no responde: es una
+    /// averia, se resuelve sola cuando la red vuelve, y se responde llamando a
+    /// quien mantiene el SIEM.
+    ///
+    /// Esta dice que **nunca hubo colector**. No se resuelve sola, no es una
+    /// averia y no se responde: se configura. Colapsarlas mandaria al operador
+    /// a investigar una caida de red que no existe, y al reves haria pasar una
+    /// caida real por una instalacion a medias.
+    ///
+    /// # La segunda condicion no emisible, y por el mismo motivo
+    ///
+    /// Un agente sin colector no puede avisar de que no tiene colector: el aviso
+    /// viajaria por el canal que no existe. Por eso llega solo por este puente,
+    /// y por eso el instalador y `journald` la declaran ademas (RPT-054 §4).
+    ///
+    /// # Por que es una condicion y no un dato de configuracion
+    ///
+    /// Porque es verdadera hasta que alguien interviene, que es la definicion
+    /// exacta de RPT-019 §2. Y porque el tecnico que va a la planta a averiguar
+    /// por que un sensor no aparece en la sala tiene que verlo **en el tablero**,
+    /// no saltando de VIS-04 a los diarios del sistema.
+    pub sin_colector: bool,
+    /// **La escucha local no esta abierta**: ninguna consola puede conectarse.
+    ///
+    /// RPT-070, PA-125. Se observo ocurriendo, no razonando: en `systemd` real,
+    /// el conjunto acotado de capacidades impedia asignar el grupo al socket y el
+    /// sensor arrancaba sin escucha (RPT-069 §3). Las diez condiciones de
+    /// entonces decian, todas, que estaba sano.
+    ///
+    /// # Esta SI se emite, y es la clave
+    ///
+    /// [`Self::salida_no_disponible`] y [`Self::sin_colector`] no viajan porque
+    /// describen **el canal de syslog mismo**: contarlas exigiria el canal que
+    /// falla. Esta describe **el otro canal**.
+    ///
+    /// Cuando la escucha local cae, syslog es justamente lo que sigue
+    /// funcionando, y es el unico camino por el que la sala puede enterarse. Lo
+    /// que no puede contarlo es la consola, que es lo que no conecta.
+    ///
+    /// # Por que no cabe en `accion_administrativa`
+    ///
+    /// Aquella dice «el almacen exige que alguien intervenga» y su remedio es
+    /// reemitir o aprovisionar. Esta dice que el sensor **funciona y es
+    /// inalcanzable**: sigue observando, registrando y emitiendo, y nadie puede
+    /// preguntarle nada. Son dos visitas distintas a la planta.
+    ///
+    /// # Un sensor vivo e inalcanzable es peor que uno caido
+    ///
+    /// Al caido lo reinicia el supervisor y alguien se entera. Este pasa por
+    /// bueno mientras dure. Es el mismo argumento de
+    /// [`Self::captura_no_disponible`], aplicado al puente en lugar de a la
+    /// captura.
+    pub escucha_no_disponible: bool,
+    /// **Este sensor corre sin configuracion firmada.**
+    ///
+    /// RPT-074, PA-79. Sus parametros salen de la linea de ordenes, asi que quien
+    /// controle el arranque puede alargar la ventana de silencio que la sala
+    /// vigila, apuntar el sensor a otro segmento o cambiarle el nombre.
+    ///
+    /// # Por que no es un fallo
+    ///
+    /// Es un estado legitimo de desarrollo y de forense: el agente lanzado a mano
+    /// es la herramienta con la que se observaron PA-123 y PA-125. Lo que no
+    /// puede es pasar desapercibido.
+    ///
+    /// # Y por que no es un mock
+    ///
+    /// Un mock **se hace pasar por** lo real y el defecto es la
+    /// indistinguibilidad. Esta condicion existe justamente para que las dos
+    /// situaciones no se confundan. Si el agente arrancara con argumentos y
+    /// **callara**, entonces si seria de esa familia.
+    ///
+    /// # El riesgo que vigila esta condicion no es tecnico
+    ///
+    /// Es que el estado degradado se vuelva el normal: si desplegar sin firmar
+    /// fuera comodo, todo el mundo desplegaria sin firmar y se aprenderia a
+    /// ignorarla. La defensa es estructural —la unidad no pasa configuracion, asi
+    /// que un despliegue sin fichero firmado no captura nada— y esta condicion es
+    /// como se ve desde fuera.
+    pub configuracion_sin_firmar: bool,
+    /// **Hay configuracion firmada y el agente NO la acepta.**
+    ///
+    /// RPT-074, PA-79. Distinta de [`Self::configuracion_sin_firmar`] y no por
+    /// matiz: aquella dice «todavia no se ha aprovisionado» y esta dice «hay una
+    /// y no vale». Colapsarlas mandaria a aprovisionar cuando lo que hay es
+    /// alguien que toco el fichero.
+    ///
+    /// Es la distincion de [`Self::inventario_suprimido`] frente a
+    /// [`Self::inventario_no_verifica`], copiada tal cual.
+    ///
+    /// # Por que NO cuenta como manipulacion
+    ///
+    /// Aunque la firma rota apunte a que alguien lo toco, las otras causas no:
+    /// una configuracion emitida para otra maquina, una clave rotada, un fichero
+    /// corrupto por disco. Presentarlas todas como incidente mandaria al operador
+    /// a respuesta a incidentes por un error de despliegue, que es la fatiga de
+    /// alertas que PA-45 §1 existe para evitar.
+    ///
+    /// Viaja con gravedad alta y sin acusar a nadie, como
+    /// [`Self::registro_saturado`]: no dice «esto es un ataque», dice «esto no
+    /// puede esperar al lunes».
+    ///
+    /// # El motivo no viaja aqui
+    ///
+    /// Firma invalida, maquina ajena y version desconocida son tres remedios
+    /// distintos. `Condiciones` describe **lo que es verdad ahora** con una forma
+    /// uniforme; el motivo viaja donde se diagnostica —el diario y la linea de
+    /// syslog—, igual que en [`Self::captura_no_disponible`].
+    pub configuracion_no_verifica: bool,
     /// El registro de evidencia esta lleno y **ya no admite alertas**.
     ///
     /// RPT-039 §1, PA-72.
@@ -321,6 +438,77 @@ impl Condiciones {
             || self.salida_no_disponible
             || self.registro_saturado
             || self.evidencia_en_riesgo
+            // RPT-070, PA-125. Un sensor al que nadie puede preguntar esta
+            // degradado aunque todo lo demas funcione: la mitad del producto que
+            // el tecnico usa no existe.
+            || self.escucha_no_disponible
+            // RPT-074, PA-79. Las dos degradan: un sensor cuyos parametros no
+            // estan firmados obedece a quien controle el arranque, y uno cuya
+            // configuracion no verifica no esta haciendo lo que alguien creyo
+            // haberle mandado hacer.
+            || self.configuracion_sin_firmar
+            || self.configuracion_no_verifica
+            // Un sensor sin colector cumple su trabajo local y **no cumple la
+            // promesa del producto**: que la alerta salga del equipo. Que sea
+            // deliberado no lo hace menos cierto, y ocultarlo por deliberado es
+            // como se despliega una flota entera sin vigilar (RPT-054 §1).
+            //
+            // Silenciarlo cuando la ausencia de colector sea una decision
+            // declarada es cosa de la configuracion firmada, no de aqui: PA-79.
+            || self.sin_colector
+    }
+
+    /// Las trece condiciones con su identificador, en el orden del contrato.
+    ///
+    /// RPT-058, PA-114.
+    ///
+    /// # Por que existe
+    ///
+    /// Cada consumidor escribia su propia lista a mano: `EMISIBLES` y `valor_de`
+    /// en el agente, la tabla de VIS-04, el panel de diagnostico, y **el resumen
+    /// por pantalla del propio agente**, que se quedo en siete de diez sin que
+    /// nadie lo notara hasta verlo en una consola.
+    ///
+    /// Un sitio mas donde vive el contrato es un sitio mas que puede divergir. La
+    /// desestructuracion de aqui es exhaustiva y **sin `..`**: un campo nuevo en
+    /// `Condiciones` deja de compilar en esta funcion, y quien lo anada tiene que
+    /// decidir donde va en el orden.
+    ///
+    /// El orden es el de [`CAMPOS_CONDICIONES`], y una prueba lo sujeta. No es
+    /// estetico: es lo que permite que cualquiera de los dos sea la autoridad.
+    #[must_use]
+    pub const fn enumerar(&self) -> [(&'static str, bool); 13] {
+        let Self {
+            inventario_suprimido,
+            inventario_no_verifica,
+            observacion_saturada,
+            captura_con_perdida,
+            captura_no_disponible,
+            accion_administrativa,
+            salida_no_disponible,
+            sin_colector,
+            escucha_no_disponible,
+            configuracion_sin_firmar,
+            configuracion_no_verifica,
+            registro_saturado,
+            evidencia_en_riesgo,
+        } = *self;
+
+        [
+            ("inventarioSuprimido", inventario_suprimido),
+            ("inventarioNoVerifica", inventario_no_verifica),
+            ("observacionSaturada", observacion_saturada),
+            ("capturaConPerdida", captura_con_perdida),
+            ("capturaNoDisponible", captura_no_disponible),
+            ("accionAdministrativa", accion_administrativa),
+            ("salidaNoDisponible", salida_no_disponible),
+            ("sinColector", sin_colector),
+            ("escuchaNoDisponible", escucha_no_disponible),
+            ("configuracionSinFirmar", configuracion_sin_firmar),
+            ("configuracionNoVerifica", configuracion_no_verifica),
+            ("registroSaturado", registro_saturado),
+            ("evidenciaEnRiesgo", evidencia_en_riesgo),
+        ]
     }
 
     /// Indica si alguna condicion sugiere que **alguien toco el almacen**.
@@ -400,7 +588,7 @@ pub const CAMPOS_RESPUESTA_ALERTAS: [(&str, &str); 3] = [
 ];
 
 /// Campos de [`Condiciones`].
-pub const CAMPOS_CONDICIONES: [(&str, &str); 9] = [
+pub const CAMPOS_CONDICIONES: [(&str, &str); 13] = [
     ("inventarioSuprimido", "booleano"),
     ("inventarioNoVerifica", "booleano"),
     ("observacionSaturada", "booleano"),
@@ -408,6 +596,10 @@ pub const CAMPOS_CONDICIONES: [(&str, &str); 9] = [
     ("capturaNoDisponible", "booleano"),
     ("accionAdministrativa", "booleano"),
     ("salidaNoDisponible", "booleano"),
+    ("sinColector", "booleano"),
+    ("escuchaNoDisponible", "booleano"),
+    ("configuracionSinFirmar", "booleano"),
+    ("configuracionNoVerifica", "booleano"),
     ("registroSaturado", "booleano"),
     ("evidenciaEnRiesgo", "booleano"),
 ];

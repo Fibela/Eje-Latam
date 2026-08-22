@@ -461,6 +461,10 @@ fn las_constantes_estan_atadas_a_los_structs() {
         captura_no_disponible,
         accion_administrativa,
         salida_no_disponible,
+        sin_colector,
+        escucha_no_disponible,
+        configuracion_sin_firmar,
+        configuracion_no_verifica,
         registro_saturado,
         evidencia_en_riesgo,
     } = Condiciones {
@@ -471,6 +475,10 @@ fn las_constantes_estan_atadas_a_los_structs() {
         captura_no_disponible: false,
         accion_administrativa: false,
         salida_no_disponible: false,
+        sin_colector: false,
+        escucha_no_disponible: false,
+        configuracion_sin_firmar: false,
+        configuracion_no_verifica: false,
         registro_saturado: false,
         evidencia_en_riesgo: false,
     };
@@ -482,10 +490,14 @@ fn las_constantes_estan_atadas_a_los_structs() {
         captura_no_disponible,
         accion_administrativa,
         salida_no_disponible,
+        sin_colector,
+        escucha_no_disponible,
+        configuracion_sin_firmar,
+        configuracion_no_verifica,
         registro_saturado,
         evidencia_en_riesgo,
     );
-    assert_eq!(CAMPOS_CONDICIONES.len(), 9);
+    assert_eq!(CAMPOS_CONDICIONES.len(), 13);
 }
 
 #[test]
@@ -498,6 +510,10 @@ fn las_condiciones_distinguen_lo_degradado_de_lo_normal() {
         captura_no_disponible: false,
         accion_administrativa: false,
         salida_no_disponible: false,
+        sin_colector: false,
+        escucha_no_disponible: false,
+        configuracion_sin_firmar: false,
+        configuracion_no_verifica: false,
         registro_saturado: false,
         evidencia_en_riesgo: false,
     };
@@ -559,6 +575,10 @@ fn la_manipulacion_no_se_confunde_con_la_accion_administrativa() {
         captura_no_disponible: false,
         accion_administrativa: false,
         salida_no_disponible: false,
+        sin_colector: false,
+        escucha_no_disponible: false,
+        configuracion_sin_firmar: false,
+        configuracion_no_verifica: false,
         registro_saturado: false,
         evidencia_en_riesgo: false,
     };

@@ -80,6 +80,29 @@ jobs:
           fi
           echo "El guardian detecta la violacion deliberada."
 
+  indices:
+    name: Indices derivados, no escritos a mano
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # Tres indices de cosas que viven en el codigo. Los tres se quedaron atras
+      # alguna vez, o se habrian quedado: el tablero conto 76 de 115 durante dos
+      # semanas (PA-108), dos pruebas quedaron anidadas sin que nadie las
+      # ejecutara (PA-73), y RPT-005 mandaba teclear una orden que no existe
+      # (PA-119). Se derivan aqui para que ninguno dependa de que alguien se
+      # acuerde.
+      - name: Todo PA-nn citado en docs tiene fila en el tablero
+        run: cargo xtask tablero
+
+      - name: Toda prueba escrita se ejecuta
+        run: cargo xtask cobertura
+
+      - name: El manual de comandos y el binario dicen lo mismo
+        run: cargo xtask manual
+
   secretos:
     name: Secretos expuestos
     runs-on: ubuntu-latest

@@ -39,9 +39,68 @@ enum Estado {
 /// El vector devuelto tiene una entrada por linea, en orden.
 #[must_use]
 pub fn lineas_de_prueba(fuente: &str) -> Vec<bool> {
+    recorrer(fuente).de_prueba
+}
+
+/// El fuente con el contenido de los comentarios sustituido por espacios.
+///
+/// RPT-076, PA-129. Devuelve una entrada por linea, con las columnas intactas:
+/// se sustituye, no se borra, para que el numero de linea y la posicion sigan
+/// significando lo mismo.
+///
+/// # Por que hacia falta
+///
+/// El guardian buscaba sus patrones en la **linea cruda**, y acuso dos veces en
+/// dos dias a la prosa que explica el diseño: primero a un comentario que decia
+/// por que NO hay un punto de escucha por omision (RPT-075 §5), despues a otro
+/// que explicaba por que un estado degradado **no es un mock**.
+///
+/// La salida facil era reescribir los comentarios para esquivar el escaner. Eso
+/// es peor que un `#[allow]`: adapta la verdad al instrumento, y ademas borra
+/// justo el texto que alguien escribio porque la pregunta se habia hecho.
+///
+/// # Las cadenas NO se tocan
+///
+/// Un `TcpListener::bind("127.0.0.1:5514")` tiene que seguir cazandose. Lo que
+/// no es codigo es el comentario; una cadena literal si lo es.
+#[must_use]
+pub fn codigo_sin_comentarios(fuente: &str) -> Vec<String> {
+    let comentario = recorrer(fuente).comentario;
+    let mut lineas = vec![String::new()];
+
+    for (indice, caracter) in fuente.chars().enumerate() {
+        if caracter == '\n' {
+            lineas.push(String::new());
+            continue;
+        }
+
+        let dentro = comentario.get(indice).copied().unwrap_or(false);
+        if let Some(ultima) = lineas.last_mut() {
+            ultima.push(if dentro { ' ' } else { caracter });
+        }
+    }
+
+    lineas
+}
+
+/// Lo que un solo recorrido del fuente averigua.
+///
+/// Las dos respuestas salen del **mismo** analizador lexico. Escribir dos
+/// recorridos habria duplicado la maquina de estados —comentarios anidados,
+/// cadenas crudas, literales de caracter— y bastaria con que una copia se
+/// quedara atras para que el guardian empezara a mentir por un lado.
+struct Recorrido {
+    /// Por linea: si pertenece a un bloque `#[cfg(test)]`.
+    de_prueba: Vec<bool>,
+    /// Por **caracter**: si esta dentro de un comentario.
+    comentario: Vec<bool>,
+}
+
+fn recorrer(fuente: &str) -> Recorrido {
     let caracteres: Vec<char> = fuente.chars().collect();
     let total_lineas = fuente.lines().count().max(1);
     let mut excluida = vec![false; total_lineas];
+    let mut comentario = vec![false; caracteres.len()];
 
     let mut estado = Estado::Codigo;
     let mut linea: usize = 0;
@@ -63,11 +122,13 @@ pub fn lineas_de_prueba(fuente: &str) -> Vec<bool> {
                 match (actual, siguiente) {
                     ('/', Some('/')) => {
                         estado = Estado::ComentarioLinea;
+                        marcar(&mut comentario, indice, 2);
                         indice += 2;
                         continue;
                     }
                     ('/', Some('*')) => {
                         estado = Estado::ComentarioBloque(1);
+                        marcar(&mut comentario, indice, 2);
                         indice += 2;
                         continue;
                     }
@@ -112,12 +173,15 @@ pub fn lineas_de_prueba(fuente: &str) -> Vec<bool> {
             Estado::ComentarioLinea => {
                 if actual == '\n' {
                     estado = Estado::Codigo;
+                } else {
+                    marcar(&mut comentario, indice, 1);
                 }
             }
 
             Estado::ComentarioBloque(nivel) => match (actual, siguiente) {
                 ('/', Some('*')) => {
                     estado = Estado::ComentarioBloque(nivel + 1);
+                    marcar(&mut comentario, indice, 2);
                     indice += 2;
                     continue;
                 }
@@ -127,10 +191,17 @@ pub fn lineas_de_prueba(fuente: &str) -> Vec<bool> {
                     } else {
                         Estado::ComentarioBloque(nivel - 1)
                     };
+                    marcar(&mut comentario, indice, 2);
                     indice += 2;
                     continue;
                 }
-                _ => {}
+                // El salto de linea de un comentario de bloque NO se marca: se
+                // conserva para que las lineas sigan separandose donde deben.
+                _ => {
+                    if actual != '\n' {
+                        marcar(&mut comentario, indice, 1);
+                    }
+                }
             },
 
             Estado::Cadena => {
@@ -173,7 +244,19 @@ pub fn lineas_de_prueba(fuente: &str) -> Vec<bool> {
         indice += 1;
     }
 
-    excluida
+    Recorrido {
+        de_prueba: excluida,
+        comentario,
+    }
+}
+
+/// Marca `cuantos` caracteres desde `desde` como pertenecientes a un comentario.
+fn marcar(comentario: &mut [bool], desde: usize, cuantos: usize) {
+    for posicion in desde..desde.saturating_add(cuantos) {
+        if let Some(hueco) = comentario.get_mut(posicion) {
+            *hueco = true;
+        }
+    }
 }
 
 /// Indica si en `indice` comienza una cadena cruda `r"` o `r#"`.

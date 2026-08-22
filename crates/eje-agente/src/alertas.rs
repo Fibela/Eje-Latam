@@ -576,6 +576,28 @@ pub fn consultar(registro: &RegistroEvidencia, peticion: &PeticionAlertas) -> Lo
     Lote { sucesos, hay_mas }
 }
 
+/// En que estado esta la configuracion firmada del sensor. RPT-074, PA-79.
+///
+/// # Tres y no dos
+///
+/// `Ausente` es «todavia no se ha aprovisionado» y `NoVerifica` es «hay una y no
+/// vale». Mandan al tecnico a sitios distintos: la primera a emitirla, la segunda
+/// a averiguar quien la toco o de que maquina es.
+///
+/// Se pasa como **un solo dato** y las dos condiciones se derivan de el, en lugar
+/// de recibir dos booleanos: dos booleanos admiten el estado imposible en que los
+/// dos son ciertos, y este proyecto quita del tipo los estados que el dominio no
+/// tiene (RPT-053 §2, RPT-059, RPT-064 §3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EstadoConfiguracion {
+    /// Hay configuracion firmada y verifica.
+    Firmada,
+    /// No hay fichero. El agente corre desde la linea de ordenes.
+    Ausente,
+    /// Hay fichero y el agente no lo acepta.
+    NoVerifica,
+}
+
 /// Manejador de `obtener-condiciones`.
 ///
 /// # Los cinco estados degradados salen de dos sitios
@@ -598,9 +620,29 @@ pub fn condiciones(
     observacion: &AlmacenObservacion,
     registro: &RegistroEvidencia,
     captura_no_disponible: bool,
+    sin_colector: bool,
+    escucha_no_disponible: bool,
+    configuracion: EstadoConfiguracion,
 ) -> Condiciones {
     Condiciones {
         salida_no_disponible: false,
+        // RPT-070, PA-125. Parametro por lo mismo que los dos de abajo: si la
+        // escucha local esta abierta es un hecho de fuera. Rellenarlo despues lo
+        // dejaria en `false`, que se lee como «la consola puede conectarse», que
+        // es exactamente la mentira que esta condicion existe para impedir.
+        escucha_no_disponible,
+        // RPT-074, PA-79. Tres estados y no dos, asi que dos booleanos que NUNCA
+        // son ambos ciertos: `Firmada` los apaga los dos, y cada uno de los
+        // fallos enciende exactamente uno. Derivarlos aqui, de un solo dato,
+        // impide que alguien encienda los dos por descuido.
+        configuracion_sin_firmar: matches!(configuracion, EstadoConfiguracion::Ausente),
+        configuracion_no_verifica: matches!(configuracion, EstadoConfiguracion::NoVerifica),
+        // RPT-054 §5, PA-109. Tambien parametro, y por el mismo motivo que el de
+        // abajo: es un hecho de fuera —si hay colector configurado o no— que
+        // esta funcion no puede averiguar. Rellenarlo despues lo dejaria en
+        // `false`, que se lee como «hay colector» y es justo la mentira que esta
+        // condicion existe para impedir.
+        sin_colector,
         // RPT-047, PA-81. Entra como PARAMETRO y no se rellena despues como
         // `salida_no_disponible`: aquel se pospone porque es el resultado de
         // emitir, y emitir necesita estas condiciones —seria circular—. Este no

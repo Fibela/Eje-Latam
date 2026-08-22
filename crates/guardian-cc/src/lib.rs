@@ -19,6 +19,7 @@ pub mod almacen;
 pub mod arranque;
 pub mod clasificacion;
 pub mod clave;
+pub mod configuracion;
 pub mod disco;
 pub mod formato;
 pub mod inventario;
@@ -1081,7 +1082,7 @@ mod pruebas {
         RaizAnclada, RaizVerificada, mensaje_de_raiz,
     };
     use motor_pqc::firma_hibrida::{
-        ClaveFirmaHibrida, ClaveVerificacionHibrida, FirmaHibrida, generar_par,
+        ClaveFirmaHibrida, ClaveVerificacionHibrida, FirmaHibrida, firmar, generar_par,
     };
     use vlan::{
         DeclaracionVlan, ErrorVlan, NaturalezaSegmento, TablaVlan, TablaVlanVerificada,
@@ -2459,8 +2460,8 @@ mod pruebas {
     use std::path::PathBuf;
 
     use arranque::{
-        ErrorArranque, EstadoArranque, RutasAlmacen, aceptar_inventario, analizar_centinela,
-        arrancar, cargar_centinela, serializar_centinela,
+        Centinelas, ErrorArranque, EstadoArranque, RutasAlmacen, aceptar_configuracion,
+        aceptar_inventario, analizar_centinela, arrancar, cargar_centinela, serializar_centinela,
     };
 
     /// Almacen aislado en disco, retirado al terminar.
@@ -2490,35 +2491,134 @@ mod pruebas {
         clave_de_recuperacion(DominioClave::ClienteRecuperacion).1
     }
 
+    /// Un centinela con las dos marcas puestas, para las pruebas de formato.
+    fn centinelas_de_prueba() -> Centinelas {
+        Centinelas {
+            inventario: Centinela::Establecido(42),
+            configuracion: Centinela::Establecido(3),
+        }
+    }
+
     #[test]
     fn el_centinela_es_reversible_en_disco() {
         assert_eq!(
-            analizar_centinela(&serializar_centinela(42)).expect("debe analizar"),
-            Centinela::Establecido(42)
+            analizar_centinela(&serializar_centinela(centinelas_de_prueba()))
+                .expect("debe analizar"),
+            centinelas_de_prueba()
         );
+    }
+
+    /// Y cada marca va por su lado. RPT-078, PA-79 paso 5.
+    ///
+    /// Las cuatro combinaciones, porque el fallo que importa es el asimetrico:
+    /// un fichero que dice «inventario si, configuracion no» tiene que volver
+    /// diciendo exactamente eso. Si las dos marcas se contagiaran, aceptar un
+    /// inventario borraria la marca de configuracion y cualquier configuracion
+    /// antigua entraria.
+    #[test]
+    fn las_dos_marcas_del_centinela_no_se_contagian() {
+        for (inventario, configuracion) in [
+            (Centinela::Establecido(9), Centinela::Establecido(4)),
+            (Centinela::Establecido(9), Centinela::SinEstablecer),
+            (Centinela::SinEstablecer, Centinela::Establecido(4)),
+        ] {
+            let centinelas = Centinelas {
+                inventario,
+                configuracion,
+            };
+
+            assert_eq!(
+                analizar_centinela(&serializar_centinela(centinelas)).expect("debe analizar"),
+                centinelas,
+                "las marcas se pisan al ir y volver del disco"
+            );
+        }
+    }
+
+    /// Cero de presencia significa cero de valor, y no hay segunda forma.
+    ///
+    /// RPT-078. Una marca «ausente» con un valor escrito encima seria una segunda
+    /// codificacion de «sin establecer», y la segunda codificacion es siempre por
+    /// donde se cuela algo: bastaria para escribir un centinela que el analizador
+    /// lee de una forma y el que lo compuso creia de otra.
+    #[test]
+    fn una_marca_ausente_con_valor_encima_se_rechaza() {
+        let mut bytes = serializar_centinela(Centinelas {
+            inventario: Centinela::Establecido(9),
+            configuracion: Centinela::SinEstablecer,
+        });
+        // La marca de configuracion empieza en 19: presencia en 19, valor en 20.
+        bytes[27] = 5;
+
+        assert!(matches!(
+            analizar_centinela(&bytes),
+            Err(ErrorArranque::CentinelaCorrupto)
+        ));
     }
 
     #[test]
     fn un_centinela_corrupto_no_se_degrada_a_primer_arranque() {
-        // Es el ataque del §2 por otra puerta: si corromper dieciocho bytes
-        // simulara un primer arranque, borrar el inventario volveria a funcionar.
-        for caso in [
-            vec![],
-            vec![0u8; 18],
-            serializar_centinela(1)[..17].to_vec(),
-            {
-                let mut bytes = serializar_centinela(1);
-                bytes[9] = 9; // version desconocida
-                bytes
-            },
-        ] {
+        // Es el ataque del §2 por otra puerta: si corromper el fichero simulara
+        // un primer arranque, borrar el inventario volveria a funcionar.
+        let casos: Vec<(Vec<u8>, &str)> = vec![
+            (vec![], "vacio"),
+            (vec![0u8; 28], "ceros con la longitud correcta"),
+            (
+                serializar_centinela(centinelas_de_prueba())[..27].to_vec(),
+                "truncado por un byte",
+            ),
+            (
+                {
+                    let mut bytes = serializar_centinela(centinelas_de_prueba());
+                    bytes[9] = 9;
+                    bytes
+                },
+                "version desconocida",
+            ),
+            (
+                {
+                    // RPT-078. La version 1 llevaba UNA marca. Aceptarla ahora
+                    // seria admitir un fichero que no dice nada de la secuencia
+                    // de configuracion: escribir dieciocho bytes a mano dejaria
+                    // entrar cualquier configuracion antigua y bien firmada. La
+                    // compatibilidad hacia atras seria aqui la vulnerabilidad.
+                    let mut bytes = arranque::MAGICO_CENTINELA.to_vec();
+                    bytes.extend_from_slice(&1u16.to_be_bytes());
+                    bytes.extend_from_slice(&42u64.to_be_bytes());
+                    bytes
+                },
+                "el formato anterior, de una sola marca",
+            ),
+            (
+                {
+                    // Un fichero que no afirma ninguna de las dos series. Eso ya
+                    // lo dice la AUSENCIA del fichero, y admitir las dos formas
+                    // dejaria poner un centinela que no dice nada donde habia uno
+                    // que decia algo.
+                    let mut bytes = arranque::MAGICO_CENTINELA.to_vec();
+                    bytes.extend_from_slice(&arranque::VERSION_CENTINELA.to_be_bytes());
+                    bytes.extend_from_slice(&[0u8; 18]);
+                    bytes
+                },
+                "presente y sin afirmar nada",
+            ),
+            (
+                {
+                    let mut bytes = serializar_centinela(centinelas_de_prueba());
+                    bytes[10] = 2; // presencia que no es ni 0 ni 1
+                    bytes
+                },
+                "bandera de presencia fuera del enumerado",
+            ),
+        ];
+
+        for (caso, que) in casos {
             assert!(
                 matches!(
                     analizar_centinela(&caso),
                     Err(ErrorArranque::CentinelaCorrupto)
                 ),
-                "un centinela de {} bytes no debe degradarse en silencio",
-                caso.len()
+                "un centinela {que} no debe degradarse en silencio"
             );
         }
     }
@@ -2536,7 +2636,7 @@ mod pruebas {
         .expect("un almacen vacio debe dejar arrancar");
 
         assert!(matches!(estado, EstadoArranque::PrimerArranque));
-        assert_eq!(centinela, Centinela::SinEstablecer);
+        assert_eq!(centinela, Centinelas::SIN_ESTABLECER);
         assert!(estado.admite_contencion_automatica());
         assert!(
             !estado.exige_alerta(),
@@ -3440,12 +3540,12 @@ mod pruebas {
         let almacen = AlmacenDePrueba::nuevo("reinicio");
         let banco = banco(DominioClave::Cliente);
 
-        let centinela = aceptar_inventario(&almacen.rutas, &bytes_en_disco(&banco), 7)
+        let centinelas = aceptar_inventario(&almacen.rutas, &bytes_en_disco(&banco), 7)
             .expect("aceptar el inventario");
-        assert_eq!(centinela, Centinela::Establecido(7));
+        assert_eq!(centinelas.inventario, Centinela::Establecido(7));
         assert_eq!(
             cargar_centinela(&almacen.rutas).expect("releer"),
-            Centinela::Establecido(7)
+            centinelas
         );
 
         let (estado, centinela) = arrancar(
@@ -3456,7 +3556,7 @@ mod pruebas {
         .expect("rearranque");
 
         assert!(matches!(estado, EstadoArranque::Operativo(_)));
-        assert_eq!(centinela, Centinela::Establecido(7));
+        assert_eq!(centinela.inventario, Centinela::Establecido(7));
 
         let marcado = estado
             .marcado(&MAC)
@@ -3471,11 +3571,16 @@ mod pruebas {
         // en N. Se comprueba el orden observando el estado tras la primera.
         let almacen = AlmacenDePrueba::nuevo("orden-de-escritura");
 
-        disco::escribir_atomico(&almacen.rutas.centinela(), &serializar_centinela(9))
-            .expect("escritura del centinela");
+        disco::escribir_atomico(
+            &almacen.rutas.centinela(),
+            &serializar_centinela(
+                Centinelas::SIN_ESTABLECER.con_inventario(Centinela::Establecido(9)),
+            ),
+        )
+        .expect("escritura del centinela");
 
         assert_eq!(
-            cargar_centinela(&almacen.rutas).expect("releer"),
+            cargar_centinela(&almacen.rutas).expect("releer").inventario,
             Centinela::Establecido(9),
             "el centinela debe quedar en disco aunque el inventario no haya llegado"
         );
@@ -3486,12 +3591,502 @@ mod pruebas {
     }
 
     #[test]
-    fn las_rutas_cuelgan_de_un_solo_directorio() {
+    fn las_rutas_persistentes_cuelgan_de_un_solo_directorio() {
         let rutas = RutasAlmacen::nuevo(PathBuf::from("/datos/eje"));
 
-        for ruta in [rutas.inventario(), rutas.revocaciones(), rutas.centinela()] {
+        for ruta in [
+            rutas.inventario(),
+            rutas.revocaciones(),
+            rutas.centinela(),
+            rutas.evidencia(),
+            rutas.ancla_evidencia(),
+        ] {
             assert_eq!(ruta.parent(), Some(rutas.directorio()));
         }
+    }
+
+    /// El socket es lo unico que **no** cuelga del directorio de datos.
+    ///
+    /// RPT-067, PA-120. Mientras compartieron sitio, `ReadWritePaths` autorizaba
+    /// a la vez escribir evidencia y crear el socket, y medir el aislamiento del
+    /// servicio no distinguia una cosa de la otra.
+    #[test]
+    fn el_socket_no_vive_donde_la_evidencia() {
+        let rutas = RutasAlmacen::nuevo(PathBuf::from("/var/lib/eje-latam"));
+
+        assert_ne!(rutas.socket().parent(), Some(rutas.directorio()));
+        assert_eq!(
+            rutas.socket(),
+            PathBuf::from(arranque::DIRECTORIO_SOCKET_POR_OMISION).join("agente.sock")
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Configuracion firmada — RPT-074, PA-79
+    // -----------------------------------------------------------------------
+    //
+    // El analizador corre ANTES de que ninguna firma se verifique, sobre un
+    // fichero que el modelo de amenazas asume manipulable. Vale aqui todo lo que
+    // `formato` exige de si mismo.
+
+    fn valores_de_prueba() -> configuracion::Valores {
+        configuracion::Valores {
+            secuencia: 7,
+            interfaz: "eth0".to_owned(),
+            perfil: PerfilSegmento::Ot,
+            colector: "siem.hospital:514".to_owned(),
+            intervalo_latido_ms: 60_000,
+            grupo_ipc: Some(1000),
+            nombre: "sensor-planta-3".to_owned(),
+            maquina_esperada: "planta-3".to_owned(),
+        }
+    }
+
+    /// Un sensor que nunca acepto una configuracion.
+    ///
+    /// RPT-078. La mayoria de estas pruebas examinan el **formato** y la firma, no
+    /// la frescura, y sin marca la frescura no rechaza nada. Que haya que
+    /// escribirlo en cada llamada es deliberado: `analizar` no deja leer una
+    /// configuracion sin decir contra que se fecha, y por eso la comprobacion no
+    /// se puede quedar sin cablear.
+    const fn sin_marca() -> Centinela {
+        Centinela::SinEstablecer
+    }
+
+    /// Fichero valido con su firma, y la clave que lo verifica.
+    ///
+    /// La clave sale **envuelta en su dominio**: el verificador la exige asi para
+    /// que una clave de PremosCorp no pueda decidir a que segmento apunta un
+    /// sensor (RPT-011 §4).
+    fn configuracion_firmada(semilla: u64) -> (Vec<u8>, ClaveInventario, configuracion::Valores) {
+        let (firmante, verificadora) = generar_par(&mut GeneradorDeterminista::nuevo(semilla));
+        let valores = valores_de_prueba();
+        let firma = firmar(
+            &firmante,
+            &configuracion::mensaje_de_configuracion(&valores),
+        );
+
+        (
+            configuracion::serializar(&valores, &firma),
+            ClaveInventario::nueva(verificadora, DominioClave::Cliente),
+            valores,
+        )
+    }
+
+    /// La clave de PremosCorp no configura sensores del cliente.
+    ///
+    /// RPT-074 §3. Es la razon de que el verificador reciba la clave **envuelta**
+    /// y no desnuda: con la clave suelta, quien llamara elegiria con cual
+    /// verificar, y la separacion de dominios dependeria de que nadie confunda
+    /// dos variables.
+    #[test]
+    fn la_clave_de_premoscorp_no_firma_configuraciones() {
+        let (firmante, verificadora) = generar_par(&mut GeneradorDeterminista::nuevo(0x7E));
+        let valores = valores_de_prueba();
+        let firma = firmar(
+            &firmante,
+            &configuracion::mensaje_de_configuracion(&valores),
+        );
+        let bytes = configuracion::serializar(&valores, &firma);
+
+        // La firma es valida; lo que no vale es el dominio de la clave.
+        let ajena = ClaveInventario::nueva(verificadora, DominioClave::PremosCorp);
+
+        assert!(matches!(
+            configuracion::analizar(&bytes, &ajena, &valores.maquina_esperada, sin_marca()),
+            Err(configuracion::ErrorConfiguracion::DominioInesperado {
+                encontrado: DominioClave::PremosCorp
+            })
+        ));
+    }
+
+    #[test]
+    fn una_configuracion_firmada_va_y_vuelve_entera() {
+        let (bytes, clave, esperados) = configuracion_firmada(0xC0_FF);
+
+        let leidos =
+            configuracion::analizar(&bytes, &clave, &esperados.maquina_esperada, sin_marca())
+                .expect("la configuracion recien firmada tiene que verificar");
+
+        assert_eq!(leidos, esperados);
+    }
+
+    /// La defensa contra el traslado lateral.
+    ///
+    /// Sin ella, root copia la configuracion de un sensor tranquilo sobre uno
+    /// ruidoso y **las dos firmas son legitimas**.
+    #[test]
+    fn una_configuracion_de_otra_maquina_se_rechaza_pese_a_firma_valida() {
+        let (bytes, clave, _) = configuracion_firmada(0xA1);
+
+        let error = configuracion::analizar(&bytes, &clave, "planta-9", sin_marca())
+            .expect_err("una configuracion de otra maquina no puede valer aqui");
+
+        assert!(
+            matches!(
+                error,
+                configuracion::ErrorConfiguracion::MaquinaAjena { .. }
+            ),
+            "el motivo tiene que decir que es de otra maquina: {error:?}"
+        );
+    }
+
+    /// Y la maquina se compara **despues** de la firma, nunca antes.
+    ///
+    /// Al reves, un fichero inventado decidiria contra que nombre se compara, y
+    /// bastaria con poner el hostname correcto para pasar la puerta.
+    #[test]
+    fn un_fichero_inventado_acusa_a_la_firma_y_no_a_la_maquina() {
+        let (bytes, _, _) = configuracion_firmada(0xB2);
+        let (_, otra) = generar_par(&mut GeneradorDeterminista::nuevo(0xB3));
+        let otra_clave = ClaveInventario::nueva(otra, DominioClave::Cliente);
+
+        let error = configuracion::analizar(&bytes, &otra_clave, "planta-9", sin_marca())
+            .expect_err("firmado por otra clave no puede verificar");
+
+        assert!(
+            matches!(error, configuracion::ErrorConfiguracion::FirmaInvalida),
+            "con la firma rota, la maquina no se ha llegado a mirar: {error:?}"
+        );
+    }
+
+    #[test]
+    fn alterar_un_campo_invalida_la_firma_de_la_configuracion() {
+        let (mut bytes, clave, valores) = configuracion_firmada(0xC3);
+
+        // Primer byte del primer campo de texto: cabecera (32) + prefijo (2).
+        bytes[34] ^= 0x01;
+
+        let error = configuracion::analizar(&bytes, &clave, &valores.maquina_esperada, sin_marca())
+            .expect_err("un campo alterado no puede verificar");
+
+        assert!(matches!(
+            error,
+            configuracion::ErrorConfiguracion::FirmaInvalida
+        ));
+    }
+
+    #[test]
+    fn un_magico_ajeno_no_es_una_configuracion() {
+        let (mut bytes, clave, valores) = configuracion_firmada(0xD4);
+        bytes[0] = b'X';
+
+        assert!(matches!(
+            configuracion::analizar(&bytes, &clave, &valores.maquina_esperada, sin_marca()),
+            Err(configuracion::ErrorConfiguracion::MagicoAusente)
+        ));
+    }
+
+    /// Una version futura se rechaza en lugar de interpretarse.
+    ///
+    /// Puede significar campos nuevos, y leerla a medias es inventarse el
+    /// contenido de un fichero que decide como se comporta el sensor.
+    #[test]
+    fn una_version_futura_de_configuracion_se_rechaza() {
+        let (mut bytes, clave, valores) = configuracion_firmada(0xE5);
+        bytes[8] = 0;
+        bytes[9] = 9;
+
+        assert!(matches!(
+            configuracion::analizar(&bytes, &clave, &valores.maquina_esperada, sin_marca()),
+            Err(configuracion::ErrorConfiguracion::VersionDesconocida { encontrada: 9 })
+        ));
+    }
+
+    /// El cero no es un perfil: un fichero de ceros no produce configuracion.
+    #[test]
+    fn un_perfil_desconocido_se_rechaza_en_la_puerta() {
+        let (bytes, clave, valores) = configuracion_firmada(0xF6);
+
+        for codigo in [0u8, 9, 255] {
+            let mut tocado = bytes.clone();
+            tocado[18] = codigo;
+
+            assert!(
+                matches!(
+                    configuracion::analizar(
+                        &tocado,
+                        &clave,
+                        &valores.maquina_esperada,
+                        sin_marca()
+                    ),
+                    Err(configuracion::ErrorConfiguracion::PerfilDesconocido { .. })
+                ),
+                "el codigo {codigo} no es un perfil y no debe leerse como uno"
+            );
+        }
+    }
+
+    /// Un intervalo de cero convertiria cada vuelta en un latido.
+    #[test]
+    fn un_intervalo_de_latido_nulo_se_rechaza() {
+        let (mut bytes, clave, valores) = configuracion_firmada(0x17);
+        bytes[19..27].fill(0);
+
+        assert!(matches!(
+            configuracion::analizar(&bytes, &clave, &valores.maquina_esperada, sin_marca()),
+            Err(configuracion::ErrorConfiguracion::IntervaloImposible { encontrado: 0 })
+        ));
+    }
+
+    /// Un prefijo absurdo no llega a indexar ni a reservar.
+    ///
+    /// Es la leccion de `eje-ipc`: el techo se comprueba antes de cortar, no
+    /// despues de intentarlo.
+    #[test]
+    fn un_campo_de_longitud_absurda_no_desborda() {
+        let (mut bytes, clave, valores) = configuracion_firmada(0x28);
+        bytes[32] = 0xFF;
+        bytes[33] = 0xFF;
+
+        assert!(matches!(
+            configuracion::analizar(&bytes, &clave, &valores.maquina_esperada, sin_marca()),
+            Err(configuracion::ErrorConfiguracion::CampoImposible { indice: 0 })
+        ));
+    }
+
+    #[test]
+    fn un_campo_que_no_es_texto_se_rechaza() {
+        let (mut bytes, clave, valores) = configuracion_firmada(0x39);
+        // Secuencia UTF-8 imposible dentro del primer campo.
+        bytes[34] = 0xFF;
+
+        assert!(matches!(
+            configuracion::analizar(&bytes, &clave, &valores.maquina_esperada, sin_marca()),
+            Err(configuracion::ErrorConfiguracion::CampoNoEsTexto { indice: 0 })
+        ));
+    }
+
+    /// Una cola sobrante admitiria dos lecturas del mismo fichero.
+    #[test]
+    fn una_cola_sobrante_en_la_configuracion_se_rechaza() {
+        let (mut bytes, clave, valores) = configuracion_firmada(0x4A);
+        bytes.push(0);
+
+        assert!(matches!(
+            configuracion::analizar(&bytes, &clave, &valores.maquina_esperada, sin_marca()),
+            Err(configuracion::ErrorConfiguracion::FirmaMalformada)
+        ));
+    }
+
+    /// Un fichero vacio o minusculo no desborda.
+    #[test]
+    fn una_configuracion_truncada_no_desborda() {
+        let (bytes, clave, valores) = configuracion_firmada(0x5B);
+
+        for corte in [0usize, 1, 8, 17, 31, 33, 40] {
+            let recortada = &bytes[..corte.min(bytes.len())];
+            assert!(
+                configuracion::analizar(recortada, &clave, &valores.maquina_esperada, sin_marca())
+                    .is_err(),
+                "un fichero de {corte} bytes no puede producir configuracion"
+            );
+        }
+    }
+
+    /// «Sin grupo» y «grupo 0» son cosas distintas y el mensaje lo refleja.
+    ///
+    /// El cero es `root`. Sin la bandera de presencia, un socket sin grupo y uno
+    /// del grupo de root producirian el mismo mensaje firmado, y una firma
+    /// emitida para lo uno valdria para lo otro.
+    #[test]
+    fn sin_grupo_y_grupo_cero_no_firman_lo_mismo() {
+        let sin_grupo = configuracion::Valores {
+            grupo_ipc: None,
+            ..valores_de_prueba()
+        };
+        let grupo_root = configuracion::Valores {
+            grupo_ipc: Some(0),
+            ..valores_de_prueba()
+        };
+
+        assert_ne!(
+            configuracion::mensaje_de_configuracion(&sin_grupo),
+            configuracion::mensaje_de_configuracion(&grupo_root)
+        );
+    }
+
+    /// Una configuracion anterior NO entra, aunque su firma sea impecable.
+    ///
+    /// RPT-078, PA-79 paso 5. Es el ataque entero: la firma de la configuracion
+    /// de la semana pasada —la del intervalo de latido largo, la que apuntaba a
+    /// otro colector— es perfectamente valida. Lo que no vale es reponerla sobre
+    /// un sensor que ya vio una posterior.
+    ///
+    /// La misma se admite a proposito: `aceptar_configuracion` avanza la marca
+    /// **antes** de obedecer, asi que un corte entre las dos cosas deja la marca
+    /// en N con la N sin aplicar. Con una comparacion estricta ese sensor no
+    /// volveria a arrancar nunca.
+    #[test]
+    fn una_configuracion_revertida_se_rechaza_pese_a_firma_valida() {
+        let (bytes, clave, valores) = configuracion_firmada(0x5E);
+
+        assert!(
+            configuracion::analizar(
+                &bytes,
+                &clave,
+                &valores.maquina_esperada,
+                Centinela::Establecido(valores.secuencia)
+            )
+            .is_ok(),
+            "reponer la MISMA secuencia tiene que seguir arrancando"
+        );
+
+        assert!(
+            matches!(
+                configuracion::analizar(
+                    &bytes,
+                    &clave,
+                    &valores.maquina_esperada,
+                    Centinela::Establecido(valores.secuencia + 1)
+                ),
+                Err(configuracion::ErrorConfiguracion::SecuenciaRevertida { .. })
+            ),
+            "una configuracion anterior a la ultima aceptada entro con firma valida"
+        );
+    }
+
+    /// Y una secuencia en el techo no congela el sensor para siempre.
+    ///
+    /// RPT-078, y es PA-33 aplicado a la configuracion. Sin techo, **un solo
+    /// mensaje** con `u64::MAX` deja la marca donde ninguna configuracion legitima
+    /// puede alcanzarla, y revocar la clave no lo arregla porque la marca sigue
+    /// arriba. Se rechaza como malformacion, antes de mirar nada mas.
+    #[test]
+    fn una_secuencia_de_configuracion_en_el_techo_se_rechaza() {
+        let (firmante, verificadora) = generar_par(&mut GeneradorDeterminista::nuevo(0x33));
+        let valores = configuracion::Valores {
+            secuencia: u64::MAX,
+            ..valores_de_prueba()
+        };
+        let firma = firmar(
+            &firmante,
+            &configuracion::mensaje_de_configuracion(&valores),
+        );
+        let bytes = configuracion::serializar(&valores, &firma);
+        let clave = ClaveInventario::nueva(verificadora, DominioClave::Cliente);
+
+        assert!(matches!(
+            configuracion::analizar(&bytes, &clave, &valores.maquina_esperada, sin_marca()),
+            Err(configuracion::ErrorConfiguracion::SecuenciaFueraDeRango { .. })
+        ));
+    }
+
+    /// Aceptar un inventario **no** borra la marca de configuracion.
+    ///
+    /// RPT-078. Es el fallo que el contenedor comun existe para impedir, y no se
+    /// ve leyendo ninguno de los dos ficheros por separado: `aceptar_inventario`
+    /// componia el centinela entero desde la secuencia del inventario, asi que un
+    /// segundo escritor ingenuo habria dejado la marca de configuracion a cero en
+    /// silencio — y a partir de ahi cualquier configuracion antigua y bien firmada
+    /// habria entrado.
+    ///
+    /// Se prueba en disco y en los dos ordenes, porque uno solo dejaria pasar la
+    /// mitad del error.
+    #[test]
+    fn las_dos_marcas_sobreviven_a_que_la_otra_avance() {
+        let almacen = AlmacenDePrueba::nuevo("marcas-cruzadas");
+        let banco = banco(DominioClave::Cliente);
+
+        aceptar_configuracion(&almacen.rutas, 4).expect("anotar configuracion");
+        let tras_inventario = aceptar_inventario(&almacen.rutas, &bytes_en_disco(&banco), 7)
+            .expect("aceptar inventario");
+
+        assert_eq!(
+            tras_inventario.configuracion,
+            Centinela::Establecido(4),
+            "aceptar un inventario borro la marca de configuracion"
+        );
+
+        let tras_configuracion =
+            aceptar_configuracion(&almacen.rutas, 5).expect("anotar configuracion posterior");
+
+        assert_eq!(
+            tras_configuracion.inventario,
+            Centinela::Establecido(7),
+            "anotar una configuracion borro la marca del inventario"
+        );
+        assert_eq!(
+            cargar_centinela(&almacen.rutas).expect("releer"),
+            tras_configuracion,
+            "lo que quedo en disco no es lo que la funcion dijo haber dejado"
+        );
+    }
+
+    /// Y dos campos de texto no se pueden intercambiar en silencio.
+    ///
+    /// Sin prefijos de longitud, `interfaz="eth" nombre="0"` e
+    /// `interfaz="eth0" nombre=""` darian el mismo mensaje canonico.
+    #[test]
+    fn los_prefijos_impiden_confundir_dos_campos_de_configuracion() {
+        let uno = configuracion::Valores {
+            interfaz: "eth".to_owned(),
+            nombre: "0".to_owned(),
+            ..valores_de_prueba()
+        };
+        let otro = configuracion::Valores {
+            interfaz: "eth0".to_owned(),
+            nombre: String::new(),
+            ..valores_de_prueba()
+        };
+
+        assert_ne!(
+            configuracion::mensaje_de_configuracion(&uno),
+            configuracion::mensaje_de_configuracion(&otro)
+        );
+    }
+
+    /// Arnes de mutacion determinista sobre un fichero valido.
+    ///
+    /// **Esto no es fuzzing** (RPT-014 §4): un mutador ciego con semilla fija
+    /// explora un espacio minusculo y no crece. Vale como red de regresion y como
+    /// guardia contra panicos evidentes; la afirmacion fuerte la sostendra el
+    /// objetivo de `cargo-fuzz`.
+    ///
+    /// Lo unico que se exige es que **ninguna entrada produzca panico** y que
+    /// ninguna mutacion produzca una configuracion verificada distinta de la
+    /// original: una firma no puede avalar bytes que nadie firmo.
+    #[test]
+    fn el_analizador_de_configuracion_resiste_mutaciones() {
+        let (bytes, clave, valores) = configuracion_firmada(0x6C);
+        let mut generador = GeneradorDeterminista::nuevo(0x6D);
+
+        for _ in 0..2_000 {
+            let mut tocado = bytes.clone();
+            let posicion = (generador.siguiente() as usize) % tocado.len();
+            let valor = (generador.siguiente() % 256) as u8;
+            tocado[posicion] = valor;
+
+            match configuracion::analizar(&tocado, &clave, &valores.maquina_esperada, sin_marca()) {
+                Err(_) => {}
+                Ok(leidos) => assert_eq!(
+                    leidos, valores,
+                    "una mutacion produjo una configuracion verificada DISTINTA"
+                ),
+            }
+        }
+    }
+
+    /// Y el nombre del fichero no se puede mover, solo el directorio.
+    ///
+    /// Si la ruta completa fuera configurable, nada impediria devolverla al
+    /// directorio de evidencia y deshacer la separacion en silencio.
+    #[test]
+    fn el_directorio_del_socket_se_puede_mover_y_el_nombre_no() {
+        let rutas = RutasAlmacen::con_directorio_socket(
+            PathBuf::from("/var/lib/eje-latam"),
+            PathBuf::from("/tmp/eje"),
+        );
+
+        assert_eq!(rutas.socket(), PathBuf::from("/tmp/eje/agente.sock"));
+        assert_eq!(
+            rutas.directorio(),
+            PathBuf::from("/var/lib/eje-latam").as_path()
+        );
+        assert_eq!(
+            rutas.directorio_socket(),
+            PathBuf::from("/tmp/eje").as_path()
+        );
     }
 
     #[test]

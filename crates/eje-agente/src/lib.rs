@@ -145,7 +145,8 @@ mod pruebas {
     // -----------------------------------------------------------------------
 
     use crate::alertas::{
-        SUCESOS_POR_CONSULTA, anotar_incontenible, condiciones, consultar, nombrar, suceso_desde,
+        EstadoConfiguracion, SUCESOS_POR_CONSULTA, anotar_incontenible, condiciones, consultar,
+        nombrar, suceso_desde,
     };
     use eje_almacen::{ClaseEvento, RegistroEvidencia};
     use eje_ipc::mensajes::{ClaseAlerta, PeticionAlertas};
@@ -322,7 +323,15 @@ mod pruebas {
             EstadoArranque::FormatoObsoleto { encontrada: 1 },
             EstadoArranque::SinClaveAprovisionada,
         ] {
-            let vigentes = condiciones(&estado, &observacion, &RegistroEvidencia::nuevo(), false);
+            let vigentes = condiciones(
+                &estado,
+                &observacion,
+                &RegistroEvidencia::nuevo(),
+                false,
+                false,
+                false,
+                EstadoConfiguracion::Firmada,
+            );
 
             assert!(vigentes.accion_administrativa, "{estado:?} debe avisar");
             assert!(
@@ -345,7 +354,15 @@ mod pruebas {
                 detalle: "prueba".to_owned(),
             },
         ] {
-            let vigentes = condiciones(&estado, &observacion, &RegistroEvidencia::nuevo(), false);
+            let vigentes = condiciones(
+                &estado,
+                &observacion,
+                &RegistroEvidencia::nuevo(),
+                false,
+                false,
+                false,
+                EstadoConfiguracion::Firmada,
+            );
 
             assert!(vigentes.hay_manipulacion());
             assert!(
@@ -364,6 +381,9 @@ mod pruebas {
             &AlmacenObservacion::nuevo(),
             &RegistroEvidencia::nuevo(),
             false,
+            false,
+            false,
+            EstadoConfiguracion::Firmada,
         );
 
         assert!(!vigentes.hay_degradacion());
@@ -791,6 +811,10 @@ mod pruebas {
             captura_no_disponible: false,
             accion_administrativa: false,
             salida_no_disponible: false,
+            sin_colector: false,
+            escucha_no_disponible: false,
+            configuracion_sin_firmar: false,
+            configuracion_no_verifica: false,
             registro_saturado: false,
             evidencia_en_riesgo: false,
         }
@@ -942,7 +966,7 @@ mod pruebas {
 
     #[test]
     fn el_fallo_de_envio_se_declara_en_lugar_de_tragarse() {
-        let mut emisor = Emisor::nuevo(DespachoDePrueba::nuevo(true), "sensor-1");
+        let mut emisor = Emisor::nuevo(DespachoDePrueba::nuevo(true), "sensor-1", "eth0");
 
         assert!(
             !emisor.emitir(&[suceso()], &normales(), 0),
@@ -960,12 +984,12 @@ mod pruebas {
             ..normales()
         };
 
-        let mut caido = Emisor::nuevo(DespachoDePrueba::nuevo(true), "sensor-1");
+        let mut caido = Emisor::nuevo(DespachoDePrueba::nuevo(true), "sensor-1", "eth0");
         assert!(!caido.emitir(&[], &degradada, 0));
 
         // El mismo emisor, con el colector ya en pie, no debe repetir la
         // transicion que intento enviar mientras estaba caido.
-        let mut emisor = Emisor::nuevo(DespachoDePrueba::nuevo(false), "sensor-1");
+        let mut emisor = Emisor::nuevo(DespachoDePrueba::nuevo(false), "sensor-1", "eth0");
         assert!(emisor.emitir(&[], &degradada, 0));
         assert!(emisor.emitir(&[], &degradada, 0));
     }
@@ -1002,7 +1026,7 @@ mod pruebas {
     // Sello del extremo hacia el testigo externo — RPT-038, PA-64
     // -----------------------------------------------------------------------
 
-    use crate::salida::linea_de_sello;
+    use crate::salida::{DatosSello, linea_de_sello};
 
     /// Despacho que falla las primeras `fallos` veces y **deja ver** lo enviado.
     ///
@@ -1047,7 +1071,13 @@ mod pruebas {
         // Es una constancia, no una noticia. Si saliera con gravedad de alerta,
         // el operador recibiria una por cada cambio del registro y aprenderia a
         // ignorarlas — que es como se pierde la que importa.
-        let marco = linea_de_sello(42, "abcdef", 0, "sensor-1");
+        let marco = linea_de_sello(&DatosSello {
+            numero: 42,
+            sello: "abcdef",
+            instante_utc: 0,
+            maquina: "sensor-1",
+            interfaz: "eth0",
+        });
         let texto = String::from_utf8_lossy(&marco);
 
         assert!(texto.contains("sello=abcdef"), "{texto}");
@@ -1071,7 +1101,7 @@ mod pruebas {
         // tramo del registro sin atestiguar para siempre, y ese tramo es
         // exactamente donde alguien podria recortar sin que nadie lo notase.
         let (despacho, buzon) = DespachoIntermitente::nuevo(1);
-        let mut emisor = Emisor::nuevo(despacho, "sensor-1");
+        let mut emisor = Emisor::nuevo(despacho, "sensor-1", "eth0");
 
         assert!(!emisor.sellar(7, "aa", 0), "el primer envio falla");
         assert!(
@@ -1095,7 +1125,7 @@ mod pruebas {
         // numero dejaria pasar justo esa mutacion, que es la que RPT-029 §2.1
         // dejo escrita como limitacion y PA-57 cerro en local.
         let (despacho, buzon) = DespachoIntermitente::nuevo(0);
-        let mut emisor = Emisor::nuevo(despacho, "sensor-1");
+        let mut emisor = Emisor::nuevo(despacho, "sensor-1", "eth0");
 
         assert!(emisor.sellar(7, "aa", 0));
         assert!(emisor.sellar(7, "aa", 0));
@@ -1320,6 +1350,9 @@ mod pruebas {
             &observacion,
             &RegistroEvidencia::nuevo(),
             false,
+            false,
+            false,
+            EstadoConfiguracion::Firmada,
         );
 
         assert!(vigentes.captura_con_perdida);

@@ -57,6 +57,168 @@ fn la_misma_semilla_produce_siempre_la_misma_clave() {
     assert_eq!(uno.verificacion().a_bytes(), otro.verificacion().a_bytes());
 }
 
+// ---------------------------------------------------------------------------
+// Configuracion firmada — RPT-074, PA-79
+// ---------------------------------------------------------------------------
+
+/// Configuracion tal como la escribiria el administrador.
+fn toml_de_configuracion() -> &'static str {
+    r#"
+maquina = "planta-3"
+nombre = "sensor-planta-3"
+interfaz = "eth0"
+perfil = "ot"
+colector = "siem.hospital:514"
+intervalo_latido_ms = 60000
+grupo_ipc = 1000
+"#
+}
+
+/// Donde vive el almacen NO se firma, y decirlo aqui se rechaza.
+///
+/// RPT-077, PA-79. Es la unica prueba del proyecto que sujeta un campo por su
+/// **ausencia**, y hace falta porque el circulo que cierra es invisible mirando
+/// la configuracion: la clave que la verifica es `<almacen>/clave-cliente.pub`,
+/// asi que una configuracion que moviera el almacen elegiria donde se busca la
+/// clave que decide si creerla. Con un directorio propio y una clave propia
+/// dentro, la firma pasa a avalar lo que uno quiera.
+///
+/// `deny_unknown_fields` convierte el intento en un fallo ruidoso. Sin el, un
+/// `parque.toml` con `almacen = ...` se analizaria bien, el campo se ignoraria en
+/// silencio, y el administrador creeria haber configurado algo.
+#[test]
+fn la_configuracion_firmada_no_decide_donde_esta_su_propia_clave() {
+    for linea in ["almacen = \"/tmp/mio\"", "directorio_socket = \"/tmp/mio\""] {
+        let texto = format!("{}\n{linea}\n", toml_de_configuracion());
+
+        assert!(
+            entrada::ConfiguracionEntrada::analizar(&texto).is_err(),
+            "'{linea}' se acepto: la configuracion estaria eligiendo donde se \
+             busca la clave que la verifica"
+        );
+    }
+}
+
+/// El recorrido completo: lo que firma el administrador lo lee **el mismo
+/// codigo** que corre en el sensor.
+///
+/// Es la prueba gemela de `un_manifiesto_recien_emitido_lo_verifica_el_agente`,
+/// y existe por lo mismo: dos implementaciones del formato —una que escribe y
+/// otra que lee— divergen, y la divergencia se lee como manipulacion.
+#[test]
+fn una_configuracion_recien_emitida_la_verifica_el_agente() {
+    let emisor = Emisor::desde_semilla(semilla(3));
+
+    let entrada = entrada::ConfiguracionEntrada::analizar(toml_de_configuracion()).expect("toml");
+    let valores = entrada.valores(1).expect("valores");
+    let firma = emisor.firmar_configuracion(&valores);
+    let bytes = guardian_cc::configuracion::serializar(&valores, &firma);
+
+    let leidos = guardian_cc::configuracion::analizar(
+        &bytes,
+        &emisor.como_clave_de_cliente(),
+        "planta-3",
+        guardian_cc::inventario::Centinela::SinEstablecer,
+    )
+    .expect("el agente debe poder cargarla");
+
+    assert_eq!(leidos.interfaz, "eth0");
+    assert_eq!(leidos.intervalo_latido_ms, 60_000);
+    assert_eq!(leidos.grupo_ipc, Some(1000));
+    assert_eq!(leidos.perfil, guardian_cc::PerfilSegmento::Ot);
+    assert_eq!(leidos.secuencia, 1);
+}
+
+/// Un perfil mal escrito se rechaza, no degrada.
+///
+/// `ot` deshabilita la Capa B y el descubrimiento activo. Una errata que cayera
+/// a `corporativo` encenderia en una planta lo que RPT-002 apaga a proposito, y
+/// lo haria **con una firma valida encima**.
+#[test]
+fn un_perfil_mal_escrito_no_degrada_a_corporativo() {
+    let texto = toml_de_configuracion().replace("\"ot\"", "\"OT\"");
+    let entrada = entrada::ConfiguracionEntrada::analizar(&texto).expect("toml valido");
+
+    assert!(matches!(
+        entrada.valores(1),
+        Err(entrada::ErrorEntrada::PerfilDesconocido { .. })
+    ));
+}
+
+/// Una clave mal escrita no se ignora en silencio.
+///
+/// Sin `deny_unknown_fields`, `intervalo_latido` en vez de `intervalo_latido_ms`
+/// dejaria el campo sin declarar y el TOML no diria lo que el sensor hara. Y
+/// aqui el campo omitido es obligatorio, asi que ademas faltaria.
+#[test]
+fn una_clave_mal_escrita_en_la_configuracion_no_se_ignora() {
+    let texto = toml_de_configuracion().replace("intervalo_latido_ms", "intervalo_latido");
+
+    assert!(entrada::ConfiguracionEntrada::analizar(&texto).is_err());
+}
+
+/// La secuencia no se puede escribir a mano.
+///
+/// Un numero en el TOML permitiria retroceder la serie —reemitir la
+/// configuracion de la semana pasada, la del intervalo largo— con firma valida.
+/// La decide quien emite, leyendo la anterior **verificada**.
+#[test]
+fn la_secuencia_no_sale_del_fichero_del_administrador() {
+    let texto = format!("{}\nsecuencia = 99\n", toml_de_configuracion());
+
+    assert!(
+        entrada::ConfiguracionEntrada::analizar(&texto).is_err(),
+        "el administrador no decide la secuencia"
+    );
+}
+
+/// Un colector vacio es legitimo, y viaja declarado.
+///
+/// RPT-054 §1: instalar sin colector es un despliegue valido. Lo que no puede es
+/// pasar desapercibido.
+#[test]
+fn un_colector_vacio_se_emite_y_se_lee_como_vacio() {
+    let emisor = Emisor::desde_semilla(semilla(4));
+    let texto = toml_de_configuracion().replace("\"siem.hospital:514\"", "\"\"");
+
+    let entrada = entrada::ConfiguracionEntrada::analizar(&texto).expect("toml");
+    let valores = entrada.valores(1).expect("valores");
+    let bytes =
+        guardian_cc::configuracion::serializar(&valores, &emisor.firmar_configuracion(&valores));
+
+    let leidos = guardian_cc::configuracion::analizar(
+        &bytes,
+        &emisor.como_clave_de_cliente(),
+        "planta-3",
+        guardian_cc::inventario::Centinela::SinEstablecer,
+    )
+    .expect("un sensor sin colector es un despliegue valido");
+
+    assert!(leidos.colector.is_empty());
+}
+
+/// Y la de un emisor no vale para otro.
+#[test]
+fn la_configuracion_de_un_emisor_no_la_avala_otro() {
+    let uno = Emisor::desde_semilla(semilla(5));
+    let otro = Emisor::desde_semilla(semilla(6));
+
+    let entrada = entrada::ConfiguracionEntrada::analizar(toml_de_configuracion()).expect("toml");
+    let valores = entrada.valores(1).expect("valores");
+    let bytes =
+        guardian_cc::configuracion::serializar(&valores, &uno.firmar_configuracion(&valores));
+
+    assert!(
+        guardian_cc::configuracion::analizar(
+            &bytes,
+            &otro.como_clave_de_cliente(),
+            "planta-3",
+            guardian_cc::inventario::Centinela::SinEstablecer,
+        )
+        .is_err()
+    );
+}
+
 #[test]
 fn semillas_distintas_producen_claves_distintas() {
     let uno = Emisor::desde_semilla(semilla(7));

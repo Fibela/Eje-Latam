@@ -26,6 +26,12 @@ srw-rw---- 1 0 1000  /tmp/eje/agente.sock
 `root` como propietario, **tu grupo** en la cuarta columna, y `srw-rw----`. Si
 falta el segundo `rw`, la consola no podrá conectar sin `sudo`.
 
+> **En desarrollo el socket está en `/tmp/eje`; en producción, en
+> `/run/eje-latam`.** No es un descuido: `/run` lo crea `systemd` con
+> `RuntimeDirectory=` y hace falta root, lo que no tiene sentido para levantar
+> una consola de diagnóstico. El guion pasa `--directorio-socket "$ALMACEN"`
+> justamente por eso (RPT-067, PA-120). Lo persistente sigue en `--almacen`.
+
 Después, la consola:
 
 ```bash
@@ -61,6 +67,11 @@ un agente que muere deja el fichero. El cliente da `ECONNREFUSED` sobre algo que
 existe: comprobar que el fichero está no dice que el agente esté. El guion lo
 retira, pero **sólo si nadie escucha** — borrarlo con otro agente vivo lo dejaría
 sordo sin que se entere.
+
+Esto **sigue siendo cierto aquí y ya no en producción**: con el socket en `/run`,
+que es tmpfs, y con `systemd` retirando el directorio al parar el servicio, el
+socket huérfano dejó de ser posible por construcción (RPT-067). El guion lo sigue
+tratando porque `/tmp/eje` no se vacía solo.
 
 **Esperar con `sleep 2` es correcto hasta el día que la máquina va lenta.** El
 guion espera al socket con cota, no a ciegas.

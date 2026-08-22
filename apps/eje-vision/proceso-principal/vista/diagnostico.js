@@ -14,6 +14,10 @@ const NOMBRES = {
   capturaNoDisponible: "CAPTURA NO DISPONIBLE",
   accionAdministrativa: "acción administrativa",
   salidaNoDisponible: "salida no disponible",
+  sinColector: "SIN COLECTOR",
+  escuchaNoDisponible: "SIN ESCUCHA LOCAL",
+  configuracionSinFirmar: "CONFIG SIN FIRMAR",
+  configuracionNoVerifica: "CONFIG NO VERIFICA",
   registroSaturado: "registro saturado",
   evidenciaEnRiesgo: "evidencia en riesgo",
 };

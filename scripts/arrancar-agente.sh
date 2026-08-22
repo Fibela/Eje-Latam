@@ -72,9 +72,14 @@ fi
 echo "Se necesitan privilegios para capturar tramas en '$INTERFAZ'."
 sudo -v
 
+# RPT-067, PA-120. En produccion el socket vive en /run/eje-latam, que crea
+# `systemd` con RuntimeDirectory=. Aqui no hay systemd y crear /run/eje-latam
+# exigiria root para algo que es desarrollo, asi que se apunta al almacen de
+# pruebas. Es la razon de que --directorio-socket exista.
 sudo "$BINARIO" \
   --interfaz "$INTERFAZ" \
   --almacen "$ALMACEN" \
+  --directorio-socket "$ALMACEN" \
   --ciclos 0 \
   --grupo-ipc "$(id -g)" \
   > "$REGISTRO" 2>&1 &

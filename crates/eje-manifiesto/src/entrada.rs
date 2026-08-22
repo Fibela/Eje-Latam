@@ -42,6 +42,17 @@ pub enum ErrorEntrada {
         detalle: String,
     },
 
+    /// El perfil declarado no es uno de los dos que existen.
+    ///
+    /// Se rechaza en lugar de caer a `corporativo`: `ot` deshabilita la Capa B y
+    /// el descubrimiento activo, y una errata que degradase a corporativo
+    /// encendería en una planta lo que RPT-002 apaga a propósito.
+    #[error("el perfil '{encontrado}' no existe; use corporativo u ot")]
+    PerfilDesconocido {
+        /// Texto rechazado.
+        encontrado: String,
+    },
+
     /// Una direccion de enlace no tiene la forma esperada.
     #[error("la direccion '{texto}' no es una MAC de seis octetos en hexadecimal")]
     MacInvalida {
@@ -82,6 +93,125 @@ pub struct Entrada {
     /// Declaraciones de segmento.
     #[serde(default)]
     pub segmento: Vec<SegmentoEntrada>,
+}
+
+/// Configuracion del sensor, tal como la escribe el administrador.
+///
+/// RPT-074, PA-79.
+///
+/// # El humano escribe texto y el sensor lee binario
+///
+/// El coste que RPT-074 §4 daba por asumido —«el administrador no lo lee con
+/// `cat`»— se paga aqui y no del todo: la **fuente** que el administrador
+/// mantiene es este TOML, y el fichero firmado es el artefacto que sale de el.
+/// El analizador de texto vive en la herramienta del administrador, no en el
+/// camino que decide si el sensor confia en su propia configuracion.
+///
+/// # `deny_unknown_fields` importa mas aqui que en ningun otro sitio
+///
+/// Una clave mal escrita —`intervalo_latido` en vez de `intervalo_latido_ms`— se
+/// ignoraria en silencio y el sensor arrancaria con otra cosa **firmada**. El
+/// error tiene que salir al emitir, delante de quien lo escribe.
+///
+/// # Casi nada tiene valor por omision, y es deliberado
+///
+/// Solo dos campos lo tienen, y en los dos **la ausencia significa algo**:
+/// `colector` vacio es «este sensor no informa a ninguna sala» (RPT-054 §1), y
+/// `grupo_ipc` ausente deja el socket en `0600`.
+///
+/// Todo lo demas se escribe. Leer el TOML dice exactamente que hara el sensor,
+/// sin valores escondidos en un binario — que es lo minimo exigible a un fichero
+/// del que depende cuanto se le oye.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConfiguracionEntrada {
+    /// `hostname` del equipo donde esta configuracion es valida.
+    ///
+    /// Distinto de [`Self::nombre`]: este dice **donde** vale, aquel **como se
+    /// llama en la sala**. Colapsarlos impediria que un sensor se anunciara con
+    /// un nombre operativo distinto del de la maquina.
+    pub maquina: String,
+
+    /// Identidad del sensor en la sala. RPT-058.
+    pub nombre: String,
+
+    /// Interfaz que se vigila. **Sin valor por omision**: no hay ninguna
+    /// razonable, y vigilar la equivocada es peor que no arrancar.
+    pub interfaz: String,
+
+    /// `corporativo` u `ot`.
+    pub perfil: String,
+
+    /// Colector de syslog, `host:puerto`. Vacio es legitimo y declarado.
+    #[serde(default)]
+    pub colector: String,
+
+    /// Cada cuanto late, en milisegundos.
+    ///
+    /// Se escribe siempre: es el campo que toda esta maquinaria existe para
+    /// proteger, y un valor por omision seria justo el que nadie mira.
+    pub intervalo_latido_ms: u64,
+
+    /// Grupo numerico autorizado a consultar por el socket. Ausente deja `0600`.
+    #[serde(default)]
+    pub grupo_ipc: Option<u32>,
+    //
+    // Aqui NO van `almacen` ni `directorio_socket`. Estuvieron un dia y salieron
+    // al cablear la obediencia (RPT-077, PA-79): la clave que verifica esta
+    // configuracion vive dentro del almacen, asi que firmar donde esta el almacen
+    // es firmar donde se busca la clave que decide si creer la firma.
+    //
+    // `deny_unknown_fields` hace que un `parque.toml` antiguo que todavia los
+    // lleve falle al analizarse en lugar de ignorarlos en silencio, que es lo
+    // que hace falta: quien los escribio creia estar configurando algo.
+}
+
+impl ConfiguracionEntrada {
+    /// Analiza el fichero del administrador.
+    ///
+    /// # Errores
+    ///
+    /// [`ErrorEntrada::TomlInvalido`], que ya incluye linea y columna.
+    pub fn analizar(contenido: &str) -> Result<Self, ErrorEntrada> {
+        toml::from_str(contenido).map_err(|error| ErrorEntrada::TomlInvalido {
+            detalle: error.to_string(),
+        })
+    }
+
+    /// Traduce al vocabulario del sensor.
+    ///
+    /// La secuencia no sale de aqui: la decide quien emite, leyendo la anterior
+    /// **verificada**. Un numero escrito a mano en el TOML permitiria retroceder
+    /// la serie sin que nada lo notara.
+    ///
+    /// # Errores
+    ///
+    /// [`ErrorEntrada::PerfilDesconocido`] si el perfil no es uno de los dos.
+    pub fn valores(
+        &self,
+        secuencia: u64,
+    ) -> Result<guardian_cc::configuracion::Valores, ErrorEntrada> {
+        let perfil = match self.perfil.as_str() {
+            "corporativo" => guardian_cc::PerfilSegmento::Corporativo,
+            "ot" => guardian_cc::PerfilSegmento::Ot,
+            otro => {
+                return Err(ErrorEntrada::PerfilDesconocido {
+                    encontrado: otro.to_owned(),
+                });
+            }
+        };
+
+        Ok(guardian_cc::configuracion::Valores {
+            secuencia,
+            interfaz: self.interfaz.clone(),
+            perfil,
+            colector: self.colector.clone(),
+            intervalo_latido_ms: self.intervalo_latido_ms,
+            grupo_ipc: self.grupo_ipc,
+            nombre: self.nombre.clone(),
+            maquina_esperada: self.maquina.clone(),
+        })
+    }
 }
 
 /// Un marcado, tal como lo escribe el administrador.

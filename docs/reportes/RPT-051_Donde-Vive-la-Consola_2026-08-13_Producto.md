@@ -8,7 +8,13 @@
 **Estado:** **Documento de decisión. No recomienda: expone.**
 
 - **Depende de:** RPT-002 §9.3 (transporte), RPT-046 (Electron), RPT-047 (degradación), RPT-050 (latencia)
-- **Aborda:** PA-77. Condiciona PA-79, PA-84 y el empaquetado
+- **Aborda:** PA-77. Condiciona PA-79, PA-107 y el empaquetado
+
+> **Corrección de identificador (13-ago-2026).** Este reporte y RPT-052 llamaron
+> **PA-84** al empaquetado dual. PA-84 ya estaba tomado en
+> `docs/Puesta-en-marcha-local.md` §5 —«`--grupo-ipc` aceptaría un nombre de
+> grupo y no un número»— desde antes. El empaquetado dual pasa a ser **PA-107**;
+> PA-84 conserva su significado original. Ver RPT-053 §9.
 
 ---
 
@@ -101,7 +107,7 @@ se deduce de esa respuesta. Ninguno se puede decidir antes.
 ## 4. Lo que este reporte pide
 
 No una opción. **Un enunciado de quién es el usuario de VIS-04**, con nombre y
-sitio. Con eso, PA-79, PA-84 y el empaquetado dejan de estar bloqueados.
+sitio. Con eso, PA-79, PA-107 y el empaquetado dejan de estar bloqueados.
 
 Y si la respuesta es «los dos», que se diga como decisión y no como aplazamiento:
 la opción D es legítima y cuesta el doble de verificación, que es un precio que

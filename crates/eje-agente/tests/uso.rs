@@ -18,11 +18,23 @@
 
 use std::process::Command;
 
-/// Opciones que el mensaje debe nombrar.
+/// Opciones que el mensaje debe nombrar **desde fuera del proceso**.
 ///
-/// No estan todas a proposito: se listan las que un operador necesita para
-/// arrancar el agente y las que se anadieron tarde, que son las que se olvidan.
-const ESPERADAS: &[&str] = &["--interfaz", "--almacen", "--ciclos", "--grupo-ipc"];
+/// # Esta lista se recorto a proposito (RPT-071, PA-122)
+///
+/// Antes tenia cuatro nombres y decia cubrir «las que se anadieron tarde, que
+/// son las que se olvidan». `--directorio-socket` se anadio tarde, se olvido, y
+/// **no estaba en la lista**: la prueba declaraba un proposito que no cumplia y
+/// paso en verde el dia entero que la opcion fue indescubrible.
+///
+/// Que el mensaje las nombre **todas** ya no se comprueba aqui, porque desde una
+/// prueba de integracion no se puede ver `OPCIONES` y cualquier lista seria otra
+/// copia a mano. Lo hace `pruebas_opciones::la_linea_de_uso_nombra_todas_las_opciones`,
+/// que sale de la misma tabla que la linea.
+///
+/// Lo que esta suite comprueba es lo suyo, y no se puede comprobar de otro modo:
+/// que el mensaje **salga del binario de verdad** y llegue a `stderr`.
+const ESPERADAS: &[&str] = &["--interfaz"];
 
 #[test]
 fn sin_argumentos_el_agente_explica_como_se_usa() {

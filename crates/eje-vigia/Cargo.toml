@@ -1,0 +1,21 @@
+[package]
+name = "eje-vigia"
+description = "Eje-Vigia. Detector de referencia de ausencia de latidos, del lado del colector."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "eje-vigia"
+path = "src/main.rs"
+
+# Sin dependencias, y no por minimalismo: este crate NO corre en el sensor, pero
+# es el que decide si un hospital se entera de que un sensor murio. Cada
+# dependencia es codigo ajeno en esa decision.
+[dependencies]
+
+[lints]
+workspace = true
