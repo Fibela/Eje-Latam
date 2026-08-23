@@ -76,6 +76,43 @@ longitud_maxima = 1048576
 prefijo_longitud_bytes = 4
 
 # ---------------------------------------------------------------------------
+# DONDE SE ENCUENTRAN LOS DOS PROCESOS — RPT-079 §2.1, PA-132
+# ---------------------------------------------------------------------------
+#
+# La ruta del socket vivio en TRES sitios y dos estaban mal. El agente abria
+# /run/eje-latam/agente.sock desde RPT-067; la consola seguia llamando por
+# omision a /run/eje/agente.sock, que quedo atras en aquel cambio; y los guiones
+# de desarrollo usaban /tmp/eje/agente.sock.
+#
+# Con los valores de fabrica, un sensor sano y una consola sana NO se
+# encontraban. Nadie lo vio porque los guiones pasan EJE_SOCKET a mano y eso
+# tapaba el agujero: el defecto solo aparecia en un despliegue de verdad, que es
+# donde no hay nadie mirando.
+#
+# Es el mismo argumento que los canales, un piso mas abajo. Un punto de
+# encuentro es contrato entre los dos procesos: si cada lado lo declara por su
+# cuenta, divergen. Que este aqui hace que la divergencia sea CI en rojo.
+
+[socket]
+# Directorio volatil donde nace el socket, por omision.
+#
+# systemd lo crea con RuntimeDirectory= y lo destruye al parar. /run es tmpfs:
+# se vacia en cada arranque, con lo que el socket huerfano —el fichero que
+# sobrevive al proceso y hace que el cliente reciba ECONNREFUSED sobre algo que
+# existe— deja de ser posible por construccion (RPT-067, PA-120).
+#
+# El agente admite moverlo con --directorio-socket, para desarrollo sin
+# privilegios. La consola lo admite con EJE_SOCKET. Lo que ninguno de los dos
+# puede hacer es SUPONER uno distinto.
+directorio = "/run/eje-latam"
+
+# Nombre del fichero. NO es configurable en el agente, a proposito: se puede
+# mover el directorio, nunca el fichero. Si la ruta completa fuera configurable,
+# nada impediria apuntarla de vuelta al directorio de evidencia y deshacer la
+# separacion de RPT-067 sin que ninguna comprobacion se enterase.
+nombre = "agente.sock"
+
+# ---------------------------------------------------------------------------
 # CANALES PERMITIDOS
 # ---------------------------------------------------------------------------
 #

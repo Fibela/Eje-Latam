@@ -36,6 +36,12 @@ import {
   CANALES_PROHIBIDOS,
   CARGA_MAXIMA_BYTES,
 } from "../puente-ipc.js";
+import {
+  DIRECTORIO_SOCKET,
+  NOMBRE_SOCKET,
+  RUTA_SOCKET_POR_OMISION,
+  rutaSocket,
+} from "../punto-de-encuentro.js";
 
 /** Raíz del repositorio, cuatro niveles por encima de este fichero compilado. */
 function rutaManifiesto(): string {
@@ -366,6 +372,64 @@ describe("PA-20 — paridad con contrato-ipc.toml", () => {
       tipoDe("lista<SucesoAlerta>"),
       "RespuestaAlertas",
       "la comparación debe distinguir un array de su envoltorio",
+    );
+  });
+
+  // RPT-079 §2.1, PA-132. La mitad TypeScript de la barrera del punto de
+  // encuentro; la otra vive en `xtask`, atando el manifiesto a la constante del
+  // agente. Media barrera no es una barrera: es exactamente así como la ruta
+  // acabó viviendo en tres sitios con dos mal.
+  //
+  // Lo que este defecto tuvo de particular es que **no se quedó corto, apuntó a
+  // otro sitio**. Un índice corto se nota porque falta algo; una ruta que apunta
+  // a otro sitio produce un sensor sano, una consola sana y `ECONNREFUSED`.
+  it("la consola busca al agente donde el contrato dice que está", () => {
+    const contenido = manifiesto();
+    const seccion = contenido.split("[socket]")[1];
+    assert.ok(seccion, "el contrato debe declarar el punto de encuentro");
+
+    // Se lee bajo `[socket]` y no la primera coincidencia del fichero: el
+    // manifiesto tiene `nombre =` en cada canal y en cada campo, y un `match`
+    // ingenuo se llevaría el de `obtener-estado-agente`.
+    const valorDe = (clave: string): string => {
+      for (const linea of seccion.split("\n")) {
+        if (linea.trimStart().startsWith("[")) break;
+        const encaje = new RegExp(`^${clave}\\s*=\\s*"([^"]*)"`, "u").exec(
+          linea.trim(),
+        );
+        if (encaje?.[1] !== undefined) return encaje[1];
+      }
+      throw new Error(`[socket] no declara ${clave}`);
+    };
+
+    assert.equal(
+      DIRECTORIO_SOCKET,
+      valorDe("directorio"),
+      "el contrato manda a la consola a un directorio y ésta abre otro",
+    );
+    assert.equal(NOMBRE_SOCKET, valorDe("nombre"));
+    assert.equal(
+      RUTA_SOCKET_POR_OMISION,
+      `${valorDe("directorio")}/${valorDe("nombre")}`,
+      "el contrato y la consola no componen la misma ruta",
+    );
+  });
+
+  // Y la variable de entorno no puede reintroducir el agujero por otra puerta.
+  //
+  // `EJE_SOCKET=` entrega una variable definida y vacía —systemd y los guiones
+  // de shell lo hacen sin querer todo el tiempo— y `?? valor` NO la sustituye,
+  // porque `??` sólo mira `undefined` y `null`. La consola intentaría abrir la
+  // cadena vacía y presentaría el fallo como «el agente no responde», que es la
+  // mentira de PA-118 en otro sitio.
+  it("una variable vacía no es un punto de encuentro", () => {
+    assert.equal(rutaSocket({}), RUTA_SOCKET_POR_OMISION);
+    assert.equal(rutaSocket({ EJE_SOCKET: "" }), RUTA_SOCKET_POR_OMISION);
+    assert.equal(rutaSocket({ EJE_SOCKET: "   " }), RUTA_SOCKET_POR_OMISION);
+    assert.equal(
+      rutaSocket({ EJE_SOCKET: "/tmp/eje/agente.sock" }),
+      "/tmp/eje/agente.sock",
+      "un destino declarado de verdad tiene que seguir mandando",
     );
   });
 

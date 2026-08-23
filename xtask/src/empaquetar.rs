@@ -987,6 +987,63 @@ mod pruebas {
         );
     }
 
+    /// Y el punto de encuentro que declara el contrato es el que el agente abre.
+    ///
+    /// RPT-079 §2.1, PA-132. La prueba de arriba ata la unidad al agente; ésta
+    /// ata el **contrato** al agente, que es la mitad que faltaba y por donde se
+    /// coló el defecto: la consola declaraba su ruta por su cuenta, se quedó en
+    /// `/run/eje` cuando RPT-067 movió el socket, y **con los valores de fábrica
+    /// un sensor sano y una consola sana no se encontraban**.
+    ///
+    /// Nadie lo vio porque los guiones de desarrollo pasan `EJE_SOCKET` a mano.
+    /// El defecto sólo aparecía en un despliegue de verdad, que es donde no hay
+    /// nadie mirando.
+    ///
+    /// La comprobación del lado TypeScript vive en `contrato.prueba.ts`, por lo
+    /// mismo que las de los canales: media barrera no es una barrera.
+    #[test]
+    fn el_punto_de_encuentro_del_contrato_es_el_que_el_agente_abre() {
+        let manifiesto = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("contrato-ipc.toml"),
+        )
+        .expect("contrato-ipc.toml es la fuente de verdad del puente");
+
+        // Se lee el valor que sigue a `[socket]` y no el primero que aparezca:
+        // el manifiesto tiene `nombre =` en cada canal y en cada campo, y un
+        // `find` ingenuo se llevaria el de `obtener-estado-agente`.
+        let seccion = manifiesto
+            .split("[socket]")
+            .nth(1)
+            .expect("el contrato debe declarar el punto de encuentro");
+
+        let valor_de = |clave: &str| -> String {
+            seccion
+                .lines()
+                .take_while(|linea| !linea.trim_start().starts_with('['))
+                .find_map(|linea| linea.trim().strip_prefix(clave)?.split('"').nth(1))
+                .unwrap_or_else(|| panic!("[socket] no declara {clave}"))
+                .to_owned()
+        };
+
+        let directorio = valor_de("directorio =");
+        let nombre = valor_de("nombre =");
+
+        assert_eq!(
+            directorio,
+            guardian_cc::arranque::DIRECTORIO_SOCKET_POR_OMISION,
+            "el contrato manda a la consola a un directorio y el agente abre otro"
+        );
+
+        let rutas = guardian_cc::arranque::RutasAlmacen::nuevo(std::path::PathBuf::from("/datos"));
+        assert_eq!(
+            rutas.socket(),
+            std::path::Path::new(&directorio).join(&nombre),
+            "el contrato y el agente no componen la misma ruta"
+        );
+    }
+
     /// La orden de arranque que la unidad entrega al nucleo, sin comentarios.
     ///
     /// # Por que no vale mirar el fichero entero

@@ -17,6 +17,7 @@ import { app, BrowserWindow, ipcMain, session, shell } from "electron";
 
 import { type Conducto, pedir } from "./enlace.js";
 import { CANALES_PERMITIDOS, type CanalPermitido } from "./puente-ipc.js";
+import { rutaSocket } from "./punto-de-encuentro.js";
 import {
   type Cabeceras,
   type OpcionesVentana,
@@ -30,10 +31,14 @@ const AQUI = dirname(fileURLToPath(import.meta.url));
 /**
  * Ruta del socket del agente.
  *
- * Sin puerto TCP local (RPT-002 §9.3). En Windows sería un named pipe; PA-79
- * queda anotado porque esta ruta está fijada y debería salir de configuración.
+ * Sin puerto TCP local (RPT-002 §9.3). En Windows sería un named pipe.
+ *
+ * El valor vive en `punto-de-encuentro.ts` y no aquí desde RPT-079 (PA-132):
+ * este fichero importa Electron, así que una constante escrita en él es una
+ * constante que ninguna prueba puede mirar — y por eso se quedó apuntando a
+ * `/run/eje` cuando el agente se mudó a `/run/eje-latam`.
  */
-export const RUTA_SOCKET = process.env["EJE_SOCKET"] ?? "/run/eje/agente.sock";
+export const RUTA_SOCKET = rutaSocket();
 
 /** Envuelve un socket real en el `Conducto` que `enlace.ts` sabe manejar. */
 function abrirConducto(): Conducto {
