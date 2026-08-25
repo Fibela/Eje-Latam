@@ -414,7 +414,219 @@ predicciones que fallen, que son las que más valen**.
 
 Si alguna sale distinta: qué se esperaba, qué ocurrió, qué punto nace.
 
-## 11. Puntos abiertos
+## 11. Resultados de la mitad A — 25 de agosto de 2026
+
+**Artefacto comprobado antes de observar:** `md5 37d036a5e9883f820e5ffb450346b952`,
+`ExecStart` sólo con `--almacen` y `--ciclos 0`, y banner declarando
+`Configuracion : FIRMADA y verificada (secuencia 1)`.
+
+| Canal | Resultado | Tiempo |
+|---|---|---|
+| `obtener-estado-agente` | ❌ rechazo: *sin manejador* | 444 ms |
+| `obtener-inventario` | ❌ rechazo: *sin manejador* | 559 ms |
+| `obtener-estado-boveda` | ❌ rechazo: *sin manejador* | 549 ms |
+| `consultar-sandbox` | ❌ rechazo: *sin manejador* | 787 ms |
+| `consultar-alertas` | ✅ `{"primerDisponible":1,"hayMas":false,"sucesos":[]}` | 983 ms |
+| `obtener-condiciones` | ✅ **trece** condiciones | 870 ms |
+
+**Ningún fallo de transporte.** Los seis viajaron, se enmarcaron, y volvieron. El
+enmarcado, el prefijo de longitud, el código de respuesta y el de rechazo
+funcionan contra un socket real y no sólo contra vectores.
+
+### 11.1 Cuatro de seis canales están declarados y no cableados — PA-135
+
+`obtener-estado-agente`, `obtener-inventario`, `obtener-estado-boveda` y
+`consultar-sandbox` **no tienen manejador**. El agente los rechaza con un motivo
+exacto, que es el comportamiento correcto y está probado
+(`un_canal_sin_manejador_se_rechaza_con_motivo_y_no_con_lista_vacia`).
+
+Lo que **no** existía es un punto abierto que dijera que faltan. La barrera de
+paridad con `contrato-ipc.toml` afirma que los seis canales están **declarados a
+los dos lados**; ninguna afirma que los seis **respondan**. Se anotó en §5.2 antes
+de ejecutar —«lo que ninguna afirma es que los seis respondan»— y así ha sido.
+
+Es el defecto dominante del proyecto, esta vez con una vuelta más: el hueco estaba
+**probado como correcto**. Una prueba que fija «si no hay manejador, rechaza con
+motivo» es buena y necesaria, y a la vez hace que la ausencia se sienta resuelta.
+
+### 11.2 El plano de control espera al de datos — PA-136
+
+Entre 444 y 983 ms por petición, sobre un socket de dominio Unix local. Debería
+ser de un dígito.
+
+No es el IPC: es que el agente **atiende consultas al final del ciclo**
+(RPT-034 §4), y cada ciclo espera hasta `PLAZO` = 500 ms por trama. La latencia de
+la consola la fija la ventana de observación de la captura.
+
+Es la hipótesis 5 de §7, y la que más me interesaba. No venció el plazo de 5 s
+—no rompió—, pero **el mecanismo está confirmado**: el plano de control va detrás
+del de datos. Con `--tramas 200` en un segmento con tráfico, un ciclo dura más, y
+esos 5 s dejan de parecer holgados.
+
+### 11.3 Las trece condiciones, leídas por el otro proceso
+
+```json
+{"inventarioSuprimido":false,"inventarioNoVerifica":false,
+ "observacionSaturada":false,"capturaConPerdida":false,
+ "capturaNoDisponible":false,"accionAdministrativa":false,
+ "salidaNoDisponible":false,"sinColector":true,
+ "escuchaNoDisponible":false,"configuracionSinFirmar":false,
+ "configuracionNoVerifica":false,"registroSaturado":false,
+ "evidenciaEnRiesgo":false}
+```
+
+Trece campos, en el orden del contrato. `sinColector` encendida —el sensor se
+emitió sin colector a propósito—, y **`configuracionSinFirmar` apagada**, que es la
+primera vez que un proceso ajeno confirma que este sensor obedece una
+configuración firmada.
+
+### 11.4 El marco troceado — §5.3
+
+Registro sembrado de **1 245 846 bytes**. `consultar-alertas` devolvió **1 038 208
+bytes** con `hayMas: true`, justo por debajo del techo de marco de 1 048 576.
+
+Llegó **entero**. El acumulador reensambló alrededor de un megabyte repartido en
+tantas lecturas como quisiera el núcleo, y el troceado lo decidió el sistema
+operativo, no nuestro codificador. **Es la única afirmación de toda esta sesión que
+los vectores de RPT-045 no podían hacer.**
+
+De paso quedó ejercitada la cota por bytes y `hayMas`, que PA-97 dice que la
+consola todavía no lee.
+
+### 11.5 Sin permiso y sin agente son cosas distintas — §5.4 y §5.5
+
+Con el socket desnudo, desde un usuario fuera del grupo: `Permission denied`,
+salida 2. El `0660` protege de verdad.
+
+Con la consola, desde ese mismo usuario:
+
+```
+[sin-permiso] sin permiso sobre el socket: el agente lo creó para su propio
+              usuario y esta consola corre como otro (PA-82)
+```
+
+Seis veces, en **0 y 1 ms**. Instantáneo, es decir: **no reintentó**. Reintentar
+contra un `EACCES` es girar el pomo de una puerta cerrada con llave, y PA-93 lo
+dejó fijado hace semanas. Aquí se ve ocurrir.
+
+Con el agente parado, el mismo guion:
+
+```
+[sin-socket] no existe el socket: el agente nunca llegó a abrirlo en esta ruta
+```
+
+Tres causas distintas —sin permiso, sin socket, sin respuesta— con tres mensajes
+distintos, sobre un sistema real. RPT-046 §11 las separó en el tipo; esto es la
+primera vez que se comprueba que llegan separadas hasta arriba.
+
+**Lo que NO se ejecutó:** cortar el servicio **a mitad de una petición en vuelo**.
+Se hizo la variante limpia —agente ya parado— y no la de dos sesiones simultáneas.
+`colgar a media respuesta menciona los bytes que faltaban` sigue siendo una prueba
+unitaria sin observación. Queda escrito.
+
+### 11.6 PA-40 cerrado: la captura habla con el núcleo — §5.3 de §8
+
+Agente a mano, `--ciclos 3 --tramas 40`, con `ping -c 40 127.0.0.1` de fondo. Los
+tres criterios de §8, los tres:
+
+| Criterio | Observado |
+|---|---|
+| `Captura` sin `NO DISPONIBLE` | ✅ no aparece |
+| `Descartes del nucleo: N (vista completa)` | ✅ `0 (vista completa)` — la llamada a `estadisticas()` respondió |
+| `Tramas observadas` > 0 y moviéndose | ✅ vueltas de 0, **4** y 0 |
+
+Los tres hacían falta. Un `abrir()` que devuelve `Ok` sobre una interfaz muerta
+habría dado el primero y cero tramas para siempre.
+
+**Y algo que no se buscaba:** en la vuelta con tráfico apareció un dispositivo con
+dirección `00:00:00:00:00:00` —`lo` no tiene MAC real— clasificado `SinIndicio` y
+contado como **«requiere humano»**. Es correcto: sin marcado firmado y sin segmento
+declarado limpio, nada es contenible por sí solo. Pero es la primera vez que el
+camino de clasificación corre sobre tráfico de verdad y no sobre una trama
+fabricada.
+
+### 11.7 Una condición que nadie había visto encenderse
+
+Ejecutado a mano, fuera de `systemd`, el agente declaró:
+
+```
+Escucha local      : NO disponible (/run/eje-latam/agente.sock: No such file...)
+  !  El directorio del socket no existe: /run/eje-latam
+     Bajo systemd lo crea RuntimeDirectory=. A mano, usa --directorio-socket.
+...
+    escuchaNoDisponible   : true
+```
+
+`escuchaNoDisponible` es la undécima condición, de RPT-070 (PA-125), y **se
+encendió sola en la primera situación real que la produce**. Además el agente
+siguió observando: perder la escucha no apaga la captura, que es RPT-047 (PA-81)
+en la dirección contraria a la que se escribió.
+
+El aviso sobre `RuntimeDirectory=` también hizo su trabajo: explica el directorio
+que falta, no el socket, que es lo que el mensaje del sistema no dice.
+
+### 11.8 Las predicciones de §6, sin ajustar
+
+| # | Predicción | Resultado |
+|---|---|---|
+| 1 | Los seis responden, ninguno rechaza | ❌ **Falló.** Cuatro rechazaron |
+| 2 | Trece condiciones, `configuracionSinFirmar` en `true` | ⚠️ Trece ✅; el valor es `false` porque el escenario cambió al camino A por acuerdo. **No cuenta como acierto** |
+| 3 | Coinciden campo a campo con el latido del diario | 🔵 **Parcial.** El modo servicio no imprime la lista (RPT-072); la ejecución a mano sí, y coincide salvo `escuchaNoDisponible`, que difiere **porque la situación difiere** (§11.7) |
+| 4 | Marco troceado se reensambla | ✅ **Acertó.** 1 038 208 bytes enteros, `hayMas: true` |
+| 5 | `obtener-inventario` responde **vacío** | ❌ **Falló.** Rechazó por falta de manejador |
+| 6 | Sin agente, lenguaje de operador | ✅ **Acertó** en la variante limpia. La de «a mitad de frase» no se ejecutó |
+| 7 | Sin permiso: `EACCES` y sin reintento | ✅ **Acertó.** Seis fallos en 0–1 ms, sin reintento |
+
+Tres aciertos, dos fallos, una superada y una parcial.
+
+**La predicción sobre el conjunto —«al menos una de las siete fallará»— acertó**,
+y fallaron dos. Las dos por lo mismo, que es lo que hace que valga la pena: yo
+sabía que la paridad del contrato estaba probada y **la leí como si probara que
+los canales funcionan**. Es exactamente el error que este protocolo existe para
+sacar a la luz.
+
+### 11.9 Qué se cierra y qué no
+
+**PA-40 cerrado** (§11.6): los tres criterios, observados.
+
+**PA-78: se cierra la mitad A.** Los dos procesos se hablan por un socket real,
+con marcos de un megabyte, y las tres causas de fallo llegan separadas hasta
+arriba. Lo que queda es la **mitad B** —que el operador vea esto en una pantalla—
+y no se pudo hacer porque la VM no tiene escritorio (§4.2). Un punto cerrado a
+medias es peor que uno abierto, así que **PA-78 sigue abierto** con su mitad
+resuelta y escrita.
+
+**PA-103 (`noServido`) se ejercitó cuatro veces por rechazo y seis por ausencia**,
+pero sólo se vio el motivo, nunca la presentación. Sigue abierto por lo mismo.
+
+**PA-65 cerrado** (§11.10).
+
+### 11.10 El reinicio, y lo que confirmó de paso
+
+```
+systemctl is-enabled  → enabled
+[reboot]
+systemctl is-active   → active
+stat                  → srw-rw---- root:vboxeruser /run/eje-latam/agente.sock
+conversar.mjs         → Los dos procesos se hablan.
+```
+
+Los tres criterios de §8 para PA-65. El tercero es el que decide: `/run` es
+`tmpfs` y se vacía en cada arranque, así que un socket que **reaparece** demuestra
+que `RuntimeDirectory=` hizo su trabajo en un arranque de verdad y no sólo en un
+`systemctl start`. Con el grupo correcto, además, que es lo que costó PA-124.
+
+**Y algo que no se iba a buscar aquí.** Tras el reinicio, `configuracionSinFirmar`
+sigue en `false`: el sensor releyó su configuración firmada del disco, la verificó
+otra vez, y **la comparó contra la marca de agua que él mismo había avanzado a 1 en
+el arranque anterior** (RPT-078 §7).
+
+Ahí se ejercitó por primera vez, sobre una máquina real, la decisión de comparar
+con `<` y no con `<=`. Con la comparación estricta, la secuencia 1 no habría
+superado a la marca 1 y **este sensor no habría vuelto a arrancar nunca**. Quedó
+escrito el 21 de agosto como razonamiento; el 25 se vio ocurrir.
+
+## 12. Puntos abiertos
 
 | ID | Punto |
 |---|---|
