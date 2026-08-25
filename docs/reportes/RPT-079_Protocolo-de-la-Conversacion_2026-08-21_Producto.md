@@ -142,7 +142,36 @@ marcada como tal.
 
 ### 4.2 La máquina
 
-La VM de RPT-068, o una igual. El protocolo se bifurca según lo que haya:
+La VM de RPT-068, o una igual. El protocolo se bifurca según lo que haya.
+
+### Cómo se comprueba, y cómo NO — observado el 24-ago-2026
+
+Se preguntó por `systemctl get-default` y por el paquete `ubuntu-desktop`, y la
+respuesta fue **engañosa**: `graphical.target`, que suena a escritorio. No lo era.
+No hay gestor de sesiones —`display-manager.service` no existe—, ni socket de
+Wayland en `/run/user/1000`, ni servidor X. `graphical.target` es sólo el objetivo
+por omisión; nadie lo satisface.
+
+Lo decisivo es preguntar por lo que se va a usar, no por lo que se declara:
+
+```bash
+systemctl status display-manager --no-pager | head -3
+ls /run/user/1000/ | grep -Ei 'wayland|X11'
+```
+
+Es la misma lección que atraviesa el proyecto —lo declarado no es lo cableado—
+aplicada esta vez al sistema operativo de la máquina de pruebas.
+
+**Y una consecuencia de producto, no de la prueba:** montar Electron ahí exigió
+GTK**3** —26.04 trae GNOME sobre GTK4, así que ningún otro programa lo usa— y
+poner `chrome-sandbox` en `root:root` modo `4755`, que npm no puede hacer. Ninguna
+de las dos cosas está declarada en ningún sitio. Van a PA-46: un instalador de
+`eje-vision` que no las entregue fallará en cada máquina limpia.
+
+**Se rechazó `--no-sandbox`** como atajo. Desactivar el aislamiento del
+renderizador para que arranque la consola de un producto de seguridad es medir una
+configuración que nadie debe desplegar; RPT-004 §6.1 sujeta las capas de arriba y
+ésta es la de abajo.
 
 **Con escritorio** (Ubuntu Desktop) — se hace la prueba entera, incluida la vista.
 
@@ -243,9 +272,23 @@ EJE_SOCKET=/run/eje-latam/agente.sock \
   node -e 'import("./proceso-principal/dist/enlace.js").then(async m => { ... })'
 ```
 
-**El guion exacto de la mitad A se escribe cuando sepamos si hace falta**, y se
-anexa aquí antes de ejecutarlo. Escribirlo ahora sería adivinar la forma de una
-prueba que quizá no se haga.
+Hizo falta. El guion es **`apps/eje-vision/scripts/conversar.mjs`**, escrito y
+versionado antes de ejecutarlo:
+
+```bash
+cd ~/Eje-Latam/apps/eje-vision && node scripts/conversar.mjs
+```
+
+Importa `enlace.js`, `cable.js`, `puente-ipc.js` y `punto-de-encuentro.js` de
+`dist/`: el enmarcado, el vencimiento, la interpretación de la respuesta y la
+lista de canales son **los que se despliegan**. Recorre `CANALES_PERMITIDOS` en
+vez de pedir seis a mano, que sería el séptimo índice escrito a mano de la serie.
+
+Lo que **sí** duplica, y se dice en su cabecera, son dos piezas de fontanería
+atrapadas dentro de `arranque.ts` porque ese fichero arrastra Electron:
+`abrirConducto` —ocho líneas sobre `net.connect`— y `cargaDe`. El protocolo no se
+reimplementa; sólo el pegamento. Y un `cargaDe` equivocado produciría un rechazo
+con motivo, que es un fallo ruidoso.
 
 ### 5.2 Los seis canales permitidos, uno por uno
 
