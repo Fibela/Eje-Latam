@@ -1176,6 +1176,7 @@ mod pruebas {
             registro: &registro,
             condiciones: &vigentes,
             evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
+            estado_agente: &estado_agente_de_prueba(),
         };
 
         let peticion = componer_peticion(Canal::ConsultarAlertas, br#"{"desdeAsiento":0}"#)
@@ -1204,6 +1205,7 @@ mod pruebas {
             registro: &registro,
             condiciones: &vigentes,
             evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
+            estado_agente: &estado_agente_de_prueba(),
         };
 
         let peticion = componer_peticion(Canal::ObtenerInventario, b"").expect("permitido");
@@ -1223,6 +1225,7 @@ mod pruebas {
             registro: &registro,
             condiciones: &vigentes,
             evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
+            estado_agente: &estado_agente_de_prueba(),
         };
 
         let peticion =
@@ -1232,6 +1235,19 @@ mod pruebas {
     }
 
     /// Respuesta desenmarcada de un atendedor concreto.
+    /// Estado del agente para las pruebas de los manejadores.
+    ///
+    /// Corporativo y operativo, es decir: **el único caso en que
+    /// `respuestaAutomatica` es cierta**. Las pruebas que examinan esa conjunción
+    /// construyen el suyo.
+    fn estado_agente_de_prueba() -> eje_ipc::mensajes::EstadoAgente {
+        eje_ipc::mensajes::EstadoAgente {
+            version: crate::VERSION.to_owned(),
+            perfil: eje_ipc::mensajes::PerfilSegmento::Corporativo,
+            respuesta_automatica: true,
+        }
+    }
+
     fn respuesta_de(atiende: &mut dyn Atiende, carga: &[u8]) -> Vec<u8> {
         let marco = atender_peticion(atiende, carga);
         desenmarcar(&marco).expect("marco valido").to_vec()
@@ -1621,6 +1637,138 @@ mod pruebas {
         nombres
     }
 
+    /// Qué canales declara el manifiesto como **servidos**, y cuáles no.
+    ///
+    /// RPT-081, PA-135. Antes esto era una lista de dos escrita a mano **dentro**
+    /// de la barrera que debía cubrir los seis, con un comentario justificando la
+    /// exclusión de los otros cuatro. Séptimo índice a mano de la serie, y el
+    /// único que estaba **dentro** de la comprobación que lo habría cazado.
+    fn canales_por_servicio(contenido: &str) -> (Vec<String>, Vec<String>) {
+        let (mut servidos, mut pendientes) = (Vec::new(), Vec::new());
+
+        for bloque in contenido.split("[[canal]]").skip(1) {
+            let mut nombre = None;
+            let mut servido = None;
+
+            for linea in bloque.lines() {
+                let limpia = linea.trim();
+                if limpia.starts_with('[') {
+                    break;
+                }
+                nombre = nombre.or_else(|| entrecomillado(linea, "nombre"));
+                if let Some(valor) = limpia.strip_prefix("servido") {
+                    servido = match valor.trim_start_matches([' ', '=']).trim() {
+                        "true" => Some(true),
+                        "false" => Some(false),
+                        // Ni «true» ni «false» no es «no servido»: es un
+                        // manifiesto que no se entiende, y eso no se degrada.
+                        otro => panic!("`servido` no es booleano: '{otro}'"),
+                    };
+                }
+            }
+
+            let Some(nombre) = nombre else { continue };
+            match servido {
+                Some(true) => servidos.push(nombre),
+                Some(false) => pendientes.push(nombre),
+                None => panic!(
+                    "el canal '{nombre}' no declara `servido`. Estar declarado y \
+                     estar cableado son cosas distintas, y el contrato tiene que \
+                     decir cual es cual (RPT-081)"
+                ),
+            }
+        }
+
+        assert!(
+            !servidos.is_empty(),
+            "ningun canal servido: con la lista vacia esta barrera pasaria sin comprobar nada"
+        );
+        (servidos, pendientes)
+    }
+
+    /// **Lo que el contrato declara servido, responde. Lo que no, se rechaza con
+    /// motivo.**
+    ///
+    /// RPT-081, PA-135. Es la barrera que faltaba. La paridad de PA-20 afirma que
+    /// los seis canales están declarados a los dos lados —cierto, y no es lo que
+    /// hace falta saber—; ésta afirma cuáles **contestan**.
+    ///
+    /// Cuatro de seis no tenían manejador y nada lo decía. Se descubrió el 25 de
+    /// agosto preguntándoselo a un agente de verdad (RPT-079 §11.1), no leyendo
+    /// código.
+    ///
+    /// Un canal nuevo sin manejador rompe esta prueba el mismo día en que se
+    /// añade al contrato, y un manejador nuevo sin actualizar `servido` también.
+    #[test]
+    fn lo_que_el_contrato_declara_servido_responde_y_lo_demas_se_rechaza() {
+        use crate::servicio::Manejadores;
+        use eje_ipc::{CODIGO_RECHAZO, CODIGO_RESPUESTA, componer_peticion};
+
+        let contenido = manifiesto_ipc();
+        let (servidos, pendientes) = canales_por_servicio(&contenido);
+        let registro = registro_con(2);
+        let vigentes = normales();
+
+        for (nombre, debe_responder) in servidos
+            .iter()
+            .map(|nombre| (nombre, true))
+            .chain(pendientes.iter().map(|nombre| (nombre, false)))
+        {
+            let canal = eje_ipc::Canal::desde_identificador(nombre)
+                .unwrap_or_else(|| panic!("'{nombre}' esta en el contrato y no en el enum Canal"));
+
+            let mut manejadores = Manejadores {
+                registro: &registro,
+                condiciones: &vigentes,
+                evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
+                estado_agente: &estado_agente_de_prueba(),
+            };
+
+            let peticion = componer_peticion(canal, carga_valida_de(nombre)).expect("permitido");
+            let cuerpo = respuesta_de(&mut manejadores, &peticion);
+
+            if debe_responder {
+                assert_eq!(
+                    cuerpo[0],
+                    CODIGO_RESPUESTA,
+                    "'{nombre}' se declara servido y no responde: {}",
+                    String::from_utf8_lossy(&cuerpo[1..])
+                );
+            } else {
+                assert_eq!(
+                    cuerpo[0], CODIGO_RECHAZO,
+                    "'{nombre}' se declara sin servir y aun asi respondio. Si ya \
+                     tiene manejador, el contrato tiene que decirlo"
+                );
+                assert!(
+                    !cuerpo[1..].is_empty(),
+                    "'{nombre}' se rechaza sin motivo, que es la lista vacia con \
+                     otro disfraz (RPT-048 §1)"
+                );
+            }
+        }
+    }
+
+    /// Carga útil válida para un canal, para poder ejercitarlo.
+    ///
+    /// Escrita a mano porque el manifiesto declara la **forma** de la carga, no
+    /// un ejemplo. Lo que impide que se quede corta es que se pide por nombre y
+    /// **un nombre desconocido revienta**: un canal nuevo obliga a pasar por aquí.
+    fn carga_valida_de(nombre: &str) -> &'static [u8] {
+        match nombre {
+            "consultar-alertas" => br#"{"desdeAsiento":0}"#,
+            "consultar-sandbox" => br#"{"sentencia":"SELECT 1"}"#,
+            "obtener-estado-agente"
+            | "obtener-inventario"
+            | "obtener-estado-boveda"
+            | "obtener-condiciones" => b"",
+            otro => panic!(
+                "'{otro}' esta en el contrato y esta prueba no sabe con que carga \
+                 ejercitarlo. Anadelo aqui antes de anadirlo al contrato"
+            ),
+        }
+    }
+
     #[test]
     fn cada_manejador_responde_con_la_forma_que_el_manifiesto_declara() {
         // PA-76. El gemelo de la barrera de PA-75, en el otro extremo del cable.
@@ -1636,16 +1784,28 @@ mod pruebas {
         let registro = registro_con(2);
         let vigentes = normales();
 
-        // Los cuatro canales sin manejador se rechazan con motivo y eso ya tiene
-        // su prueba; aqui solo se miran los que responden de verdad.
-        for (canal, carga) in [
-            (Canal::ConsultarAlertas, &br#"{"desdeAsiento":0}"#[..]),
-            (Canal::ObtenerCondiciones, &b""[..]),
-        ] {
+        // RPT-081, PA-135. Esta lista era de dos, ESCRITA A MANO, con un
+        // comentario que justificaba dejar fuera a los otros cuatro. Era el
+        // septimo indice a mano de la serie y el unico que estaba **dentro** de
+        // la comprobacion que lo habria cazado: mientras dijera «aqui solo se
+        // miran los que responden de verdad», nadie iba a preguntarse por que
+        // los otros no respondian.
+        //
+        // Ahora sale del contrato. Esta prueba mira la FORMA de lo que responden;
+        // `lo_que_el_contrato_declara_servido_responde_y_lo_demas_se_rechaza`
+        // mira CUALES responden. Son dos preguntas y siguen separadas.
+        let (servidos, _) = canales_por_servicio(&contenido);
+
+        for (canal, carga) in servidos.iter().map(|nombre| {
+            let canal = Canal::desde_identificador(nombre)
+                .unwrap_or_else(|| panic!("'{nombre}' esta en el contrato y no en el enum"));
+            (canal, carga_valida_de(nombre))
+        }) {
             let mut manejadores = Manejadores {
                 registro: &registro,
                 condiciones: &vigentes,
                 evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
+                estado_agente: &estado_agente_de_prueba(),
             };
 
             let peticion = componer_peticion(canal, carga).expect("canal permitido");

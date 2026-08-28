@@ -156,11 +156,25 @@ pub struct Manejadores<'a> {
     ///
     /// PA-74. Sin esto la respuesta no puede decir donde empieza lo que entrega.
     pub evidencia: &'a std::path::Path,
+    /// Estado resumido del demonio. RPT-081, PA-135.
+    ///
+    /// Se compone **una vez, antes del bucle**, porque sus tres campos no
+    /// cambian durante la ejecucion: la version es del binario, y el perfil y el
+    /// estado de arranque se fijan al arrancar. Recomponerlo en cada vuelta
+    /// sugeriria que puede cambiar, y quien lo leyera acabaria preguntandose por
+    /// que no cambia nunca.
+    pub estado_agente: &'a eje_ipc::mensajes::EstadoAgente,
 }
 
 impl Atiende for Manejadores<'_> {
     fn responder(&mut self, canal: Canal, carga: &[u8]) -> Result<Vec<u8>, String> {
         match canal {
+            // RPT-081, PA-135. Cuatro de los seis canales estaban declarados y
+            // sin cablear; este es el primero que se cablea. El valor no se
+            // compone aqui: llega hecho, por lo que dice `Manejadores`.
+            Canal::ObtenerEstadoAgente => serde_json::to_vec(self.estado_agente)
+                .map_err(|error| format!("no se pudo componer el estado del agente: {error}")),
+
             Canal::ConsultarAlertas => {
                 let peticion: eje_ipc::mensajes::PeticionAlertas = serde_json::from_slice(carga)
                     .map_err(|error| format!("peticion de alertas ilegible: {error}"))?;

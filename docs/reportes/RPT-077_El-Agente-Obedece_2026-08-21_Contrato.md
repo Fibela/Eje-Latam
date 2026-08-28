@@ -100,10 +100,22 @@ ExecStart=/usr/local/bin/eje-agente \
     --ciclos 0
 ```
 
-**Un sensor recién instalado no arranca vigilando nada hasta que se le emite
-configuración.** Es un corte deliberado, y el instalador lo grita con los tres
-pasos y con el `hostname` que hay que poner. La alternativa era dejar en pie el
-camino que la firma viene a cerrar.
+**Un sensor recién instalado no vigila nada hasta que se le emite configuración.**
+Es un corte deliberado, y el instalador lo grita con los tres pasos y con el
+`hostname` que hay que poner. La alternativa era dejar en pie el camino que la
+firma viene a cerrar.
+
+> **Corregido el 25-ago-2026 (RPT-080, PA-133).** Este párrafo decía «no arranca»,
+> y el instalador escribía —desde el mismo día— *«arrancarlo ahora no da un sensor
+> a medias: da uno que lo declara y espera»*. Las dos frases describían la
+> intención. **El código hacía otra cosa:** moría con un error de uso, y bajo
+> `Restart=always` eso es un bucle de reinicios. Se observó ocurriendo 350 veces
+> seguidas en RPT-079.
+>
+> Es §5 de este mismo reporte contradiciéndose: allí se argumentó «arrancar y
+> declarar en lugar de morir» para la firma **rota**, y no se aplicó a la firma
+> **ausente**. La prosa tenía razón y el mecanismo no la seguía — la familia de
+> siempre, con los papeles cambiados.
 
 RPT-054 §4.1 se ratificó como «instala y lo declara a gritos». El grito cambia de
 asunto —antes el colector ausente, ahora la configuración ausente, que es más

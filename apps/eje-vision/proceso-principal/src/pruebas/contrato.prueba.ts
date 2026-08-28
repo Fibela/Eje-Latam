@@ -433,6 +433,49 @@ describe("PA-20 — paridad con contrato-ipc.toml", () => {
     );
   });
 
+  // RPT-081, PA-135. El contrato distingue declarado de cableado, y esta
+  // comprobación existe para que esa distinción no se quede sólo en el lado
+  // Rust — que es exactamente cómo el punto de encuentro acabó divergiendo.
+  //
+  // Aquí no se puede llamar al manejador: vive en el agente. Lo que sí se puede
+  // afirmar es que **todo canal declara si está servido y por qué no**, que es
+  // lo que permite a VIS-04 presentar un panel como «no servido» sin gastar una
+  // consulta de medio segundo en descubrirlo (RPT-079 §11.2).
+  it("todo canal declara si está servido, y los que no dicen por qué", () => {
+    const contenido = manifiesto();
+    const bloques = contenido.split("[[canal]]").slice(1);
+
+    assert.equal(
+      bloques.length,
+      CANALES_PERMITIDOS.length,
+      "el manifiesto y la lista de permitidos cuentan distinto",
+    );
+
+    for (const bloque of bloques) {
+      const cabecera = bloque.split(/^\[/mu)[0] ?? "";
+      const nombre = /^nombre\s*=\s*"([^"]+)"/mu.exec(cabecera)?.[1];
+      const servido = /^servido\s*=\s*(true|false)/mu.exec(cabecera)?.[1];
+
+      assert.ok(nombre, "un canal sin nombre en el manifiesto");
+      assert.ok(
+        servido,
+        `'${nombre}' no declara 'servido'. Estar declarado y estar cableado son ` +
+          "cosas distintas, y el contrato tiene que decir cuál es cuál",
+      );
+
+      if (servido === "false") {
+        // Un hueco sin motivo se erosiona: alguien lo revisa dentro de un año,
+        // no encuentra la razón, y lo cablea a medias o lo borra. Es la misma
+        // disciplina que los canales prohibidos.
+        assert.match(
+          cabecera,
+          /^motivo_no_servido\s*=\s*"[^"]+"/mu,
+          `'${nombre}' se declara sin servir y no dice por qué`,
+        );
+      }
+    }
+  });
+
   it("el manifiesto documenta el motivo de cada prohibición", () => {
     // Una lista de prohibidos sin motivos se erosiona: alguien la revisa dentro
     // de un ano, no encuentra la razon y la borra.

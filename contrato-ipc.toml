@@ -118,30 +118,65 @@ nombre = "agente.sock"
 #
 # La lista es de PERMITIDOS, no de bloqueados: un canal que no figure aqui se
 # rechaza aunque el preload lo invoque (RPT-004 §6.2).
+#
+# ---------------------------------------------------------------------------
+# `servido` — RPT-081, PA-135
+# ---------------------------------------------------------------------------
+#
+# Estar declarado y estar cableado son cosas distintas, y hasta hoy el contrato
+# solo sabia decir la primera. Cuatro de los seis canales no tenian manejador en
+# el agente y NADA lo decia: la paridad afirmaba que los seis estaban declarados
+# a los dos lados, que es verdad y no es lo que hace falta saber.
+#
+# `servido = false` NO es una promesa de desarrollo: es la declaracion de una
+# ausencia, que es la doctrina de los tres estados (RPT-006 §4) aplicada al
+# propio contrato. No es «existe» contra «no existe», sino:
+#
+#   servido = true    el agente responde
+#   servido = false   declarado y sin manejador; se rechaza CON MOTIVO
+#   no declarado      el guardian ni siquiera deja pasar la peticion
+#
+# Se prefirio esto a retirar los dos canales sin sustrato. Retirarlos habria
+# dejado la lista mas corta y el defecto intacto: la comprobacion del agente
+# llevaba una lista de dos ESCRITA A MANO dentro de la barrera que debia cubrir
+# los seis. Ahora esa lista sale de aqui, y un canal nuevo sin manejador rompe
+# la suite el mismo dia.
 
 [[canal]]
 nombre = "obtener-estado-agente"
 vista = "VIS-04"
 direccion = "consulta"
-descripcion = "Estado resumido del demonio: version, perfil de segmento y vigencia de reglas."
+descripcion = "Estado resumido del demonio: version, perfil de segmento y si contendria por si solo."
+servido = true
+# `respuestaAutomatica` es la conjuncion de las DOS guardas que deciden de
+# verdad: el perfil —`ot` nunca contiene solo— y el estado de arranque. La
+# descripcion decia «vigencia de reglas» y prometia una tercera que nadie evalua:
+# `boveda::VigenciaReglas` existe, esta probada y no la llama nadie (PA-137).
+# Se corrige el texto en lugar de dejar que prometa lo que el campo no da.
 
 [[canal]]
 nombre = "obtener-inventario"
 vista = "VIS-04"
 direccion = "consulta"
 descripcion = "Inventario vivo de dispositivos IoT/OT descubiertos y su postura."
+servido = false
+motivo_no_servido = "Sin productor posible todavia (PA-138). De los cuatro campos de NodoInventario, el agente tiene fuente honesta para UNO: direccionEnlace. Y ni siquiera puede listarlos: AlmacenObservacion no expone sus dispositivos, solo cuenta cuantos hay."
 
 [[canal]]
 nombre = "obtener-estado-boveda"
 vista = "VIS-04"
 direccion = "consulta"
 descripcion = "Ocupacion de la Boveda Aislada, para la alerta obligatoria de capacidad."
+servido = false
+motivo_no_servido = "AGT-04, la Boveda Aislada, no existe todavia (PA-15). Sin subsistema detras, un manejador solo podria inventarse cifras."
 
 [[canal]]
 nombre = "consultar-sandbox"
 vista = "VIS-01"
 direccion = "consulta"
 descripcion = "Consulta SQL contra ALM-02. Nunca alcanza ALM-01 (RPT-002 §5)."
+servido = false
+motivo_no_servido = "ALM-02, el sandbox del analista, no existe todavia (PA-18). El canal viaja y se rechaza con motivo; no se finge una consulta."
 
 # RPT-019. Los dos canales de alerta son CONSULTAS, no empuje.
 #
@@ -157,12 +192,14 @@ nombre = "consultar-alertas"
 vista = "VIS-04"
 direccion = "consulta"
 descripcion = "Sucesos de alerta anexados a ALM-01, desde un numero de asiento."
+servido = true
 
 [[canal]]
 nombre = "obtener-condiciones"
 vista = "VIS-04"
 direccion = "consulta"
 descripcion = "Estados degradados vigentes. A diferencia de las alertas, no se anexan: se consultan."
+servido = true
 
 # ---------------------------------------------------------------------------
 # CANALES PROHIBIDOS

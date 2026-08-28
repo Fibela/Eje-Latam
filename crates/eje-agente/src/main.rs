@@ -46,6 +46,7 @@ use eje_agente::servicio::{Escucha, Manejadores};
 use eje_agente::{ConfiguracionAgente, VERSION};
 use eje_captura::transporte::extraer;
 use eje_captura::{DireccionEnlace, ErrorCaptura, FuentePasiva, abrir};
+use eje_ipc::mensajes::EstadoAgente;
 use guardian_cc::PerfilSegmento;
 use guardian_cc::arranque::{
     ErrorArranque, EstadoArranque, RutasAlmacen, aceptar_configuracion, arrancar_con_almacen,
@@ -625,7 +626,25 @@ fn resolver(
         }
 
         Configuracion::Ausente => Ok(Efectivas {
-            interfaz: Some(argumentos.interfaz.ok_or(ErrorAgente::Uso)?),
+            // RPT-080, PA-133. Sin interfaz, la respuesta depende de quién
+            // pregunta, y es la misma distinción que ya hace `--ciclos`:
+            //
+            // - **El servicio arranca y lo declara.** Morir aquí es un bucle de
+            //   reinicios bajo `Restart=always`, no una avería visible. Se
+            //   observó ocurriendo 350 veces seguidas sin que nada fuera del
+            //   diario local se enterase (RPT-079 §11).
+            // - **A mano se explica el uso**, porque hay una persona delante que
+            //   acaba de teclear algo incompleto y quiere saber qué falta.
+            //
+            // Es el argumento de RPT-077 §5 —arrancar y declarar en lugar de
+            // morir— aplicado al caso que aquel reporte dejó fuera por
+            // descuido: allí se razonó para la firma **rota** y no para la
+            // firma **ausente**.
+            interfaz: match argumentos.interfaz {
+                Some(interfaz) => Some(interfaz),
+                None if es_servicio(argumentos.ciclos) => None,
+                None => return Err(ErrorAgente::Uso),
+            },
             tramas: argumentos.tramas,
             perfil: argumentos.perfil,
             syslog: argumentos.syslog,
@@ -795,6 +814,20 @@ fn ejecutar() -> Result<(), ErrorAgente> {
             println!("     Los parametros de arriba salen de ahi. La linea de ordenes");
             println!("     no puede cambiarlos: si lo intenta, el agente no arranca.");
         }
+        Configuracion::Ausente if opciones.interfaz.is_none() => {
+            // RPT-080, PA-133. Un sensor instalado y sin aprovisionar. Arranca
+            // —morir seria un bucle de reinicios— y dice con todas las letras
+            // que no esta haciendo su trabajo. Las condiciones lo cuentan por el
+            // socket; esto es la mitad que ve quien esta delante de la maquina.
+            println!("Configuracion      : SIN FIRMAR, y no hay ninguna interfaz que vigilar");
+            println!("  !! ESTE SENSOR NO ESTA VIGILANDO NADA.");
+            println!("     Arranca, atiende consultas y lo declara. No observa.");
+            println!("     Emitele configuracion firmada: eje-manifiesto configurar");
+            println!(
+                "     El campo 'maquina' tiene que ser: {}",
+                nombre_de_maquina()
+            );
+        }
         Configuracion::Ausente => {
             println!("Configuracion      : SIN FIRMAR");
             println!("     Los parametros salen de la linea de ordenes, asi que quien");
@@ -945,6 +978,10 @@ fn ejecutar() -> Result<(), ErrorAgente> {
     // PA-68. El ciclo vive en la biblioteca, donde se puede ejercitar N vueltas
     // en pruebas sin levantar un demonio. Aqui queda solo lo que exige una
     // tarjeta de red de verdad: capturar y presentar.
+    // RPT-081, PA-135. Una vez, antes del bucle: sus tres campos no cambian
+    // durante la ejecucion. Ver `estado_del_agente`.
+    let estado_agente = estado_del_agente(opciones.perfil, &estado);
+
     let mut ciclo = Ciclo::nuevo(rutas.evidencia(), opciones.perfil, registro, emisor);
     ciclo.declarar_intervalo_latido(opciones.intervalo_latido);
 
@@ -1171,6 +1208,7 @@ fn ejecutar() -> Result<(), ErrorAgente> {
                 registro: ciclo.registro(),
                 condiciones: &resultado.condiciones,
                 evidencia: ciclo.evidencia(),
+                estado_agente: &estado_agente,
             });
             // Se calla en modo demonio: una consola que pregunta cada dos
             // segundos escribiria una linea cada dos segundos, y eso es el mismo
@@ -1259,6 +1297,75 @@ fn leer_configuracion(
     }
 }
 
+/// Traduce el perfil del **dominio** al del **cable**.
+///
+/// RPT-081, PA-135.
+///
+/// # Por que hay dos tipos, y por que esto no es un `impl From`
+///
+/// `guardian_cc::PerfilSegmento` y `eje_ipc::mensajes::PerfilSegmento` tienen el
+/// mismo nombre y las mismas variantes, y para el compilador son tipos ajenos.
+/// **No es un descuido:** `eje-ipc` depende de `thiserror` y `serde` y de nada
+/// mas, porque la capa de transporte no debe depender del nucleo de dominio. Los
+/// dos se comprueban contra `contrato-ipc.toml` por separado, que es lo que
+/// impide que diverjan.
+///
+/// Un `impl From` tendria que vivir en uno de esos dos crates —regla del
+/// huerfano— y eso obligaria a invertir esa dependencia para ahorrar cuatro
+/// lineas. La traduccion es una decision del agente, que es quien conoce los dos
+/// lados, asi que vive aqui.
+///
+/// El `match` es exhaustivo: anadir un perfil **no compila** hasta que alguien
+/// decida como viaja. Lo que el `match` no impide es traducirlo **mal** —
+/// `Corporativo => Ot` compila igual de bien—, y de eso se ocupa
+/// `el_perfil_no_se_cruza_al_pasar_al_cable`.
+const fn perfil_en_el_cable(perfil: PerfilSegmento) -> eje_ipc::mensajes::PerfilSegmento {
+    match perfil {
+        PerfilSegmento::Corporativo => eje_ipc::mensajes::PerfilSegmento::Corporativo,
+        PerfilSegmento::Ot => eje_ipc::mensajes::PerfilSegmento::Ot,
+    }
+}
+
+/// Compone el estado resumido que responde `obtener-estado-agente`.
+///
+/// RPT-081, PA-135.
+///
+/// # `respuestaAutomatica` es una conjuncion, y no un campo
+///
+/// El encargo decia atarla a [`EstadoArranque::admite_contencion_automatica`].
+/// **Es la mitad**, y la mitad que falta es la peligrosa.
+///
+/// Quien decide de verdad si el agente contiene solo son DOS guardas
+/// independientes:
+///
+/// - `PerfilSegmento::permite_respuesta_automatica` — el perfil `ot` **nunca** la
+///   admite. IEC 62443 ordena las prioridades de una planta al reves que TI:
+///   una contencion automatica que detiene una linea **es** el incidente, no la
+///   respuesta al incidente. Esta guarda ya decide en `evaluar`.
+/// - `EstadoArranque::admite_contencion_automatica` — con el inventario
+///   suprimido o sin verificar no se contiene nada, diga lo que diga el perfil.
+///
+/// Informar solo la segunda haria que un sensor de planta —perfil `ot`, almacen
+/// impecable— dijera `respuestaAutomatica: true`. Le estaria diciendo al
+/// operador que ese sensor actua solo cuando no lo hara jamas, que es la
+/// direccion equivocada en la que mentir.
+///
+/// # La guarda que NO se consulta, y por que se dice aqui
+///
+/// `boveda::VigenciaReglas::permite_respuesta_automatica` existe, esta probada, y
+/// **no la llama nadie**. La descripcion de este canal en el contrato dice «segun
+/// vigencia de reglas», asi que el nombre promete una tercera guarda que hoy no
+/// se evalua. No se incluye inventando un valor: no hay distribucion de reglas,
+/// asi que «vigentes» seria una suposicion disfrazada de dato. Queda en PA-137.
+fn estado_del_agente(perfil: PerfilSegmento, estado: &EstadoArranque) -> EstadoAgente {
+    EstadoAgente {
+        version: VERSION.to_owned(),
+        perfil: perfil_en_el_cable(perfil),
+        respuesta_automatica: perfil.permite_respuesta_automatica()
+            && estado.admite_contencion_automatica(),
+    }
+}
+
 /// Avanza la marca de agua **antes** de obedecer, y no despues.
 ///
 /// RPT-078, PA-79 paso 5. Es la mitad del mecanismo que no se ve: sin ella, el
@@ -1307,14 +1414,25 @@ enum Voz {
     SoloCambios,
 }
 
-/// Cuanto habla el agente segun cuantas vueltas vaya a dar.
+/// Si esta ejecucion es **el servicio** y no un recorrido de comprobacion.
 ///
-/// `--ciclos 0` es el servicio y `--ciclos N` finito es el recorrido de
-/// comprobacion. La distincion no se anade como bandera nueva a proposito: ya
-/// existe una opcion que dice exactamente eso, y dos formas de decir lo mismo se
-/// contradicen el dia que alguien cambie una.
+/// `--ciclos 0` es el servicio. La distincion no se anade como bandera nueva a
+/// proposito: ya existe una opcion que dice exactamente eso, y dos formas de
+/// decir lo mismo se contradicen el dia que alguien cambie una.
+///
+/// # De aqui cuelgan dos decisiones, y conviene que cuelguen de la misma
+///
+/// Cuanto habla ([`voz_de`], RPT-072) y **si morir ante una configuracion
+/// ausente** ([`resolver`], RPT-080). Las dos preguntan lo mismo —«¿hay una
+/// persona delante?»— y por eso comparten esta funcion en lugar de comparar
+/// `ciclos == 0` cada una por su cuenta.
+const fn es_servicio(ciclos: u64) -> bool {
+    ciclos == 0
+}
+
+/// Cuanto habla el agente segun cuantas vueltas vaya a dar.
 const fn voz_de(ciclos: u64) -> Voz {
-    if ciclos == 0 {
+    if es_servicio(ciclos) {
         Voz::SoloCambios
     } else {
         Voz::Detallada
@@ -1751,13 +1869,77 @@ mod pruebas_obediencia {
         assert_eq!(efectivas.perfil, PerfilSegmento::Ot);
     }
 
-    /// Y sin configuracion la interfaz vuelve a hacer falta.
+    /// Sin configuracion y sin interfaz, **el servicio arranca y lo declara**.
+    ///
+    /// RPT-080, PA-133. Es el sensor recien instalado y sin aprovisionar, que es
+    /// como llega **toda** maquina nueva. Antes moria con un error de uso, y bajo
+    /// `Restart=always` eso no es una averia visible: es un bucle de reinicios.
+    /// Se observo ocurriendo 350 veces seguidas sin que nada fuera del diario
+    /// local se enterase (RPT-079 §11).
     #[test]
-    fn sin_configuracion_y_sin_interfaz_no_hay_nada_que_vigilar() {
-        assert!(matches!(
-            resolver(leidos(&["--ciclos", "0"]), &Configuracion::Ausente),
-            Err(ErrorAgente::Uso)
-        ));
+    fn sin_configuracion_el_servicio_arranca_y_declara_en_lugar_de_morir() {
+        let efectivas = resolver(leidos(&["--ciclos", "0"]), &Configuracion::Ausente)
+            .expect("un sensor sin aprovisionar tiene que arrancar y declararlo");
+
+        assert_eq!(
+            efectivas.interfaz, None,
+            "no hay nada que vigilar, y disfrazarlo de interfaz seria mentir"
+        );
+    }
+
+    /// Pero a mano, sin interfaz, se explica el uso.
+    ///
+    /// La distincion la hace `--ciclos`, que ya separa el servicio del recorrido
+    /// de comprobacion desde RPT-072. Ahi hay una persona delante que acaba de
+    /// teclear algo incompleto: darle un sensor que no observa, en lugar de
+    /// decirle que falta, seria obedecer la letra y perder el sentido.
+    #[test]
+    fn a_mano_y_sin_interfaz_se_explica_el_uso() {
+        for argv in [vec![], vec!["--ciclos", "1"], vec!["--tramas", "10"]] {
+            assert!(
+                matches!(
+                    resolver(leidos(&argv), &Configuracion::Ausente),
+                    Err(ErrorAgente::Uso)
+                ),
+                "con {argv:?} hay alguien delante esperando la linea de uso"
+            );
+        }
+    }
+
+    /// **Ningun estado de configuracion puede impedir que el servicio arranque.**
+    ///
+    /// RPT-080, PA-133. Esta es la barrera, y las dos de arriba son sus casos.
+    /// El defecto no fue equivocarse en una rama: fue que RPT-077 §5 razono
+    /// «arrancar y declarar en lugar de morir» para la firma **rota** y no lo
+    /// aplico a la firma **ausente**. Una regla que se aplica caso por caso se
+    /// olvida en el siguiente caso.
+    ///
+    /// El `match` de `cada_estado` es exhaustivo a proposito: anadir una variante
+    /// a [`Configuracion`] **no compila** hasta que alguien decida si el servicio
+    /// sigue arrancando con ella.
+    #[test]
+    fn el_servicio_arranca_diga_lo_que_diga_la_configuracion() {
+        fn cada_estado() -> Vec<Configuracion> {
+            match &Configuracion::Ausente {
+                Configuracion::Firmada(_)
+                | Configuracion::Ausente
+                | Configuracion::NoVerifica(_) => {}
+            }
+
+            vec![
+                firmada(),
+                Configuracion::Ausente,
+                Configuracion::NoVerifica("la firma no verifica".to_owned()),
+            ]
+        }
+
+        for configuracion in cada_estado() {
+            assert!(
+                resolver(leidos(&["--ciclos", "0"]), &configuracion).is_ok(),
+                "el servicio no arranca con esta configuracion, y morir bajo \
+                 Restart=always es un bucle de reinicios que nadie ve"
+            );
+        }
     }
 
     /// Con la firma rota **no manda nadie**, y menos que nadie los argumentos.
@@ -1901,6 +2083,75 @@ mod pruebas_obediencia {
         );
 
         let _ = std::fs::remove_file(&estorbo);
+    }
+
+    /// `respuestaAutomatica` **no puede decir que sí** si cualquiera de las dos
+    /// guardas dice que no.
+    ///
+    /// RPT-081, PA-135. El encargo era atarla al estado de arranque. Informar
+    /// sólo eso haría que un sensor de planta —perfil `ot`, almacén impecable—
+    /// anunciara `true`: le diría al operador que ese sensor actúa solo cuando
+    /// **no lo hará jamás**, porque `evaluar` nunca ejecuta con perfil `ot`.
+    ///
+    /// Las cuatro combinaciones, porque el fallo que importa es el asimétrico:
+    /// una sola guarda cerrada tiene que bastar para cerrar el campo.
+    #[test]
+    fn la_respuesta_automatica_exige_las_dos_guardas() {
+        use guardian_cc::PerfilSegmento::{Corporativo, Ot};
+        use guardian_cc::arranque::EstadoArranque;
+
+        let contiene = EstadoArranque::PrimerArranque;
+        let no_contiene = EstadoArranque::Supresion {
+            secuencia_conocida: 7,
+        };
+
+        assert!(
+            super::estado_del_agente(Corporativo, &contiene).respuesta_automatica,
+            "perfil que la admite y almacen sano: es el unico caso que si"
+        );
+        assert!(
+            !super::estado_del_agente(Ot, &contiene).respuesta_automatica,
+            "el perfil OT NUNCA contiene solo (IEC 62443): decir que si es la \
+             mentira peligrosa"
+        );
+        assert!(
+            !super::estado_del_agente(Corporativo, &no_contiene).respuesta_automatica,
+            "con el inventario suprimido no se contiene, diga lo que diga el perfil"
+        );
+        assert!(!super::estado_del_agente(Ot, &no_contiene).respuesta_automatica);
+    }
+
+    /// Y el resto del estado sale del binario y de la configuración, no de aire.
+    #[test]
+    fn el_estado_del_agente_declara_su_version_y_su_perfil() {
+        use guardian_cc::PerfilSegmento::Ot;
+        use guardian_cc::arranque::EstadoArranque;
+
+        let estado = super::estado_del_agente(Ot, &EstadoArranque::PrimerArranque);
+
+        assert_eq!(estado.version, super::VERSION);
+        assert_eq!(estado.perfil, eje_ipc::mensajes::PerfilSegmento::Ot);
+    }
+
+    /// El perfil no se cruza al pasar al cable.
+    ///
+    /// RPT-081. El `match` exhaustivo de `perfil_en_el_cable` obliga a traducir
+    /// cada perfil; **no impide traducirlo mal**. `Corporativo => Ot` compila
+    /// igual de bien, y en el cable significaria que la sala ve una planta donde
+    /// hay una oficina — o al reves, que es peor: una oficina donde hay una
+    /// planta invita a esperar contencion automatica que nunca va a ocurrir.
+    #[test]
+    fn el_perfil_no_se_cruza_al_pasar_al_cable() {
+        use guardian_cc::PerfilSegmento::{Corporativo, Ot};
+
+        assert_eq!(
+            super::perfil_en_el_cable(Corporativo),
+            eje_ipc::mensajes::PerfilSegmento::Corporativo
+        );
+        assert_eq!(
+            super::perfil_en_el_cable(Ot),
+            eje_ipc::mensajes::PerfilSegmento::Ot
+        );
     }
 
     /// La configuracion firmada NO decide donde vive el almacen.
