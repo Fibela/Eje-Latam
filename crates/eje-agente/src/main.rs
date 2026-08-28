@@ -1026,6 +1026,7 @@ fn ejecutar() -> Result<(), ErrorAgente> {
         let mut observaciones: Vec<Observacion> = Vec::new();
         let mut ilegibles = 0u64;
         let mut perdida: Option<String> = None;
+        let mut tramos = Tramos::default();
         let inicio = Instant::now();
 
         while (observaciones.len() as u64) < opciones.tramas {
@@ -1083,10 +1084,23 @@ fn ejecutar() -> Result<(), ErrorAgente> {
         // «vista completa», y sin captura no hay vista completa: no hay vista.
         // La ausencia se representa como ausencia y `capturaNoDisponible` es la
         // que carga con el significado (RPT-047 §3).
+        // RPT-083, PA-136. La ventana de captura termina AQUI, y esta linea
+        // corrige una medicion que llevaba mal desde que se escribio:
+        // `inicio.elapsed()` se evaluaba **despues** de `ciclo.vuelta`, asi que
+        // el «Tramas observadas: N en X» que se lleva imprimiendo desde RPT-020
+        // incluia clasificar, persistir y emitir. Las cifras de la VM —507, 977 y
+        // 526 ms— no eran la ventana: eran la ventana mas la vuelta.
+        //
+        // Un instrumento que mide de mas en el sitio donde ibamos a buscar la
+        // causa habria confirmado la hipotesis equivocada.
+        tramos.captura = inicio.elapsed();
+
+        let marca = Instant::now();
         let estadisticas = match fuente.as_ref() {
             Some(activa) => Some(activa.estadisticas()?),
             None => None,
         };
+        tramos.estadisticas = marca.elapsed();
         if estadisticas
             .as_ref()
             .is_some_and(eje_captura::Estadisticas::hay_perdida)
@@ -1125,13 +1139,17 @@ fn ejecutar() -> Result<(), ErrorAgente> {
         }
 
         let ahora_ms = instante_utc();
+        let marca = Instant::now();
         let resultado = ciclo.vuelta(&estado, &observaciones, instante, ahora_ms);
+        tramos.vuelta = marca.elapsed();
+
+        let marca = Instant::now();
 
         if voz == Voz::Detallada {
             println!(
                 "Tramas observadas  : {} en {:?}",
                 observaciones.len(),
-                inicio.elapsed()
+                tramos.captura
             );
             println!("Tramas ilegibles   : {ilegibles}");
             match &estadisticas {
@@ -1199,10 +1217,12 @@ fn ejecutar() -> Result<(), ErrorAgente> {
             }
         }
 
+        tramos.presentar = marca.elapsed();
         anteriores = Some(resultado.condiciones);
 
         // Al final del ciclo, sobre lo ya persistido (RPT-034 §4). Una consulta
         // nunca responde con lo que aun vive solo en memoria.
+        let marca = Instant::now();
         if let Some(escucha) = &escucha {
             let atendidas = escucha.atender(&mut Manejadores {
                 registro: ciclo.registro(),
@@ -1216,6 +1236,13 @@ fn ejecutar() -> Result<(), ErrorAgente> {
             if atendidas > 0 && voz == Voz::Detallada {
                 println!("Consultas atendidas: {atendidas}");
             }
+        }
+        tramos.atender = marca.elapsed();
+
+        // RPT-083, PA-136. Solo con `--ciclos N` finito, que ya significa «hay
+        // una persona mirando» (RPT-072). El modo servicio sigue callado.
+        if voz == Voz::Detallada {
+            tramos.presentar_al_operador();
         }
 
         vueltas = vueltas.saturating_add(1);
@@ -1294,6 +1321,80 @@ fn leer_configuracion(
     match guardian_cc::configuracion::analizar(&bytes, &clave, maquina, aceptada) {
         Ok(valores) => Configuracion::Firmada(Box::new(valores)),
         Err(motivo) => Configuracion::NoVerifica(motivo.to_string()),
+    }
+}
+
+/// Cuanto tarda cada tramo de una vuelta. RPT-083, PA-136.
+///
+/// # Por que se mide, y por que aqui
+///
+/// En la VM, una consulta por el socket tardo entre 444 y 983 ms sobre un socket
+/// de dominio Unix local, donde deberia ser de un digito. La causa **parece** ser
+/// que el agente atiende al final del ciclo (RPT-034 §4) y cada ciclo espera
+/// hasta [`PLAZO`] por trama — pero eso es aritmetica, no observacion, y esta
+/// semana ha dejado claro lo que cuesta confundirlas.
+///
+/// Se imprime **solo con `--ciclos N` finito**, que ya significa «hay una persona
+/// mirando» (RPT-072). El modo servicio sigue callado: una bandera nueva seria
+/// una segunda forma de decir lo que `--ciclos` ya dice.
+///
+/// # La hipotesis que da miedo
+///
+/// `ciclo.vuelta` incluye la emision a syslog, y `DespachoTcp` lleva
+/// [`PLAZO_SYSLOG`] = 3 s. Con `colector = ""` no hay emisor y ese tramo se salta
+/// entero, que es como se midio en la VM. **Un sensor con un colector
+/// inalcanzable gastaria hasta tres segundos por vuelta**, y la consola quedaria
+/// cerca del plazo de 5 s de `ESPERA_MAXIMA_MS`.
+///
+/// El momento en que el SIEM se cae es exactamente el momento en que alguien abre
+/// la consola a mirar. Si esa hipotesis se confirma, lo medido en la VM era el
+/// caso bueno.
+#[derive(Debug, Default, Clone, Copy)]
+struct Tramos {
+    /// La ventana de observacion. Acotada por `--tramas` o por [`PLAZO`].
+    captura: std::time::Duration,
+    /// Preguntar al nucleo cuantas tramas descarto.
+    estadisticas: std::time::Duration,
+    /// Clasificar, persistir, sellar y **emitir**. El tramo sospechoso.
+    vuelta: std::time::Duration,
+    /// Escribir el informe por pantalla.
+    presentar: std::time::Duration,
+    /// Atender las consultas que hubiera pendientes en el socket.
+    atender: std::time::Duration,
+}
+
+impl Tramos {
+    /// Imprime el desglose, con el total y el tramo dominante.
+    ///
+    /// El dominante se calcula y se nombra en lugar de dejar cinco cifras para
+    /// que alguien las compare a ojo. Leer mal un desglose es tan facil como leer
+    /// mal un diario, y esta semana ya paso.
+    fn presentar_al_operador(self) {
+        let etiquetas = [
+            ("captura", self.captura),
+            ("estadisticas", self.estadisticas),
+            ("vuelta", self.vuelta),
+            ("presentar", self.presentar),
+            ("atender", self.atender),
+        ];
+
+        let total: std::time::Duration = etiquetas.iter().map(|(_, cuanto)| *cuanto).sum();
+
+        println!();
+        println!("  Tramos de la vuelta          : {total:?} en total");
+        for (nombre, cuanto) in etiquetas {
+            let parte = if total.is_zero() {
+                0
+            } else {
+                // Entero: una cifra con decimales invita a comparar ruido.
+                cuanto.as_micros().saturating_mul(100) / total.as_micros().max(1)
+            };
+            println!("    {nombre:<14}: {cuanto:>12?}  {parte:>3}%");
+        }
+
+        if let Some((nombre, cuanto)) = etiquetas.iter().max_by_key(|(_, cuanto)| *cuanto) {
+            println!("    domina '{nombre}' con {cuanto:?}");
+        }
     }
 }
 

@@ -22,7 +22,6 @@
 
 #![forbid(unsafe_code)]
 
-use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use eje_manifiesto::entrada::{ConfiguracionEntrada, Entrada};
@@ -133,16 +132,68 @@ fn escribir(ruta: &Path, bytes: &[u8]) -> Result<(), ErrorHerramienta> {
 
 /// Pide la frase de paso por la entrada estandar.
 fn pedir_frase(motivo: &str) -> Result<Vec<u8>, ErrorHerramienta> {
-    eprintln!("Frase de paso ({motivo}).");
+    eprintln!("Frase de paso ({motivo}), y Enter al terminar.");
     eprintln!("AVISO: se vera al teclearla; no la use delante de nadie (PA-53).");
+    // RPT-082, PA-134. «Y Enter al terminar» es la mitad del arreglo que se ve.
+    // El aviso decia como se VE la frase y no como se TERMINA, y con
+    // `read_to_string` no terminaba nunca. Decir que hacer no cuesta nada; que
+    // alguien lo averigue a la tercera, si.
 
+    leer_frase(&mut std::io::stdin().lock())
+}
+
+/// Lee **una linea** de la entrada y la toma por frase de paso.
+///
+/// RPT-082, PA-134.
+///
+/// # El defecto que esto corrige
+///
+/// Usaba `read_to_string`, que lee **hasta el fin de la entrada** y no hasta el
+/// salto de linea. Pulsar Enter no terminaba nada: la herramienta se quedaba
+/// esperando para siempre, sin decir por que, y hacia falta un Ctrl-D que el
+/// aviso no menciona. Costo tres intentos aprovisionando la VM de PA-78, y
+/// durante dos parecio culpa de quien lo tecleaba.
+///
+/// Y tenia un segundo filo, peor: **cualquier linea pegada despues entraba en la
+/// frase**. Pegar las dos ordenes del aprovisionamiento de golpe —`generar` y
+/// `configurar`— habria cifrado la semilla con el texto de un comando, y no se
+/// habria sabido hasta que `configurar` fallara.
+///
+/// # Por que una linea, y no lo que haya
+///
+/// Una frase de paso con un salto de linea dentro no se puede teclear, asi que
+/// admitirla no compraba nada y era justo la puerta por la que entraba el texto
+/// pegado. Se cortan `\r` y `\n` del final —y **solo** esos—: recortar espacios
+/// alteraria en silencio un secreto que alguien eligio con ellos.
+///
+/// Sigue funcionando por tuberia: `printf '%s' 'frase' | eje-manifiesto ...`
+/// entrega una linea sin salto final, y el fin de entrada la cierra igual.
+///
+/// # Errores
+///
+/// [`ErrorHerramienta::Fichero`] si la entrada no se puede leer, y tambien si se
+/// cierra **sin entregar nada**. Cero bytes no es una frase vacia: es que nadie
+/// llego a escribir. Colapsarlas dejaria que un guion mal encadenado sellara una
+/// semilla sin que nadie hubiera decidido con que.
+fn leer_frase(entrada: &mut impl std::io::BufRead) -> Result<Vec<u8>, ErrorHerramienta> {
     let mut texto = String::new();
-    std::io::stdin()
-        .read_to_string(&mut texto)
+
+    let leidos = entrada
+        .read_line(&mut texto)
         .map_err(|fuente| ErrorHerramienta::Fichero {
             ruta: "<entrada estandar>".to_owned(),
             fuente,
         })?;
+
+    if leidos == 0 {
+        return Err(ErrorHerramienta::Fichero {
+            ruta: "<entrada estandar>".to_owned(),
+            fuente: std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "la entrada se cerro sin frase de paso",
+            ),
+        });
+    }
 
     Ok(texto.trim_end_matches(['\r', '\n']).as_bytes().to_vec())
 }
@@ -533,5 +584,84 @@ fn main() -> Result<(), ErrorHerramienta> {
         "recuperacion" => recuperacion(&opciones),
         "revocar" => revocar(&opciones),
         _ => Err(ErrorHerramienta::Uso),
+    }
+}
+
+#[cfg(test)]
+mod pruebas_frase {
+    #![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
+
+    use super::leer_frase;
+
+    /// La frase termina en el **salto de linea**, no al cerrar la entrada.
+    ///
+    /// RPT-082, PA-134. Es el defecto entero: con `read_to_string`, pulsar Enter
+    /// no terminaba nada y la herramienta se colgaba sin decir por que.
+    #[test]
+    fn una_linea_termina_la_frase() {
+        let mut entrada = &b"prueba-pa78-eje\nesto ya no es la frase\n"[..];
+
+        assert_eq!(
+            leer_frase(&mut entrada).expect("una linea es una frase"),
+            b"prueba-pa78-eje"
+        );
+    }
+
+    /// Y lo que venga detras **no entra**.
+    ///
+    /// El segundo filo del defecto, y el peor: pegar las dos ordenes del
+    /// aprovisionamiento de golpe habria cifrado la semilla con el texto de un
+    /// comando. Esta prueba lo reproduce con la orden exacta que se pego aquel
+    /// dia.
+    #[test]
+    fn una_orden_pegada_detras_no_se_convierte_en_la_frase() {
+        let pegado = b"mi-frase\n/usr/local/bin/eje-manifiesto configurar --semilla cliente.sem\n";
+
+        let frase = leer_frase(&mut &pegado[..]).expect("la primera linea es la frase");
+
+        assert_eq!(frase, b"mi-frase");
+        assert!(
+            !String::from_utf8_lossy(&frase).contains("eje-manifiesto"),
+            "la orden pegada entro en la frase de paso"
+        );
+    }
+
+    /// Por tuberia, sin salto final, sigue funcionando.
+    ///
+    /// `printf '%s' 'frase' | ...` es como se desbloqueo el aprovisionamiento de
+    /// la VM, y tiene que seguir valiendo: es la forma reproducible, la que no
+    /// depende de que nadie recuerde pulsar Ctrl-D.
+    #[test]
+    fn una_tuberia_sin_salto_final_sigue_valiendo() {
+        assert_eq!(
+            leer_frase(&mut &b"sin-salto-final"[..]).expect("el fin de entrada cierra la linea"),
+            b"sin-salto-final"
+        );
+    }
+
+    /// Se cortan `\r` y `\n`, y **solo** esos.
+    ///
+    /// Recortar espacios alteraria en silencio un secreto que alguien eligio con
+    /// ellos, y el fallo aparecería mucho despues, al no poder abrir la semilla.
+    #[test]
+    fn los_espacios_de_la_frase_se_respetan() {
+        assert_eq!(
+            leer_frase(&mut &b"con espacios al final   \r\n"[..]).expect("valida"),
+            b"con espacios al final   "
+        );
+    }
+
+    /// Una entrada cerrada sin nada **no es una frase vacia**.
+    ///
+    /// Cero bytes significa que nadie llego a escribir. Colapsarlo con la frase
+    /// vacia dejaria que un guion mal encadenado sellara una semilla sin que
+    /// nadie hubiera decidido con que (RPT-006 §4, una vez mas).
+    #[test]
+    fn una_entrada_cerrada_sin_nada_no_es_una_frase_vacia() {
+        assert!(leer_frase(&mut &b""[..]).is_err());
+        assert!(
+            leer_frase(&mut &b"\n"[..]).is_ok(),
+            "una linea vacia SI se leyo; que este vacia lo rechaza el sellado"
+        );
     }
 }
