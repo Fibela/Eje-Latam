@@ -1174,7 +1174,7 @@ mod pruebas {
         let vigentes = normales();
         let mut manejadores = Manejadores {
             registro: &registro,
-            condiciones: &vigentes,
+            condiciones: Some(&vigentes),
             evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
             estado_agente: &estado_agente_de_prueba(),
         };
@@ -1203,7 +1203,7 @@ mod pruebas {
         let vigentes = normales();
         let mut manejadores = Manejadores {
             registro: &registro,
-            condiciones: &vigentes,
+            condiciones: Some(&vigentes),
             evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
             estado_agente: &estado_agente_de_prueba(),
         };
@@ -1223,7 +1223,7 @@ mod pruebas {
         let vigentes = normales();
         let mut manejadores = Manejadores {
             registro: &registro,
-            condiciones: &vigentes,
+            condiciones: Some(&vigentes),
             evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
             estado_agente: &estado_agente_de_prueba(),
         };
@@ -1235,6 +1235,75 @@ mod pruebas {
     }
 
     /// Respuesta desenmarcada de un atendedor concreto.
+    /// En la primera vuelta, las condiciones **se rechazan con motivo**.
+    ///
+    /// RPT-084, PA-136. Desde que se atiende a mitad de vuelta, una consulta
+    /// puede llegar antes de que exista una sola condición evaluada.
+    ///
+    /// La salida cómoda sería devolver las trece en `false`. Diría **«este sensor
+    /// está sano»** sobre un sensor del que todavía no se sabe nada, que es
+    /// exactamente la mentira que RPT-006 §4 prohíbe y que ya costó la décima
+    /// condición (PA-118). Se rechaza, y el motivo dice por qué.
+    #[test]
+    fn en_la_primera_vuelta_las_condiciones_se_rechazan_con_motivo() {
+        use crate::servicio::Manejadores;
+        use eje_ipc::{CODIGO_RECHAZO, Canal, componer_peticion};
+
+        let registro = registro_con(2);
+        let mut manejadores = Manejadores {
+            registro: &registro,
+            condiciones: None,
+            evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
+            estado_agente: &estado_agente_de_prueba(),
+        };
+
+        let peticion = componer_peticion(Canal::ObtenerCondiciones, b"").expect("permitido");
+        let cuerpo = respuesta_de(&mut manejadores, &peticion);
+
+        assert_eq!(cuerpo[0], CODIGO_RECHAZO);
+
+        let motivo = String::from_utf8_lossy(&cuerpo[1..]);
+        assert!(
+            motivo.contains("primera vuelta"),
+            "el rechazo tiene que decir por que, y no solo que no: {motivo}"
+        );
+    }
+
+    /// Pero lo que **ya está en disco** se sirve igual.
+    ///
+    /// RPT-084. El rechazo alcanza sólo al canal que necesita lo que falta. Las
+    /// alertas persistidas existen desde antes de arrancar este proceso, y
+    /// negarlas porque el ciclo no ha terminado sería confundir «aún no lo he
+    /// calculado» con «no lo tengo».
+    #[test]
+    fn en_la_primera_vuelta_las_alertas_persistidas_si_se_sirven() {
+        use crate::servicio::Manejadores;
+        use eje_ipc::{CODIGO_RESPUESTA, Canal, componer_peticion};
+
+        let registro = registro_con(2);
+        let mut manejadores = Manejadores {
+            registro: &registro,
+            condiciones: None,
+            evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
+            estado_agente: &estado_agente_de_prueba(),
+        };
+
+        for canal in [Canal::ConsultarAlertas, Canal::ObtenerEstadoAgente] {
+            let carga: &[u8] = if canal == Canal::ConsultarAlertas {
+                br#"{"desdeAsiento":0}"#
+            } else {
+                b""
+            };
+            let peticion = componer_peticion(canal, carga).expect("permitido");
+            let cuerpo = respuesta_de(&mut manejadores, &peticion);
+
+            assert_eq!(
+                cuerpo[0], CODIGO_RESPUESTA,
+                "{canal:?} no depende de las condiciones y tiene que responder"
+            );
+        }
+    }
+
     /// Estado del agente para las pruebas de los manejadores.
     ///
     /// Corporativo y operativo, es decir: **el único caso en que
@@ -1719,7 +1788,7 @@ mod pruebas {
 
             let mut manejadores = Manejadores {
                 registro: &registro,
-                condiciones: &vigentes,
+                condiciones: Some(&vigentes),
                 evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
                 estado_agente: &estado_agente_de_prueba(),
             };
@@ -1803,7 +1872,7 @@ mod pruebas {
         }) {
             let mut manejadores = Manejadores {
                 registro: &registro,
-                condiciones: &vigentes,
+                condiciones: Some(&vigentes),
                 evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
                 estado_agente: &estado_agente_de_prueba(),
             };

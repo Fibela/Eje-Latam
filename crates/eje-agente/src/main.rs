@@ -1030,6 +1030,29 @@ fn ejecutar() -> Result<(), ErrorAgente> {
         let inicio = Instant::now();
 
         while (observaciones.len() as u64) < opciones.tramas {
+            // RPT-084, PA-136. AQUI esta el arreglo. Antes solo se atendia al
+            // final de la vuelta, y como la ventana no tiene techo —dura
+            // `--tramas` dividido por el ritmo de tramas— la latencia de la
+            // consola era la del trafico del segmento: once segundos con un
+            // goteo, contra un plazo de cinco (RPT-083 §5 y §6).
+            //
+            // Se sirve el registro ya persistido y las condiciones de la vuelta
+            // ANTERIOR. Cuesta microsegundos y acota la espera al tiempo entre
+            // dos tramas en lugar de a la vuelta entera.
+            tramos.atender += {
+                let marca = Instant::now();
+                let atendidas = atender_pendientes(
+                    escucha.as_ref(),
+                    &ciclo,
+                    anteriores.as_ref(),
+                    &estado_agente,
+                );
+                if atendidas > 0 && voz == Voz::Detallada {
+                    println!("Consultas atendidas a mitad de vuelta: {atendidas}");
+                }
+                marca.elapsed()
+            };
+
             // La fuente puede no existir (nunca abrio) o desaparecer en marcha
             // (alguien retiro la interfaz). Ninguno de los dos casos propaga:
             // los dos se declaran y se reintentan.
@@ -1223,21 +1246,20 @@ fn ejecutar() -> Result<(), ErrorAgente> {
         // Al final del ciclo, sobre lo ya persistido (RPT-034 §4). Una consulta
         // nunca responde con lo que aun vive solo en memoria.
         let marca = Instant::now();
-        if let Some(escucha) = &escucha {
-            let atendidas = escucha.atender(&mut Manejadores {
-                registro: ciclo.registro(),
-                condiciones: &resultado.condiciones,
-                evidencia: ciclo.evidencia(),
-                estado_agente: &estado_agente,
-            });
-            // Se calla en modo demonio: una consola que pregunta cada dos
-            // segundos escribiria una linea cada dos segundos, y eso es el mismo
-            // defecto con otro disfraz.
-            if atendidas > 0 && voz == Voz::Detallada {
-                println!("Consultas atendidas: {atendidas}");
-            }
+        let atendidas = atender_pendientes(
+            escucha.as_ref(),
+            &ciclo,
+            Some(&resultado.condiciones),
+            &estado_agente,
+        );
+        // Se calla en modo demonio: una consola que pregunta cada dos segundos
+        // escribiria una linea cada dos segundos, y eso es el mismo defecto con
+        // otro disfraz.
+        if atendidas > 0 && voz == Voz::Detallada {
+            println!("Consultas atendidas al cerrar: {atendidas}");
         }
-        tramos.atender = marca.elapsed();
+        // Se ACUMULA: el tramo ya lleva lo gastado dentro del bucle de captura.
+        tramos.atender += marca.elapsed();
 
         // RPT-083, PA-136. Solo con `--ciclos N` finito, que ya significa «hay
         // una persona mirando» (RPT-072). El modo servicio sigue callado.
@@ -1322,6 +1344,54 @@ fn leer_configuracion(
         Ok(valores) => Configuracion::Firmada(Box::new(valores)),
         Err(motivo) => Configuracion::NoVerifica(motivo.to_string()),
     }
+}
+
+/// Atiende lo que haya pendiente en el socket, y devuelve cuantas se sirvieron.
+///
+/// RPT-084, PA-136. Se llama **dos veces por vuelta**, y esa es la correccion:
+///
+/// - **entre trama y trama**, con las condiciones de la vuelta anterior;
+/// - **al final**, con las recien calculadas.
+///
+/// # Por que se puede servir a mitad de vuelta
+///
+/// Lo que se entrega es el registro **ya persistido** y las condiciones de la
+/// ultima vuelta completa. RPT-034 §4 exige exactamente eso —nunca lo que vive
+/// solo en memoria— y aqui se cumple sin tocarlo.
+///
+/// Parecia un intercambio entre latencia y frescura, y no lo es: atender solo al
+/// final entrega un dato fresco **que llega hasta once segundos tarde**
+/// (RPT-083 §5), asi que la edad del dato en manos del operador es la misma. La
+/// diferencia es que una version responde y la otra se cuelga.
+///
+/// # El coste
+///
+/// Medido: entre 12 y 312 microsegundos. Doscientas llamadas son cuatro
+/// milisegundos sobre una vuelta de once segundos. No hay nada que optimizar aqui,
+/// y por eso no hace falta ni un hilo aparte ni acortar la ventana.
+///
+/// # Generico sobre el despacho, y sin usarlo
+///
+/// `Ciclo<D>` lo es porque el emisor de syslog es intercambiable en pruebas. Aqui
+/// solo se leen el registro y la ruta de evidencia, asi que `D` viaja sin que a
+/// esta funcion le importe cual sea. La cota `Despacho` la exige el `impl` del
+/// ciclo, no esto.
+fn atender_pendientes<D: eje_agente::salida::Despacho>(
+    escucha: Option<&Escucha>,
+    ciclo: &Ciclo<D>,
+    condiciones: Option<&eje_ipc::mensajes::Condiciones>,
+    estado_agente: &EstadoAgente,
+) -> usize {
+    let Some(escucha) = escucha else {
+        return 0;
+    };
+
+    escucha.atender(&mut Manejadores {
+        registro: ciclo.registro(),
+        condiciones,
+        evidencia: ciclo.evidencia(),
+        estado_agente,
+    })
 }
 
 /// Cuanto tarda cada tramo de una vuelta. RPT-083, PA-136.

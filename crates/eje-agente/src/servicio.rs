@@ -142,16 +142,37 @@ pub fn atender_peticion(atiende: &mut dyn Atiende, carga: &[u8]) -> Vec<u8> {
 ///
 /// # Solo lectura, y por eso no hay cerrojo
 ///
-/// RPT-034 §4 pone la atencion de IPC **al final del ciclo**: una consulta
-/// responde con lo que ya se escribio a disco, nunca con lo que aun vive solo en
-/// memoria. Eso permite que estos manejadores tomen referencias compartidas en
-/// lugar de exclusivas, y con ello no hace falta ningun cerrojo — que era el
-/// argumento entero del hilo unico.
+/// RPT-034 §4 exige que una consulta responda con lo que **ya se escribio a
+/// disco**, nunca con lo que aun vive solo en memoria. Eso permite que estos
+/// manejadores tomen referencias compartidas en lugar de exclusivas, y con ello
+/// no hace falta ningun cerrojo — que era el argumento entero del hilo unico.
+///
+/// # Y por eso se puede atender A MITAD de vuelta. RPT-084, PA-136
+///
+/// Hasta hoy se atendia solo al final del ciclo, y eso hacia que la latencia de
+/// la consola **fuera la ventana de observacion**: con el valor por omision de
+/// `--tramas` y un goteo de trafico, vueltas de once segundos y tres de seis
+/// canales venciendo el plazo de cinco (RPT-083 §6).
+///
+/// Atender entre trama y trama sirve el estado de la **vuelta anterior**, que ya
+/// esta persistido. Parecia un intercambio —latencia contra frescura— y no lo es:
+/// atender al final da un dato fresco que llega once segundos tarde, asi que **la
+/// edad del dato que recibe el operador es la misma**. La diferencia es que uno
+/// responde y el otro se cuelga.
 pub struct Manejadores<'a> {
     /// Registro tal como quedo tras persistir este ciclo.
     pub registro: &'a eje_almacen::RegistroEvidencia,
     /// Condiciones vigentes, ya con el resultado de la salida.
-    pub condiciones: &'a eje_ipc::mensajes::Condiciones,
+    ///
+    /// `None` **solo** en la primera vuelta, antes de que se calcule ninguna.
+    /// RPT-084, PA-136: desde que se atiende a mitad de vuelta, una consulta
+    /// puede llegar antes de que exista una sola condicion evaluada.
+    ///
+    /// No se rellena con «todo en falso». Eso diria «este sensor esta sano» sobre
+    /// un sensor del que aun no se sabe nada, que es la mentira exacta que
+    /// RPT-006 §4 prohibe. Se rechaza con motivo, y **solo el canal que las
+    /// necesita**: las alertas ya persistidas se sirven igual.
+    pub condiciones: Option<&'a eje_ipc::mensajes::Condiciones>,
     /// Ruta del segmento activo, para saber que hay archivado junto a el.
     ///
     /// PA-74. Sin esto la respuesta no puede decir donde empieza lo que entrega.
@@ -192,8 +213,18 @@ impl Atiende for Manejadores<'_> {
                     .map_err(|error| format!("no se pudo serializar la respuesta: {error}"))
             }
 
-            Canal::ObtenerCondiciones => serde_json::to_vec(self.condiciones)
-                .map_err(|error| format!("no se pudo serializar la respuesta: {error}")),
+            Canal::ObtenerCondiciones => match self.condiciones {
+                Some(vigentes) => serde_json::to_vec(vigentes)
+                    .map_err(|error| format!("no se pudo serializar la respuesta: {error}")),
+
+                // RPT-084, PA-136. La primera vuelta todavia no ha terminado.
+                // «Todavia no se sabe» no es «no hay nada»: quien pregunte tiene
+                // que poder distinguirlo, y con un objeto de trece falsos no
+                // podria.
+                None => Err("el sensor aun no ha completado su primera vuelta: no hay \
+                     condiciones evaluadas todavia"
+                    .to_owned()),
+            },
 
             // Los otros cuatro canales pertenecen a modulos que aun no existen.
             // Se rechazan **con motivo** en lugar de devolver una lista vacia,
