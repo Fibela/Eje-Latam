@@ -118,7 +118,7 @@ struct EntradaVolatil {
 /// contrato. No es un olvido:
 ///
 /// - **La clase puede venir de dos sitios que no valen lo mismo.** Del marcado
-///   firmado, o de [`Protocolo::clase_sugerida`], que es una *inferencia* —tanto
+///   firmado, o de [`Protocolo::sugiere`], que es una *inferencia* —tanto
 ///   que existe `un_marcado_no_critico_contradicho_por_la_huella_es_ambiguo`—.
 ///   Aqui se entregan los protocolos observados en crudo y **quien componga la
 ///   respuesta decide**, con el marcado delante. Colapsar las dos procedencias

@@ -31,32 +31,74 @@ pub enum PerfilSegmento {
     Ot,
 }
 
-/// Clasificación de un dispositivo descubierto.
+/// Lo que se sabe de la clase de un dispositivo, **con su procedencia dentro**.
+///
+/// RPT-088, PA-139.
+///
+/// # Por que la clase y su respaldo no son dos campos
+///
+/// Separarlos permitiria leer `soporteVital` sin mirar de donde sale, y **no es
+/// lo mismo**: que lo jure el administrador con su firma, o que el agente lo
+/// suponga por haber visto trafico HL7. Bloquear un equipo inferido es gestion
+/// de red; bloquear uno declarado de soporte vital es riesgo humano.
+///
+/// Con un solo valor, la lectura equivocada **no se puede escribir**. Es la misma
+/// decision que renombrar `marcaPegajosa` a `vistoEnSegmentoCritico`: cerrar el
+/// malentendido con la forma y no con un comentario que nadie leera.
+///
+/// # Los tres estados de «no se sabe», que aqui son tres y no uno
+///
+/// - [`Self::EnConflicto`]: el marcado dice una cosa y la huella otra
+///   (`MotivoAmbiguedad::ConflictoEntreFuentes`). **Hay dos datos y se
+///   contradicen.**
+/// - [`Self::SinIndicio`]: no hay marcado y ningun protocolo observado sugiere
+///   nada. **No significa «no es critico»**: significa que nada apunta.
+/// - [`Self::Indeterminada`]: la fuente no pudo consultarse. Colapsarla con la
+///   anterior repetiria el defecto que RPT-006 §4 documenta — una base caida
+///   leida como ausencia de riesgo.
+///
+/// # Por que no existe `InferidaCaminoDeGestion`
+///
+/// Ningun protocolo observable lo sugiere: `Protocolo::sugiere` sale de
+/// Modbus, DNP3, HL7 y BACnet, y ninguno apunta ahi. Una variante para un caso
+/// que no puede darse invitaria a rellenarla. Lo sujeta una prueba en
+/// `guardian-cc`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ClaseDispositivo {
-    /// Controlador lógico programable.
-    Plc,
-    /// Cámara de red.
-    Camara,
-    /// Equipamiento médico.
-    Medico,
-    /// Estación de trabajo.
-    Estacion,
-    /// No fue posible clasificarlo.
-    Desconocido,
+#[serde(rename_all = "camelCase")]
+pub enum ClaseConocida {
+    /// Marcado firmado y vigente: soporte vital.
+    DeclaradaSoporteVital,
+    /// Marcado firmado y vigente: seguridad funcional.
+    DeclaradaSeguridadFuncional,
+    /// Marcado firmado y vigente: camino de gestion.
+    DeclaradaCaminoDeGestion,
+    /// Sin marcado; la huella observada sugiere soporte vital.
+    InferidaSoporteVital,
+    /// Sin marcado; la huella observada sugiere seguridad funcional.
+    InferidaSeguridadFuncional,
+    /// Marcado y huella se contradicen. Exige mirar.
+    EnConflicto,
+    /// Nada apunta a nada. **No** es «no es critico».
+    SinIndicio,
+    /// La fuente no pudo consultarse.
+    Indeterminada,
 }
 
-/// Postura de confianza cero evaluada para un nodo.
+/// Lo que el administrador declaro del segmento donde se vio al equipo.
+///
+/// Espejo de `guardian_cc::clasificacion::DeclaracionSegmento`. Se duplica el
+/// tipo, no se importa: `eje-ipc` depende solo de `thiserror` y `serde` a
+/// proposito, y traer `guardian-cc` invertiria esa dependencia. La traduccion
+/// vive en `eje-agente`, como `perfil_en_el_cable` (RPT-081).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Postura {
-    /// Comportamiento dentro de perfil.
-    Conforme,
-    /// Comportamiento anómalo detectado.
-    Anomalo,
-    /// Nodo actualmente contenido.
-    Contenido,
+#[serde(rename_all = "camelCase")]
+pub enum DeclaracionSegmento {
+    /// El administrador declara que el segmento no aloja equipos criticos.
+    SinDispositivosCriticos,
+    /// Segmento clinico, de planta o similar.
+    PuedeAlojarCriticos,
+    /// Nadie declaro nada. Se trata como [`Self::PuedeAlojarCriticos`].
+    NoDeclarado,
 }
 
 /// Estado resumido del demonio local. Respuesta de `obtener-estado-agente`.
@@ -71,18 +113,38 @@ pub struct EstadoAgente {
     pub respuesta_automatica: bool,
 }
 
-/// Dispositivo IoT/OT descubierto. Elemento de `obtener-inventario`.
+/// Dispositivo IoT/OT observado. Elemento de `obtener-inventario`.
+///
+/// RPT-088, PA-139. **Lleva evidencia, no juicios.**
+///
+/// # Que se fue de aqui, y por que
+///
+/// - `identificador` era la MAC serializada, igual que `direccionEnlace`. Un
+///   campo que finge ser una abstraccion y es el mismo dato.
+/// - `postura` (`conforme|anomalo|contenido`) **no tenia productor en ninguna
+///   parte**: su unica aparicion en Rust era un dato de prueba, y en TypeScript
+///   si tenia consumidor. Un tipo con consumidor y sin productor es la clase de
+///   defecto dominante del proyecto, aqui a nivel de campo.
+///
+/// El agente sabe `Indicio`, `DeclaracionSegmento` y la marca de segmento
+/// critico. Eso no es una postura: son las evidencias con las que se forma una.
+/// El agente es testigo; el juicio lo compone VIS-04, donde cambiar la regla no
+/// exige recompilar el sensor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NodoInventario {
-    /// Identificador estable del nodo.
-    pub identificador: String,
-    /// Dirección de capa de enlace observada.
+    /// Direccion de capa de enlace, en notacion de MAC. Es la clave.
     pub direccion_enlace: String,
-    /// Clasificación del dispositivo.
-    pub clase: ClaseDispositivo,
-    /// Postura evaluada.
-    pub postura: Postura,
+    /// Clase y respaldo, en un solo valor.
+    pub clase: ClaseConocida,
+    /// Lo que el administrador declaro del segmento.
+    pub declaracion_segmento: DeclaracionSegmento,
+    /// Se le vio en un segmento que admite criticos.
+    ///
+    /// **No es contencion.** El agente no contiene a nadie (RPT-020).
+    pub visto_en_segmento_critico: bool,
+    /// Protocolos industriales observados, en el orden en que se anotaron.
+    pub protocolos_observados: Vec<String>,
 }
 
 /// Ocupación de la Bóveda Aislada. Respuesta de `obtener-estado-boveda`.
@@ -137,11 +199,12 @@ pub const CAMPOS_ESTADO_AGENTE: [(&str, &str); 3] = [
 ];
 
 /// Campos de [`NodoInventario`].
-pub const CAMPOS_NODO_INVENTARIO: [(&str, &str); 4] = [
-    ("identificador", "texto"),
+pub const CAMPOS_NODO_INVENTARIO: [(&str, &str); 5] = [
     ("direccionEnlace", "texto"),
     ("clase", "enumerado"),
-    ("postura", "enumerado"),
+    ("declaracionSegmento", "enumerado"),
+    ("vistoEnSegmentoCritico", "booleano"),
+    ("protocolosObservados", "lista<texto>"),
 ];
 
 /// Campos de [`EstadoBoveda`].

@@ -158,7 +158,7 @@ servido = true
 nombre = "obtener-inventario"
 vista = "VIS-04"
 direccion = "consulta"
-descripcion = "Inventario vivo de dispositivos IoT/OT descubiertos y su postura."
+descripcion = "Inventario vivo de dispositivos IoT/OT observados, con la evidencia de cada uno."
 servido = false
 motivo_no_servido = "Sin productor todavia (PA-138b). Enumerar ya se puede desde RPT-087: AlmacenObservacion::inventario() lista el volatil ordenado. Lo que falta es que exista que decir: de los cuatro campos de NodoInventario, clase cruza dos taxonomias distintas y postura no tiene valor para no-se-sabe. Los decide PA-139; rellenarlos antes seria inventar dato."
 
@@ -279,13 +279,17 @@ tipo = "booleano"
 
 [[registro]]
 nombre = "NodoInventario"
-descripcion = "Dispositivo IoT/OT descubierto y su postura."
+descripcion = "Dispositivo IoT/OT observado. Lleva EVIDENCIA, no juicios: el agente es testigo, VIS-04 es quien lee. RPT-088, PA-139."
 
-[[campo]]
-registro = "NodoInventario"
-nombre = "identificador"
-tipo = "texto"
-
+# La clase y su PROCEDENCIA viajan en un solo valor a proposito.
+#
+# Separarlas en dos campos permitiria leer 'soporteVital' sin mirar de donde
+# sale, y no es lo mismo que lo jure el administrador con su firma a que lo
+# suponga el agente por haber visto trafico HL7. Bloquear un equipo inferido es
+# gestion de red; bloquear uno declarado de soporte vital es riesgo humano.
+#
+# No existe 'inferidaCaminoDeGestion' porque ningun protocolo observable lo
+# sugiere. Lo sujeta una prueba en guardian-cc.
 [[campo]]
 registro = "NodoInventario"
 nombre = "direccionEnlace"
@@ -295,17 +299,27 @@ tipo = "texto"
 registro = "NodoInventario"
 nombre = "clase"
 tipo = "enumerado"
-valores = "plc|camara|medico|estacion|desconocido"
+valores = "declaradaSoporteVital|declaradaSeguridadFuncional|declaradaCaminoDeGestion|inferidaSoporteVital|inferidaSeguridadFuncional|enConflicto|sinIndicio|indeterminada"
 
 [[campo]]
 registro = "NodoInventario"
-nombre = "postura"
+nombre = "declaracionSegmento"
 tipo = "enumerado"
-valores = "conforme|anomalo|contenido"
+valores = "sinDispositivosCriticos|puedeAlojarCriticos|noDeclarado"
 
-[[registro]]
-nombre = "EstadoBoveda"
-descripcion = "Ocupacion de la Boveda Aislada, para la alerta de capacidad."
+# NO se llama 'marcaPegajosa' ni 'contenido'. Significa que se le vio en un
+# segmento que admite criticos y que esa marca no se pierde por presion de
+# tabla (RPT-018 §6). El agente NO contiene a nadie (RPT-020), y el nombre
+# anterior invito a leerlo como contencion tres veces seguidas.
+[[campo]]
+registro = "NodoInventario"
+nombre = "vistoEnSegmentoCritico"
+tipo = "booleano"
+
+[[campo]]
+registro = "NodoInventario"
+nombre = "protocolosObservados"
+tipo = "lista<texto>"
 
 [[campo]]
 registro = "EstadoBoveda"

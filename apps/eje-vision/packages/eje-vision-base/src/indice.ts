@@ -47,11 +47,11 @@ export type {
 
 export {
   alertasObligatorias,
-  resumirPostura,
+  resumirRespaldo,
 } from "./vistas/vis-04-panel-confianza-cero/indice.js";
 export type {
   Alerta,
-  ResumenPostura,
+  ResumenRespaldo,
   Severidad,
 } from "./vistas/vis-04-panel-confianza-cero/indice.js";
 

@@ -276,9 +276,9 @@ fn un_prefijo_malicioso_no_provoca_reserva() {
 use crate::mensajes::{
     CAMPOS_CONDICIONES, CAMPOS_ESTADO_AGENTE, CAMPOS_ESTADO_BOVEDA, CAMPOS_NODO_INVENTARIO,
     CAMPOS_PETICION_ALERTAS, CAMPOS_PETICION_CONSULTA, CAMPOS_RESPUESTA_ALERTAS,
-    CAMPOS_RESULTADO_CONSULTA, CAMPOS_SUCESO_ALERTA, ClaseAlerta, ClaseDispositivo, Condiciones,
-    EstadoAgente, EstadoBoveda, NodoInventario, PerfilSegmento, PeticionAlertas, PeticionConsulta,
-    Postura, ResultadoConsulta, SucesoAlerta,
+    CAMPOS_RESULTADO_CONSULTA, CAMPOS_SUCESO_ALERTA, ClaseAlerta, ClaseConocida, Condiciones,
+    DeclaracionSegmento, EstadoAgente, EstadoBoveda, NodoInventario, PerfilSegmento,
+    PeticionAlertas, PeticionConsulta, ResultadoConsulta, SucesoAlerta,
 };
 
 /// Campo declarado en el manifiesto.
@@ -397,18 +397,26 @@ fn las_constantes_estan_atadas_a_los_structs() {
     assert_eq!(CAMPOS_ESTADO_AGENTE.len(), 3);
 
     let NodoInventario {
-        identificador,
         direccion_enlace,
         clase,
-        postura,
+        declaracion_segmento,
+        visto_en_segmento_critico,
+        protocolos_observados,
     } = NodoInventario {
-        identificador: "plc-3".to_owned(),
         direccion_enlace: "00:11:22:33:44:55".to_owned(),
-        clase: ClaseDispositivo::Plc,
-        postura: Postura::Conforme,
+        clase: ClaseConocida::InferidaSeguridadFuncional,
+        declaracion_segmento: DeclaracionSegmento::NoDeclarado,
+        visto_en_segmento_critico: true,
+        protocolos_observados: vec!["modbus".to_owned()],
     };
-    let _ = (identificador, direccion_enlace, clase, postura);
-    assert_eq!(CAMPOS_NODO_INVENTARIO.len(), 4);
+    let _ = (
+        direccion_enlace,
+        clase,
+        declaracion_segmento,
+        visto_en_segmento_critico,
+        protocolos_observados,
+    );
+    assert_eq!(CAMPOS_NODO_INVENTARIO.len(), 5);
 
     let EstadoBoveda {
         usado_bytes,

@@ -1845,6 +1845,41 @@ mod pruebas {
     /// Ese era el bloqueo entero de PA-138: `volatiles()` y `pegajosos()`
     /// devuelven `usize`, y un canal que promete una lista de dispositivos no se
     /// puede escribir contra un almacen que solo dice cuantos hay.
+    /// Ninguna inferencia por protocolo apunta al camino de gestion.
+    ///
+    /// RPT-088, PA-139. El contrato **no tiene** `inferidaCaminoDeGestion`, y la
+    /// razon es esta: `sugiere` sale de Modbus, DNP3, HL7 y BACnet, y
+    /// ninguno de los cuatro lo sugiere. Un camino de gestion se declara, no se
+    /// deduce del trafico.
+    ///
+    /// Sin esta prueba, anadir manana un protocolo que si lo sugiera dejaria el
+    /// caso sin variante en el cable y alguien lo mapearia a otra cosa. Es la
+    /// familia de defecto de toda la semana: no falla, encaja mal en silencio.
+    #[test]
+    fn ninguna_inferencia_apunta_al_camino_de_gestion() {
+        // La lista es exhaustiva por construccion: si se anade una variante a
+        // `Protocolo`, este `match` deja de compilar.
+        const TODOS: [Protocolo; 4] = [
+            Protocolo::Modbus,
+            Protocolo::Dnp3,
+            Protocolo::Hl7,
+            Protocolo::Bacnet,
+        ];
+
+        for protocolo in TODOS {
+            match protocolo {
+                Protocolo::Modbus | Protocolo::Dnp3 | Protocolo::Hl7 | Protocolo::Bacnet => {}
+            }
+
+            assert_ne!(
+                protocolo.sugiere(),
+                Some(ClaseExcluida::CaminoDeGestion),
+                "{protocolo:?} sugiere camino de gestion: el contrato IPC no tiene \
+                 variante para eso (RPT-088). Anadela antes de mapear a otra cosa"
+            );
+        }
+    }
+
     #[test]
     fn el_inventario_enumera_lo_observado_y_no_solo_lo_cuenta() {
         let mut almacen = AlmacenObservacion::nuevo();

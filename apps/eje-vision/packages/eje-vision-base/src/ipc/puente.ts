@@ -20,16 +20,62 @@ export interface EstadoAgente {
   readonly respuestaAutomatica: boolean;
 }
 
-/** Nodo IoT/OT descubierto, tal como se muestra en VIS-04. */
+/**
+ * Clase de un dispositivo **con su procedencia dentro**. RPT-088, PA-139.
+ *
+ * La clase y su respaldo no son dos campos a propósito. Separarlos permitiría
+ * leer `soporteVital` sin mirar de dónde sale, y no es lo mismo que lo jure el
+ * administrador con su firma a que el agente lo suponga por haber visto tráfico
+ * HL7: bloquear un equipo inferido es gestión de red, bloquear uno declarado de
+ * soporte vital es riesgo humano.
+ *
+ * Los tres finales son tres y no uno. `enConflicto` es «hay dos datos y se
+ * contradicen»; `sinIndicio` es «nada apunta», que **no** significa «no es
+ * crítico»; `indeterminada` es «la fuente no se pudo consultar». Colapsarlas
+ * repetiría el defecto que RPT-006 §4 documenta.
+ */
+export type ClaseConocida =
+  | "declaradaSoporteVital"
+  | "declaradaSeguridadFuncional"
+  | "declaradaCaminoDeGestion"
+  | "inferidaSoporteVital"
+  | "inferidaSeguridadFuncional"
+  | "enConflicto"
+  | "sinIndicio"
+  | "indeterminada";
+
+/** Lo que el administrador declaró del segmento donde se vio al equipo. */
+export type DeclaracionSegmento =
+  | "sinDispositivosCriticos"
+  | "puedeAlojarCriticos"
+  | "noDeclarado";
+
+/**
+ * Dispositivo IoT/OT observado, tal como se muestra en VIS-04.
+ *
+ * **Lleva evidencia, no juicios.** RPT-088, PA-139. Se fueron dos campos:
+ * `identificador`, que era la misma cadena que `direccionEnlace`; y `postura`,
+ * que tenía consumidor aquí y **ningún productor en el agente**.
+ *
+ * El juicio lo compone esta capa. Si mañana cambia la regla de qué se considera
+ * anómalo, se cambia aquí y no hay que recompilar el sensor.
+ */
 export interface NodoInventario {
-  /** Identificador estable del nodo. */
-  readonly identificador: string;
-  /** Dirección de capa de enlace observada. */
+  /** Dirección de capa de enlace, en notación de MAC. Es la clave. */
   readonly direccionEnlace: string;
-  /** Clasificación del dispositivo. */
-  readonly clase: "plc" | "camara" | "medico" | "estacion" | "desconocido";
-  /** Postura de confianza cero evaluada. */
-  readonly postura: "conforme" | "anomalo" | "contenido";
+  /** Clase y respaldo, en un solo valor. */
+  readonly clase: ClaseConocida;
+  /** Lo que el administrador declaró del segmento. */
+  readonly declaracionSegmento: DeclaracionSegmento;
+  /**
+   * Se le vio en un segmento que admite críticos.
+   *
+   * **No es contención.** El agente no contiene a nadie (RPT-020). El nombre
+   * anterior —`marcaPegajosa`— se leyó como contención tres veces seguidas.
+   */
+  readonly vistoEnSegmentoCritico: boolean;
+  /** Protocolos industriales observados, en el orden en que se anotaron. */
+  readonly protocolosObservados: readonly string[];
 }
 
 /**
@@ -310,10 +356,11 @@ export const CAMPOS_ESTADO_AGENTE = [
 
 /** Campos de [`NodoInventario`]. */
 export const CAMPOS_NODO_INVENTARIO = [
-  ["identificador", "texto"],
   ["direccionEnlace", "texto"],
   ["clase", "enumerado"],
-  ["postura", "enumerado"],
+  ["declaracionSegmento", "enumerado"],
+  ["vistoEnSegmentoCritico", "booleano"],
+  ["protocolosObservados", "lista<texto>"],
 ] as const satisfies readonly (readonly [keyof NodoInventario, string])[];
 
 /** Campos de [`EstadoBoveda`]. */

@@ -58,42 +58,67 @@ export function alertasObligatorias(
   return alertas;
 }
 
-/** Recuento de nodos por postura, para la cabecera del panel. */
-export interface ResumenPostura {
-  /** Nodos conformes. */
-  readonly conformes: number;
-  /** Nodos con comportamiento anómalo. */
-  readonly anomalos: number;
-  /** Nodos actualmente contenidos. */
-  readonly contenidos: number;
+/**
+ * Recuento del inventario por **calidad del respaldo**, para la cabecera.
+ *
+ * RPT-088, PA-139. Sustituye a `ResumenPostura`, que contaba por un campo que el
+ * agente nunca produjo.
+ *
+ * Lo que el operador necesita saber de un vistazo no es cuántos nodos «están
+ * conformes» —el agente no juzga eso—, sino **cuánto del inventario está
+ * respaldado por una firma y cuánto es suposición**. Las cinco cifras suman
+ * siempre el total: ninguna categoría absorbe a otra.
+ */
+export interface ResumenRespaldo {
+  /** Clase declarada por marcado firmado y vigente. */
+  readonly declarados: number;
+  /** Sin marcado; la huella observada sugiere una clase. Es suposición. */
+  readonly inferidos: number;
+  /** El marcado dice una cosa y la huella otra. Exige mirar. */
+  readonly enConflicto: number;
+  /** Nada apunta a nada. **No** significa que no sean críticos. */
+  readonly sinIndicio: number;
+  /** La fuente no se pudo consultar. Distinto de que no aporte. */
+  readonly indeterminados: number;
 }
 
 /**
- * Agrega el inventario por postura.
+ * Agrega el inventario por calidad del respaldo.
  *
- * @param inventario Nodos descubiertos.
- * @returns Recuento por postura.
+ * @param inventario Nodos observados.
+ * @returns Recuento por respaldo. Las cinco cifras suman `inventario.length`.
  */
-export function resumirPostura(
+export function resumirRespaldo(
   inventario: readonly NodoInventario[],
-): ResumenPostura {
-  let conformes = 0;
-  let anomalos = 0;
-  let contenidos = 0;
+): ResumenRespaldo {
+  let declarados = 0;
+  let inferidos = 0;
+  let enConflicto = 0;
+  let sinIndicio = 0;
+  let indeterminados = 0;
 
   for (const nodo of inventario) {
-    switch (nodo.postura) {
-      case "conforme":
-        conformes += 1;
+    switch (nodo.clase) {
+      case "declaradaSoporteVital":
+      case "declaradaSeguridadFuncional":
+      case "declaradaCaminoDeGestion":
+        declarados += 1;
         break;
-      case "anomalo":
-        anomalos += 1;
+      case "inferidaSoporteVital":
+      case "inferidaSeguridadFuncional":
+        inferidos += 1;
         break;
-      case "contenido":
-        contenidos += 1;
+      case "enConflicto":
+        enConflicto += 1;
+        break;
+      case "sinIndicio":
+        sinIndicio += 1;
+        break;
+      case "indeterminada":
+        indeterminados += 1;
         break;
     }
   }
 
-  return { conformes, anomalos, contenidos };
+  return { declarados, inferidos, enConflicto, sinIndicio, indeterminados };
 }

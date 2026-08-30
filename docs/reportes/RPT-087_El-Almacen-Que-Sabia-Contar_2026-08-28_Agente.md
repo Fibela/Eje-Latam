@@ -59,7 +59,7 @@ CaminoDeGestion`: `Corporativo` es un `PerfilSegmento`, no una clase, y `CaminoD
 desaparecía. Es el patrón de identificador inventado, parado por cuarta vez.
 
 Y hay algo por debajo que decide PA-139, no esto: la clase puede venir del **marcado
-firmado** o de `Protocolo::clase_sugerida`, que es una **inferencia** —tanto que existe
+firmado** o de `Protocolo::sugiere`, que es una **inferencia** —tanto que existe
 `un_marcado_no_critico_contradicho_por_la_huella_es_ambiguo`—. Colapsar las dos
 procedencias en un enumerado plano presenta una sospecha como una declaración.
 
