@@ -138,6 +138,7 @@ cargo xtask verificar [ruta]           # guardián de inconclusos. Por defecto: 
 cargo xtask tablero                    # recuento de puntos abiertos, LEÍDO de RPT-002 §12
 cargo xtask cobertura                  # ¿ejecuta alguien todas las pruebas escritas?
 cargo xtask manual                     # ¿dice este manual lo mismo que el binario?
+cargo xtask conformidad                # suites PQC + atestado CONFORMIDAD.lock
 cargo xtask empaquetar [ruta]          # artefacto headless, revisado sobre el disco
 cargo xtask probar-instalador          # caja de arena del instalador
 cargo xtask vectores [--actualizar]    # vectores ACVP y Wycheproof de motor-pqc
@@ -177,6 +178,21 @@ entero, no que venga de PremosCorp. Quien pueda sustituirlo puede recalcular los
 resúmenes. La firma de release es PA-14a, y el instalador lo dice a gritos
 (RPT-073).
 
+**`conformidad`** ejecuta las tres suites poscuánticas de `motor-pqc` —ACVP,
+Wycheproof y la diferencial contra libcrux— y **sólo si las tres pasan** emite
+`CONFORMIDAD.lock`: las versiones exactas de las dependencias de `motor-pqc`, el
+resumen de `FUENTES.lock`, el canal del toolchain y una huella SHA-256 sobre todo
+ello.
+
+La huella se calcula sobre las **entradas** y no sobre el evento de compilación.
+Si alguien sube `ml-dsa` o cambia un vector sin volver a ejecutar esta orden, la
+huella deja de cuadrar y `cargo test -p xtask` se pone rojo solo: el atestado se
+autoinvalida. Ese fichero **no se edita a mano**; se regenera con esta orden.
+
+Lo que **no** garantiza: ata *qué* se probó, no *que* se probó. Componer la huella
+sin ejecutar nada es posible, y cerrar eso exige que la CI sea el único productor
+de confianza con una clave que sólo ella tenga — el alcance de PA-14.
+
 **`probar-instalador`** corre `instalar.sh` **dos veces** contra un destino
 desechable en `/tmp`. Comprueba que respeta las rutas que se le dan, que deja el
 binario ejecutable, que **una reinstalación no machaca la configuración** del
@@ -187,13 +203,13 @@ en las dos direcciones: ninguna orden sin anunciar aquí, y ningún `cargo xtask
 citado en cualquier `.md` de `docs/` que no exista. La segunda es la que importa:
 un comando documentado y retirado manda a teclear algo que falla. En su primer
 barrido encontró que RPT-005 §9.3 llevaba diez días mandando teclear una orden
-que **nunca se construyó** (PA-121).
+que **todavía no se ha construido**.
 
 Para citar una orden diseñada y no construida sin que la barrera acuse, el
 documento tiene que decirlo **en la misma línea**:
 
 ```markdown
-- `cargo xtask conformidad` — **NO EXISTE TODAVIA**, es diseño; se sigue en PA-121
+- `cargo xtask atestar-release` — **NO EXISTE TODAVIA**, es diseño; se sigue en PA-14
 ```
 
 El aviso vale para su línea y no para el resto del fichero. Así no se apagan las
@@ -603,7 +619,8 @@ cargo test --workspace && \
 cargo xtask verificar crates && \
 cargo xtask cobertura && \
 cargo xtask manual && \
-cargo xtask tablero
+cargo xtask tablero && \
+cargo xtask conformidad
 ```
 
 Y si se tocó la interfaz:

@@ -10,6 +10,7 @@
 //! ```
 
 mod cobertura;
+mod conformidad;
 mod empaquetar;
 mod exclusion;
 mod guardian;
@@ -91,6 +92,12 @@ const ORDENES: &[Orden] = &[
         argumentos: "",
         resumen: "Caja de arena del instalador (PA-116). NO cubre PA-117",
         ejecutar: orden_probar_instalador,
+    },
+    Orden {
+        nombre: "conformidad",
+        argumentos: "",
+        resumen: "Ejecuta las suites PQC y emite CONFORMIDAD.lock (PA-121)",
+        ejecutar: orden_conformidad,
     },
     Orden {
         nombre: "vectores",
@@ -181,6 +188,10 @@ fn orden_tablero(_argumentos: &[String]) -> ExitCode {
 
 fn orden_cobertura(_argumentos: &[String]) -> ExitCode {
     ejecutar_cobertura()
+}
+
+fn orden_conformidad(_argumentos: &[String]) -> ExitCode {
+    ejecutar_conformidad()
 }
 
 fn orden_vectores_ipc(_argumentos: &[String]) -> ExitCode {
@@ -596,4 +607,91 @@ sin querer.{FIN}"
             ExitCode::FAILURE
         }
     }
+}
+
+/// Ejecuta las tres suites poscuanticas y, solo si pasan, emite el atestado.
+///
+/// # Por que ejecutar y emitir van juntos y en este orden
+///
+/// RPT-005 §9.3: «ejecutaria las tres suites y, **solo si pasan**, emitiria el
+/// fichero». Separarlo en dos ordenes dejaria emitir sin probar, y entonces el
+/// fichero solo diria «alguien escribio esto», que es la constante `true` que ese
+/// reporte ya descarto.
+///
+/// El atestado se compone **despues**, leyendo el arbol. No recoge nada de la
+/// ejecucion —ni fechas, ni maquina, ni duracion— porque nada de eso es
+/// reproducible, y un campo que no se puede recalcular convierte la barrera en
+/// ruido.
+fn ejecutar_conformidad() -> ExitCode {
+    let raiz = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap_or(Path::new("."));
+
+    println!("{GRIS}Conformidad poscuantica (RPT-005 §9.3){FIN}");
+    println!();
+
+    for &suite in conformidad::SUITES {
+        print!("  {suite} ... ");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+
+        let salida = std::process::Command::new(env!("CARGO"))
+            .current_dir(raiz)
+            .args(["test", "-p", "motor-pqc", "--test", suite])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+
+        match salida {
+            Ok(estado) if estado.success() => println!("{VERDE}pasa{FIN}"),
+
+            Ok(_) => {
+                println!("{ROJO}FALLA{FIN}");
+                eprintln!();
+                eprintln!("{ROJO}No se emite {}.{FIN}", conformidad::FICHERO);
+                eprintln!(
+                    "  Un atestado emitido con una suite en rojo diria que el motor es\n  \
+                     conforme cuando no lo es. Reproduce el fallo con:\n\n    \
+                     cargo test -p motor-pqc --test {suite}"
+                );
+                return ExitCode::FAILURE;
+            }
+
+            Err(error) => {
+                println!("{ROJO}NO SE PUDO EJECUTAR{FIN}");
+                eprintln!("  {error}");
+                eprintln!(
+                    "  No se emite nada: «no se pudo comprobar» no es «pasa»."
+                );
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
+    let atestado = match conformidad::componer(raiz) {
+        Ok(atestado) => atestado,
+        Err(fallo) => {
+            eprintln!("{ROJO}{fallo}{FIN}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let destino = raiz.join(conformidad::FICHERO);
+
+    if let Err(error) = std::fs::write(&destino, conformidad::rendir(&atestado)) {
+        eprintln!("{ROJO}no se pudo escribir {}: {error}{FIN}", destino.display());
+        return ExitCode::FAILURE;
+    }
+
+    println!();
+    println!("  {} paquete(s) atestiguados", atestado.paquetes.len());
+    println!("  canal   {}", atestado.canal);
+    println!("  huella  {}", atestado.huella);
+    println!();
+    println!("{VERDE}{} emitido.{FIN}", conformidad::FICHERO);
+    println!(
+        "{GRIS}  Ata QUE se probo, no QUE se probo (RPT-005 §9.4): componer esta\n\
+         \x20 huella sin ejecutar nada es posible. Cerrarlo es PA-14.{FIN}"
+    );
+
+    ExitCode::SUCCESS
 }

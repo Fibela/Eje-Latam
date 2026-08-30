@@ -1,0 +1,28 @@
+# Atestado de conformidad poscuantica. RPT-005 §9.3, PA-121.
+#
+# Lo emite 'cargo xtask conformidad' SOLO si las tres suites pasan.
+# NO se edita a mano: 'cargo test -p xtask' recalcula la huella y falla
+# si no describe este arbol.
+#
+# Ata QUE se probo, no QUE se probo (RPT-005 §9.4). Componer esta huella
+# sin ejecutar nada es posible; cerrarlo es el alcance de PA-14.
+
+canal  1.85
+fuentes  ba952b06681b9caa919fe278548601be4542d14abd1f950fdc0573627070ef49
+
+paquete  aes-gcm  0.10.3
+paquete  ed25519-dalek  2.2.0
+paquete  hkdf  0.12.4
+paquete  libcrux-ml-dsa  0.0.10
+paquete  libcrux-ml-kem  0.0.10
+paquete  ml-dsa  0.1.1
+paquete  ml-kem  0.3.2
+paquete  rand  0.9.5
+paquete  rand_core  0.10.1
+paquete  serde_json  1.0.151
+paquete  sha2  0.10.9
+paquete  thiserror  2.0.19
+paquete  x25519-dalek  2.0.1
+paquete  zeroize  1.9.0
+
+huella  9287eb09291d669990be20c9dd3c22e8afd899f4a62bce07e6a637486ec94b77

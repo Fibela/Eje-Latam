@@ -253,7 +253,7 @@ CONFORMIDAD.lock
   └── huella = SHA-256 sobre todo lo anterior
 ```
 
-- `cargo xtask conformidad` — **NO EXISTE TODAVIA**, es diseño; se sigue en PA-121 — ejecutaría las tres suites y, **solo si pasan**, emitiría el fichero.
+- `cargo xtask conformidad` — **construida el 28-ago-2026, RPT-086** — ejecuta las tres suites y, **solo si pasan**, emite el fichero.
 - `tests/atestacion.rs` **recalcula la huella** desde `Cargo.lock` y `FUENTES.lock` y falla si no coincide con la registrada.
 
 La propiedad que se gana es la que importa: **si alguien sube una dependencia o cambia un vector sin volver a ejecutar la conformidad, las huellas divergen y la CI se pone roja sola.** El atestado se autoinvalida. Es el mismo mecanismo del anclaje Merkle de los vectores, aplicado al árbol de dependencias, y no necesita `build.rs`, ni variable de entorno, ni clave.

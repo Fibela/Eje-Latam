@@ -72,7 +72,7 @@ nada — el lector del reporte seguiría copiando el comando. Lo que se exige es
 aviso **en la línea de la cita**:
 
 ```markdown
-- `cargo xtask conformidad` — **NO EXISTE TODAVIA**, es diseño; se sigue en PA-121
+- `cargo xtask atestar-release` — **NO EXISTE TODAVIA**, es diseño; se sigue en PA-14
 ```
 
 Y vale para su línea, no para el fichero. Hay una prueba dedicada a eso
