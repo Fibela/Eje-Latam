@@ -23,25 +23,30 @@ export interface EstadoAgente {
 /**
  * Clase de un dispositivo **con su procedencia dentro**. RPT-088, PA-139.
  *
- * La clase y su respaldo no son dos campos a propósito. Separarlos permitiría
- * leer `soporteVital` sin mirar de dónde sale, y no es lo mismo que lo jure el
- * administrador con su firma a que el agente lo suponga por haber visto tráfico
- * HL7: bloquear un equipo inferido es gestión de red, bloquear uno declarado de
- * soporte vital es riesgo humano.
+ * Cada valor es un resultado alcanzable de `clasificar` en el dominio, uno a
+ * uno. **No hay valores `inferida*`**: cuando la huella sugiere criticidad sin
+ * marcado que la respalde, el agente declara ambigüedad y no afirma la clase.
+ * Una fuente inferida levanta la mano, no dictamina.
  *
- * Los tres finales son tres y no uno. `enConflicto` es «hay dos datos y se
- * contradicen»; `sinIndicio` es «nada apunta», que **no** significa «no es
- * crítico»; `indeterminada` es «la fuente no se pudo consultar». Colapsarlas
- * repetiría el defecto que RPT-006 §4 documenta.
+ * `declaradaNoCritica` es «no crítico **y hay un humano que lo firma**», el
+ * único estado que permite acción automática. No confundir con las ambiguas,
+ * que significan lo contrario: que no se sabe.
+ *
+ * Las cuatro ambigüedades mandan a mirar sitios distintos —marcado caducado,
+ * fuentes que se contradicen, huella sin respaldo, segmento sin declarar—, así
+ * que no se colapsan en una: es lo único que le dice al operador por dónde
+ * empezar.
  */
 export type ClaseConocida =
   | "declaradaSoporteVital"
   | "declaradaSeguridadFuncional"
   | "declaradaCaminoDeGestion"
-  | "inferidaSoporteVital"
-  | "inferidaSeguridadFuncional"
-  | "enConflicto"
-  | "sinIndicio"
+  | "declaradaNoCritica"
+  | "segmentoDeclaradoSinCriticos"
+  | "ambiguaMarcadoCaducado"
+  | "ambiguaConflictoEntreFuentes"
+  | "ambiguaInferenciaSugiereCriticidad"
+  | "ambiguaSegmentoPuedeAlojarCriticos"
   | "indeterminada";
 
 /** Lo que el administrador declaró del segmento donde se vio al equipo. */

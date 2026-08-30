@@ -10,6 +10,12 @@
 - **Depende de:** RPT-087 (la evidencia que lo desbloqueó), RPT-006 §4, RPT-020 (el agente no contiene), RPT-081 (el patrón de tipo espejo en el cable)
 - **Aborda:** PA-139 (cerrado). Desbloquea PA-138b
 
+> **ERRATA — corregido por RPT-089 el mismo dia.** El `ClaseConocida` que describe §5
+> tenia `inferidaSoporteVital` e `inferidaSeguridadFuncional`, y `clasificar` nunca
+> devuelve eso: ante huella sin marcado declara ambiguedad. Ademas le faltaba
+> `declaradaNoCritica`, el unico estado que permite accion automatica. El enumerado
+> vigente es el de RPT-089 §3. Lo demas de este reporte se mantiene.
+
 ---
 
 ## 1. La pregunta cambió al mirar

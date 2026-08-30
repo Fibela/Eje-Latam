@@ -288,8 +288,13 @@ descripcion = "Dispositivo IoT/OT observado. Lleva EVIDENCIA, no juicios: el age
 # suponga el agente por haber visto trafico HL7. Bloquear un equipo inferido es
 # gestion de red; bloquear uno declarado de soporte vital es riesgo humano.
 #
-# No existe 'inferidaCaminoDeGestion' porque ningun protocolo observable lo
-# sugiere. Lo sujeta una prueba en guardian-cc.
+# Cada valor es un resultado alcanzable de guardian_cc::clasificacion::clasificar,
+# uno a uno. NO hay valores 'inferida*': cuando la huella sugiere criticidad sin
+# marcado que la respalde, el dominio declara ambiguedad y NO afirma la clase.
+# Una fuente inferida levanta la mano, no dictamina.
+#
+# 'declaradaNoCritica' es «no critico y hay un humano que lo firma», el unico
+# estado que permite accion automatica. No es lo mismo que no saber nada.
 [[campo]]
 registro = "NodoInventario"
 nombre = "direccionEnlace"
@@ -299,7 +304,7 @@ tipo = "texto"
 registro = "NodoInventario"
 nombre = "clase"
 tipo = "enumerado"
-valores = "declaradaSoporteVital|declaradaSeguridadFuncional|declaradaCaminoDeGestion|inferidaSoporteVital|inferidaSeguridadFuncional|enConflicto|sinIndicio|indeterminada"
+valores = "declaradaSoporteVital|declaradaSeguridadFuncional|declaradaCaminoDeGestion|declaradaNoCritica|segmentoDeclaradoSinCriticos|ambiguaMarcadoCaducado|ambiguaConflictoEntreFuentes|ambiguaInferenciaSugiereCriticidad|ambiguaSegmentoPuedeAlojarCriticos|indeterminada"
 
 [[campo]]
 registro = "NodoInventario"

@@ -33,36 +33,33 @@ pub enum PerfilSegmento {
 
 /// Lo que se sabe de la clase de un dispositivo, **con su procedencia dentro**.
 ///
-/// RPT-088, PA-139.
+/// RPT-089, PA-139 (reabierto).
 ///
-/// # Por que la clase y su respaldo no son dos campos
+/// # Es el espejo de `Clasificacion`, no un modelo aparte
 ///
-/// Separarlos permitiria leer `soporteVital` sin mirar de donde sale, y **no es
-/// lo mismo**: que lo jure el administrador con su firma, o que el agente lo
-/// suponga por haber visto trafico HL7. Bloquear un equipo inferido es gestion
-/// de red; bloquear uno declarado de soporte vital es riesgo humano.
+/// La primera version de este enumerado se diseno sobre lo que parecia razonable
+/// y **afirmaba cosas que el dominio se niega a afirmar**. Tenia
+/// `InferidaSoporteVital`, y `guardian_cc::clasificacion::clasificar` nunca
+/// devuelve eso: cuando la huella sugiere criticidad sin marcado que la
+/// respalde, declara `Ambiguo { InferenciaSugiereCriticidad }`. **Una fuente
+/// inferida no afirma una clase; levanta la mano.**
 ///
-/// Con un solo valor, la lectura equivocada **no se puede escribir**. Es la misma
-/// decision que renombrar `marcaPegajosa` a `vistoEnSegmentoCritico`: cerrar el
-/// malentendido con la forma y no con un comentario que nadie leera.
+/// Cada variante de aqui corresponde a un resultado alcanzable de `clasificar`,
+/// uno a uno. Ni mas —seria inventar dato— ni menos —seria colapsar estados.
 ///
-/// # Los tres estados de «no se sabe», que aqui son tres y no uno
+/// # El que faltaba, y era el que mas importa
 ///
-/// - [`Self::EnConflicto`]: el marcado dice una cosa y la huella otra
-///   (`MotivoAmbiguedad::ConflictoEntreFuentes`). **Hay dos datos y se
-///   contradicen.**
-/// - [`Self::SinIndicio`]: no hay marcado y ningun protocolo observado sugiere
-///   nada. **No significa «no es critico»**: significa que nada apunta.
-/// - [`Self::Indeterminada`]: la fuente no pudo consultarse. Colapsarla con la
-///   anterior repetiria el defecto que RPT-006 §4 documenta — una base caida
-///   leida como ausencia de riesgo.
+/// [`Self::DeclaradaNoCritica`] es «no critico, **y hay un humano que lo
+/// firma**». Es el unico estado que permite accion automatica
+/// (`Clasificacion::permite_accion_automatica`). En la version anterior se
+/// habria leido como «sin indicio», que significa lo contrario: que nada apunta.
 ///
-/// # Por que no existe `InferidaCaminoDeGestion`
+/// # Y las cuatro ambiguedades no son una
 ///
-/// Ningun protocolo observable lo sugiere: `Protocolo::sugiere` sale de
-/// Modbus, DNP3, HL7 y BACnet, y ninguno apunta ahi. Una variante para un caso
-/// que no puede darse invitaria a rellenarla. Lo sujeta una prueba en
-/// `guardian-cc`.
+/// «Su marcado caduco», «el marcado y la huella se contradicen», «la huella
+/// sugiere y no hay marcado» y «nadie declaro el segmento» mandan a mirar sitios
+/// distintos. Colapsarlas en un `ambigua` generico le quitaria al operador lo
+/// unico que le dice por donde empezar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ClaseConocida {
@@ -72,15 +69,30 @@ pub enum ClaseConocida {
     DeclaradaSeguridadFuncional,
     /// Marcado firmado y vigente: camino de gestion.
     DeclaradaCaminoDeGestion,
-    /// Sin marcado; la huella observada sugiere soporte vital.
-    InferidaSoporteVital,
-    /// Sin marcado; la huella observada sugiere seguridad funcional.
-    InferidaSeguridadFuncional,
-    /// Marcado y huella se contradicen. Exige mirar.
-    EnConflicto,
-    /// Nada apunta a nada. **No** es «no es critico».
-    SinIndicio,
-    /// La fuente no pudo consultarse.
+    /// Marcado firmado y vigente que declara **ausencia** de criticidad.
+    ///
+    /// Unico estado con un humano responsable detras que permite contener sin
+    /// intervencion. No confundir con [`Self::SinIndicio`], que es lo contrario.
+    DeclaradaNoCritica,
+    /// Sin marcado, sin huella que sugiera nada, y el segmento esta declarado
+    /// libre de criticos.
+    ///
+    /// La responsabilidad humana esta al nivel del segmento, no del equipo.
+    SegmentoDeclaradoSinCriticos,
+    /// Existio un marcado y su vigencia expiro. Se degrada a ausencia.
+    AmbiguaMarcadoCaducado,
+    /// El marcado dice una cosa y la huella observada dice otra.
+    AmbiguaConflictoEntreFuentes,
+    /// La huella apunta a un equipo critico y **no hay marcado que lo confirme**.
+    ///
+    /// No dice cual: la inferencia no afirma clases.
+    AmbiguaInferenciaSugiereCriticidad,
+    /// Sin marcado, en un segmento que admite criticos o sin declarar.
+    AmbiguaSegmentoPuedeAlojarCriticos,
+    /// Una fuente declarativa no pudo consultarse.
+    ///
+    /// **No** es «no aporta»: es que no se sabe. RPT-006 §4. En el ciclo es el
+    /// caso que hoy se cuenta como `escalados`.
     Indeterminada,
 }
 

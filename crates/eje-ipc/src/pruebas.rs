@@ -404,7 +404,7 @@ fn las_constantes_estan_atadas_a_los_structs() {
         protocolos_observados,
     } = NodoInventario {
         direccion_enlace: "00:11:22:33:44:55".to_owned(),
-        clase: ClaseConocida::InferidaSeguridadFuncional,
+        clase: ClaseConocida::AmbiguaInferenciaSugiereCriticidad,
         declaracion_segmento: DeclaracionSegmento::NoDeclarado,
         visto_en_segmento_critico: true,
         protocolos_observados: vec!["modbus".to_owned()],

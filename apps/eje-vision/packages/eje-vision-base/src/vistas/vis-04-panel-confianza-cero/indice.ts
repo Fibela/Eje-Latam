@@ -61,24 +61,34 @@ export function alertasObligatorias(
 /**
  * Recuento del inventario por **calidad del respaldo**, para la cabecera.
  *
- * RPT-088, PA-139. Sustituye a `ResumenPostura`, que contaba por un campo que el
+ * RPT-089, PA-139. Sustituye a `ResumenPostura`, que contaba por un campo que el
  * agente nunca produjo.
  *
- * Lo que el operador necesita saber de un vistazo no es cuántos nodos «están
+ * Lo que el operador necesita de un vistazo no es cuántos nodos «están
  * conformes» —el agente no juzga eso—, sino **cuánto del inventario está
- * respaldado por una firma y cuánto es suposición**. Las cinco cifras suman
- * siempre el total: ninguna categoría absorbe a otra.
+ * respaldado por una firma y cuánto no se sabe**. Las cuatro cifras suman
+ * siempre el total.
+ *
+ * # Las cuatro ambigüedades se agregan aquí, y sólo aquí
+ *
+ * El cable las lleva separadas —marcado caducado, fuentes que se contradicen,
+ * huella sin respaldo, segmento sin declarar— porque mandan a mirar sitios
+ * distintos. Esta función las junta **para una cabecera**, que es un recuento y
+ * no un diagnóstico.
+ *
+ * Que la agregación viva aquí y no en el agente es el punto entero de RPT-088:
+ * si mañana la cabecera tiene que separarlas, se cambia esta capa y no hay que
+ * recompilar el sensor ni volver a desplegar en planta. Cada nodo conserva su
+ * motivo.
  */
 export interface ResumenRespaldo {
-  /** Clase declarada por marcado firmado y vigente. */
+  /** Marcado firmado y vigente por dispositivo, sea o no crítico. */
   readonly declarados: number;
-  /** Sin marcado; la huella observada sugiere una clase. Es suposición. */
-  readonly inferidos: number;
-  /** El marcado dice una cosa y la huella otra. Exige mirar. */
-  readonly enConflicto: number;
-  /** Nada apunta a nada. **No** significa que no sean críticos. */
-  readonly sinIndicio: number;
-  /** La fuente no se pudo consultar. Distinto de que no aporte. */
+  /** Sin marcado propio, pero en un segmento declarado libre de críticos. */
+  readonly porSegmento: number;
+  /** La evidencia falta o se contradice. Cada nodo dice cuál de los cuatro. */
+  readonly ambiguos: number;
+  /** Una fuente declarativa no se pudo consultar. Distinto de que no aporte. */
   readonly indeterminados: number;
 }
 
@@ -86,15 +96,14 @@ export interface ResumenRespaldo {
  * Agrega el inventario por calidad del respaldo.
  *
  * @param inventario Nodos observados.
- * @returns Recuento por respaldo. Las cinco cifras suman `inventario.length`.
+ * @returns Recuento. Las cuatro cifras suman `inventario.length`.
  */
 export function resumirRespaldo(
   inventario: readonly NodoInventario[],
 ): ResumenRespaldo {
   let declarados = 0;
-  let inferidos = 0;
-  let enConflicto = 0;
-  let sinIndicio = 0;
+  let porSegmento = 0;
+  let ambiguos = 0;
   let indeterminados = 0;
 
   for (const nodo of inventario) {
@@ -102,17 +111,17 @@ export function resumirRespaldo(
       case "declaradaSoporteVital":
       case "declaradaSeguridadFuncional":
       case "declaradaCaminoDeGestion":
+      case "declaradaNoCritica":
         declarados += 1;
         break;
-      case "inferidaSoporteVital":
-      case "inferidaSeguridadFuncional":
-        inferidos += 1;
+      case "segmentoDeclaradoSinCriticos":
+        porSegmento += 1;
         break;
-      case "enConflicto":
-        enConflicto += 1;
-        break;
-      case "sinIndicio":
-        sinIndicio += 1;
+      case "ambiguaMarcadoCaducado":
+      case "ambiguaConflictoEntreFuentes":
+      case "ambiguaInferenciaSugiereCriticidad":
+      case "ambiguaSegmentoPuedeAlojarCriticos":
+        ambiguos += 1;
         break;
       case "indeterminada":
         indeterminados += 1;
@@ -120,5 +129,5 @@ export function resumirRespaldo(
     }
   }
 
-  return { declarados, inferidos, enConflicto, sinIndicio, indeterminados };
+  return { declarados, porSegmento, ambiguos, indeterminados };
 }
