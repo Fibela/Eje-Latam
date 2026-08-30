@@ -659,9 +659,7 @@ fn ejecutar_conformidad() -> ExitCode {
             Err(error) => {
                 println!("{ROJO}NO SE PUDO EJECUTAR{FIN}");
                 eprintln!("  {error}");
-                eprintln!(
-                    "  No se emite nada: «no se pudo comprobar» no es «pasa»."
-                );
+                eprintln!("  No se emite nada: «no se pudo comprobar» no es «pasa».");
                 return ExitCode::FAILURE;
             }
         }
@@ -678,7 +676,10 @@ fn ejecutar_conformidad() -> ExitCode {
     let destino = raiz.join(conformidad::FICHERO);
 
     if let Err(error) = std::fs::write(&destino, conformidad::rendir(&atestado)) {
-        eprintln!("{ROJO}no se pudo escribir {}: {error}{FIN}", destino.display());
+        eprintln!(
+            "{ROJO}no se pudo escribir {}: {error}{FIN}",
+            destino.display()
+        );
         return ExitCode::FAILURE;
     }
 

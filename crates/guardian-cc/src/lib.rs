@@ -1836,6 +1836,159 @@ mod pruebas {
         [0x02, 0x00, bytes[0], bytes[1], bytes[2], bytes[3]]
     }
 
+    // -----------------------------------------------------------------------
+    // Enumeracion del inventario — RPT-087, PA-138a
+    // -----------------------------------------------------------------------
+
+    /// El almacen sabia contar y no sabia enumerar.
+    ///
+    /// Ese era el bloqueo entero de PA-138: `volatiles()` y `pegajosos()`
+    /// devuelven `usize`, y un canal que promete una lista de dispositivos no se
+    /// puede escribir contra un almacen que solo dice cuantos hay.
+    #[test]
+    fn el_inventario_enumera_lo_observado_y_no_solo_lo_cuenta() {
+        let mut almacen = AlmacenObservacion::nuevo();
+
+        almacen.observar(
+            MAC,
+            Some(Protocolo::Hl7),
+            DeclaracionSegmento::PuedeAlojarCriticos,
+        );
+        almacen.observar(
+            mac_numero(7),
+            Some(Protocolo::Modbus),
+            DeclaracionSegmento::SinDispositivosCriticos,
+        );
+
+        let inventario = almacen.inventario();
+
+        assert_eq!(inventario.len(), almacen.volatiles());
+
+        let clinico = inventario
+            .iter()
+            .find(|nodo| nodo.direccion == MAC)
+            .expect("el equipo clinico esta en la lista");
+
+        assert_eq!(clinico.protocolos, vec![Protocolo::Hl7]);
+        assert_eq!(clinico.segmento, DeclaracionSegmento::PuedeAlojarCriticos);
+        assert!(
+            clinico.pegajoso,
+            "se le vio en un segmento que admite criticos"
+        );
+        assert!(clinico.visto_en > 0, "el reloj de la observacion viaja");
+    }
+
+    /// Dos consultas seguidas devuelven el mismo orden.
+    ///
+    /// `HashMap` no promete ninguno. Un inventario que se reordena solo hace
+    /// parpadear la pantalla del operador y arruina comparar una vuelta con la
+    /// siguiente.
+    #[test]
+    fn el_orden_del_inventario_es_estable_entre_consultas() {
+        let mut almacen = AlmacenObservacion::nuevo();
+
+        for numero in 0..32 {
+            almacen.observar(
+                mac_numero(numero),
+                None,
+                DeclaracionSegmento::SinDispositivosCriticos,
+            );
+        }
+
+        let primera = almacen.inventario();
+        let segunda = almacen.inventario();
+
+        assert_eq!(primera, segunda);
+
+        let mut ordenadas: Vec<DireccionEnlace> =
+            primera.iter().map(|nodo| nodo.direccion).collect();
+        ordenadas.sort_unstable();
+
+        assert_eq!(
+            primera
+                .iter()
+                .map(|nodo| nodo.direccion)
+                .collect::<Vec<_>>(),
+            ordenadas,
+            "el orden sale de la clave, que es lo unico estable"
+        );
+    }
+
+    /// El tercer estado del inventario, y el que costo abrir el punto.
+    ///
+    /// Un pegajoso expulsado del volatil **no** se afirma presente: de el se sabe
+    /// que estuvo en segmento critico y no se sabe si sigue. Ni se cuela en la
+    /// lista ni desaparece sin dejar rastro.
+    #[test]
+    fn un_pegajoso_expulsado_no_se_declara_presente_ni_se_pierde() {
+        let mut almacen = AlmacenObservacion::nuevo();
+
+        almacen.observar(
+            MAC,
+            Some(Protocolo::Hl7),
+            DeclaracionSegmento::PuedeAlojarCriticos,
+        );
+
+        for numero in 0..(CAPACIDAD_VOLATIL as u32 * 2) {
+            almacen.observar(
+                mac_numero(numero),
+                None,
+                DeclaracionSegmento::SinDispositivosCriticos,
+            );
+        }
+
+        assert!(
+            !almacen
+                .inventario()
+                .iter()
+                .any(|nodo| nodo.direccion == MAC),
+            "expulsado del volatil, no se puede afirmar que siga en la red"
+        );
+
+        assert!(
+            almacen.pegajosos_no_observados().contains(&MAC),
+            "pero tampoco desaparece: se sabe que estuvo en segmento critico"
+        );
+    }
+
+    /// `pegajoso` no significa «contenido», y esta prueba existe para que nadie
+    /// lo lea asi dentro de un ano.
+    ///
+    /// El agente no contiene nada (RPT-020). La marca es resistencia a la
+    /// expulsion, y derivar contencion de ella seria inventar dato justo en el
+    /// campo que PA-138 se abrio para proteger.
+    #[test]
+    fn la_marca_pegajosa_sale_del_segmento_y_no_de_ninguna_contencion() {
+        let mut almacen = AlmacenObservacion::nuevo();
+
+        almacen.observar(MAC, None, DeclaracionSegmento::PuedeAlojarCriticos);
+        almacen.observar(
+            mac_numero(1),
+            None,
+            DeclaracionSegmento::SinDispositivosCriticos,
+        );
+        almacen.observar(mac_numero(2), None, DeclaracionSegmento::NoDeclarado);
+
+        let pegajosos: Vec<DireccionEnlace> = almacen
+            .inventario()
+            .iter()
+            .filter(|nodo| nodo.pegajoso)
+            .map(|nodo| nodo.direccion)
+            .collect();
+
+        // `NoDeclarado` se trata como `PuedeAlojarCriticos`, asi que son dos.
+        assert_eq!(pegajosos, vec![MAC, mac_numero(2)]);
+    }
+
+    /// Un almacen vacio es una lista vacia, no un fallo.
+    #[test]
+    fn un_almacen_sin_observar_nada_enumera_cero_y_no_se_queja() {
+        let almacen = AlmacenObservacion::nuevo();
+
+        assert!(almacen.inventario().is_empty());
+        assert!(almacen.pegajosos_no_observados().is_empty());
+    }
+
     #[test]
     fn la_expulsion_volatil_no_borra_la_marca_pegajosa() {
         // El hallazgo de RPT-018 §6. Sin la particion, llenar la tabla con

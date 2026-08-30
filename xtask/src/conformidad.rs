@@ -137,7 +137,9 @@ pub enum ErrorConformidad {
 impl std::fmt::Display for ErrorConformidad {
     fn fmt(&self, formateador: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Lectura { ruta, detalle } => write!(formateador, "no se pudo leer {ruta}: {detalle}"),
+            Self::Lectura { ruta, detalle } => {
+                write!(formateador, "no se pudo leer {ruta}: {detalle}")
+            }
 
             Self::SinVersion(nombre) => write!(
                 formateador,
@@ -238,7 +240,10 @@ fn version_del_bloque(bloque: &str) -> Option<String> {
 /// # Errores
 ///
 /// [`ErrorConformidad::SinPaquete`] si el paquete no esta en el bloqueo.
-pub fn dependencias_resueltas(bloqueo: &str, paquete: &str) -> Result<Vec<String>, ErrorConformidad> {
+pub fn dependencias_resueltas(
+    bloqueo: &str,
+    paquete: &str,
+) -> Result<Vec<String>, ErrorConformidad> {
     let bloque = bloques(bloqueo)
         .find(|bloque| nombre_del_bloque(bloque).as_deref() == Some(paquete))
         .ok_or_else(|| ErrorConformidad::SinPaquete(paquete.to_owned()))?;
@@ -489,7 +494,10 @@ fn diferencias(contenido: &str, ahora: &Atestado) -> String {
             continue;
         }
 
-        match antes.iter().find(|cada| cada.starts_with(&format!("{nombre}  "))) {
+        match antes
+            .iter()
+            .find(|cada| cada.starts_with(&format!("{nombre}  ")))
+        {
             Some(vieja) => {
                 let _ = writeln!(texto, "  cambio   : {vieja}  ->  {version}");
             }
@@ -508,11 +516,18 @@ fn diferencias(contenido: &str, ahora: &Atestado) -> String {
     }
 
     if !contenido.contains(&format!("fuentes  {}", ahora.resumen_fuentes)) {
-        let _ = writeln!(texto, "  cambio   : FUENTES.lock (los vectores no son los mismos)");
+        let _ = writeln!(
+            texto,
+            "  cambio   : FUENTES.lock (los vectores no son los mismos)"
+        );
     }
 
     if !contenido.contains(&format!("canal  {}", ahora.canal)) {
-        let _ = writeln!(texto, "  cambio   : canal del toolchain  ->  {}", ahora.canal);
+        let _ = writeln!(
+            texto,
+            "  cambio   : canal del toolchain  ->  {}",
+            ahora.canal
+        );
     }
 
     if texto.is_empty() {
@@ -580,7 +595,10 @@ version = \"0.0.10\"
     fn una_version_desambiguada_no_arrastra_a_sus_hermanas() {
         let resueltas = versiones_de(BLOQUEO, &entradas(&["rand_core 0.10.1"])).expect("resuelve");
 
-        assert_eq!(resueltas, vec![("rand_core".to_owned(), "0.10.1".to_owned())]);
+        assert_eq!(
+            resueltas,
+            vec![("rand_core".to_owned(), "0.10.1".to_owned())]
+        );
         assert!(
             !resueltas.iter().any(|(_, version)| version == "0.6.4"),
             "0.6.4 no es de motor-pqc y no puede entrar en su atestado"
@@ -638,7 +656,8 @@ version = \"0.0.10\"
         let referencia = resumir(&base);
 
         let version = mensaje_canonico(&[("ml-dsa".to_owned(), "0.1.2".to_owned())], "res", "1.85");
-        let fuentes = mensaje_canonico(&[("ml-dsa".to_owned(), "0.1.0".to_owned())], "OTRO", "1.85");
+        let fuentes =
+            mensaje_canonico(&[("ml-dsa".to_owned(), "0.1.0".to_owned())], "OTRO", "1.85");
         let canal = mensaje_canonico(&[("ml-dsa".to_owned(), "0.1.0".to_owned())], "res", "1.90");
 
         for (que, movido) in [("version", version), ("fuentes", fuentes), ("canal", canal)] {
@@ -692,17 +711,25 @@ version = \"0.0.10\"
 
         for exigida in ["ml-kem", "ml-dsa", "libcrux-ml-kem", "libcrux-ml-dsa"] {
             assert!(
-                atestado.paquetes.iter().any(|(nombre, _)| nombre == exigida),
+                atestado
+                    .paquetes
+                    .iter()
+                    .any(|(nombre, _)| nombre == exigida),
                 "'{exigida}' tiene que estar en el atestado: es una de las dos \
                  implementaciones que la suite diferencial compara"
             );
         }
 
-        assert_eq!(atestado.huella.len(), 64, "la huella es un SHA-256 en hexadecimal");
+        assert_eq!(
+            atestado.huella.len(),
+            64,
+            "la huella es un SHA-256 en hexadecimal"
+        );
 
         // Cada nombre una sola vez. Es la prueba de regresion del defecto: si
         // vuelven a colarse las hermanas de `rand_core`, aqui se ve.
-        let mut nombres: Vec<&String> = atestado.paquetes.iter().map(|(nombre, _)| nombre).collect();
+        let mut nombres: Vec<&String> =
+            atestado.paquetes.iter().map(|(nombre, _)| nombre).collect();
         let antes = nombres.len();
         nombres.sort();
         nombres.dedup();

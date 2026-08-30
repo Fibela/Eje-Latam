@@ -160,7 +160,7 @@ vista = "VIS-04"
 direccion = "consulta"
 descripcion = "Inventario vivo de dispositivos IoT/OT descubiertos y su postura."
 servido = false
-motivo_no_servido = "Sin productor posible todavia (PA-138). De los cuatro campos de NodoInventario, el agente tiene fuente honesta para UNO: direccionEnlace. Y ni siquiera puede listarlos: AlmacenObservacion no expone sus dispositivos, solo cuenta cuantos hay."
+motivo_no_servido = "Sin productor todavia (PA-138b). Enumerar ya se puede desde RPT-087: AlmacenObservacion::inventario() lista el volatil ordenado. Lo que falta es que exista que decir: de los cuatro campos de NodoInventario, clase cruza dos taxonomias distintas y postura no tiene valor para no-se-sabe. Los decide PA-139; rellenarlos antes seria inventar dato."
 
 [[canal]]
 nombre = "obtener-estado-boveda"

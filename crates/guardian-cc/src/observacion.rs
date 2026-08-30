@@ -108,6 +108,104 @@ struct EntradaVolatil {
     visto_en: u64,
 }
 
+/// Lo que el almacen sabe de un dispositivo, para quien tenga que enumerarlos.
+///
+/// RPT-087, PA-138a.
+///
+/// # Que NO lleva, que es la mitad del diseno
+///
+/// No lleva `clase` ni `postura`, los dos campos que `NodoInventario` pide en el
+/// contrato. No es un olvido:
+///
+/// - **La clase puede venir de dos sitios que no valen lo mismo.** Del marcado
+///   firmado, o de [`Protocolo::clase_sugerida`], que es una *inferencia* —tanto
+///   que existe `un_marcado_no_critico_contradicho_por_la_huella_es_ambiguo`—.
+///   Aqui se entregan los protocolos observados en crudo y **quien componga la
+///   respuesta decide**, con el marcado delante. Colapsar las dos procedencias
+///   en un enumerado plano seria presentar una sospecha como una declaracion.
+/// - **La postura no tiene hoy valor para «no se sabe»** (PA-139). Un equipo
+///   visto en el cable sin marcado firmado no es conforme, ni anomalo, ni
+///   contenido. Inventar uno de los tres es exactamente lo que este punto se
+///   abrio para evitar.
+///
+/// # Y `pegajoso` no significa «contenido»
+///
+/// Significa que se vio en un segmento que admite criticos y que su marca no se
+/// pierde por presion de tabla. **El agente no contiene nada** (RPT-020), asi que
+/// leer contencion de aqui seria inventar dato en el punto exacto que PA-138 se
+/// abrio para proteger.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VistaNodo {
+    /// Direccion de capa de enlace. Es la clave del almacen.
+    pub direccion: DireccionEnlace,
+    /// Protocolos industriales observados, en el orden en que se anotaron.
+    pub protocolos: Vec<Protocolo>,
+    /// Lo que el administrador declaro del segmento donde se le vio.
+    pub segmento: DeclaracionSegmento,
+    /// Valor del reloj del almacen en la ultima observacion.
+    pub visto_en: u64,
+    /// Si su marca resiste la expulsion por presion de tabla.
+    pub pegajoso: bool,
+}
+
+impl AlmacenObservacion {
+    /// Enumera lo observado, en orden estable.
+    ///
+    /// # Por que el volatil y no el pegajoso
+    ///
+    /// El pegajoso solo guarda direcciones: de un equipo que solo estuviera ahi
+    /// no se podria decir ni que protocolos hablo ni en que segmento se le vio.
+    /// El volatil es la unica coleccion que guarda **que** se observo, asi que es
+    /// la unica que puede sostener un inventario sin rellenar huecos.
+    ///
+    /// Un pegajoso ya expulsado del volatil no aparece, y eso es correcto: su
+    /// marca sirve para no declararlo contenible a la ligera, no para afirmar que
+    /// sigue en la red. Afirmarlo seria inventar presencia.
+    ///
+    /// # Por que ordenado por direccion
+    ///
+    /// `HashMap` no promete orden, y un inventario que se reordena solo entre dos
+    /// consultas hace parpadear la pantalla del operador y arruina cualquier
+    /// comparacion entre vueltas. El orden sale de la clave, que es estable.
+    #[must_use]
+    pub fn inventario(&self) -> Vec<VistaNodo> {
+        let mut nodos: Vec<VistaNodo> = self
+            .volatil
+            .iter()
+            .map(|(direccion, entrada)| VistaNodo {
+                direccion: *direccion,
+                protocolos: entrada.protocolos.clone(),
+                segmento: entrada.segmento,
+                visto_en: entrada.visto_en,
+                pegajoso: self.pegajoso.contains(direccion),
+            })
+            .collect();
+
+        nodos.sort_by_key(|nodo| nodo.direccion);
+        nodos
+    }
+
+    /// Direcciones con marca pegajosa que **ya no estan** en el volatil.
+    ///
+    /// Es el tercer estado del inventario, y no cabe en [`Self::inventario`]: de
+    /// estas se sabe que estuvieron en un segmento critico y **no** se sabe si
+    /// siguen. Meterlas en la lista las afirmaria presentes; omitirlas del todo
+    /// las daria por inexistentes. Se devuelven aparte para que quien componga la
+    /// respuesta pueda decir las dos cosas por separado.
+    #[must_use]
+    pub fn pegajosos_no_observados(&self) -> Vec<DireccionEnlace> {
+        let mut sueltos: Vec<DireccionEnlace> = self
+            .pegajoso
+            .iter()
+            .filter(|direccion| !self.volatil.contains_key(*direccion))
+            .copied()
+            .collect();
+
+        sueltos.sort_unstable();
+        sueltos
+    }
+}
+
 /// Almacen de observacion.
 ///
 /// Alimenta a la vez a [`ProveedorHuella`] y a [`ProveedorSegmento`]. RPT-018
