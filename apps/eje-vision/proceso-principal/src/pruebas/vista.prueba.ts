@@ -134,3 +134,56 @@ describe("PA-102 / PA-106 — la vista nombra las condiciones del contrato", () 
     assert.match(html, /id="sello"[^>]*>\s*EL MÓDULO DE LA VISTA NO ARRANCÓ/);
   });
 });
+
+/**
+ * PA-97 — el sondeo de alertas consume lo que el agente le contesta.
+ *
+ * # Por que este bloque existe, que es lo interesante
+ *
+ * PA-97 decia «`componerSucesos` no lee `hayMas` todavia» y llevaba semanas
+ * siendo falso: RPT-050 cableo el bucle y la fila del tablero no se actualizo.
+ * Un punto abierto que ya esta hecho no es inofensivo — dirige el trabajo hacia
+ * donde no hace falta, y este bloque nace de haber estado a punto de reescribir
+ * algo que funcionaba.
+ *
+ * La causa de que se quedara caduco es la de siempre: **nada lo comprobaba**.
+ * `vis04.js` no lo compila `tsc` ni lo cruza `dependency-cruiser`, asi que el
+ * bucle podia desaparecer sin que ninguna suite se enterase.
+ *
+ * # Lo que se sujeta
+ *
+ * No que las funciones existan —eso ya lo prueban `bitacora.prueba.ts` y
+ * `sucesos.prueba.ts`— sino que la vista **las llame y en el orden correcto**.
+ * Es la clase de defecto dominante del proyecto: piezas correctas que nadie
+ * invoca.
+ */
+describe("PA-97 — la vista pagina de verdad", () => {
+  const FUENTE = fuenteDeVista("vis04.js");
+
+  it("pide desde la marca de la bitacora y no desde el principio", () => {
+    assert.match(
+      FUENTE,
+      /consultarAlertas\(\s*bitacora\.desdeAsiento\s*\)/,
+      "vis04.js tiene que pedir desde donde se quedo; con un literal volveria a " +
+        "traer la primera pagina en cada vuelta y no avanzaria nunca",
+    );
+  });
+
+  it("actualiza la bitacora ANTES de decidir cuando volver a preguntar", () => {
+    const incorpora = FUENTE.indexOf("bitacora = incorporar(");
+    const espera = FUENTE.indexOf("esperaSugerida(bitacora)");
+
+    assert.notEqual(incorpora, -1, "no se encontro la reasignacion de la bitacora");
+    assert.notEqual(espera, -1, "la cadencia ya no sale de 'esperaSugerida'");
+
+    // El orden es el mecanismo entero. Al reves, 'esperaSugerida' leeria el
+    // 'hayMas' de la vuelta ANTERIOR: con cola pendiente esperaria 2 s en lugar
+    // de volver a preguntar, y la cola se vaciaria a un asiento cada dos
+    // segundos. No falla ruidosamente: solo va lento, que es peor.
+    assert.ok(
+      incorpora < espera,
+      "la bitacora se actualiza despues de programar el refresco: la cadencia " +
+        "se decidiria con el 'hayMas' de la vuelta anterior",
+    );
+  });
+});
