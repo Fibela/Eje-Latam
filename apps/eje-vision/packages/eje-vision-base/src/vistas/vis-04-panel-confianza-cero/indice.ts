@@ -69,11 +69,11 @@ export function alertasObligatorias(
  * respaldado por una firma y cuánto no se sabe**. Las cuatro cifras suman
  * siempre el total.
  *
- * # Las cuatro ambigüedades se agregan aquí, y sólo aquí
+ * # Las cinco ambigüedades se agregan aquí, y sólo aquí
  *
- * El cable las lleva separadas —marcado caducado, fuentes que se contradicen,
- * huella sin respaldo, segmento sin declarar— porque mandan a mirar sitios
- * distintos. Esta función las junta **para una cabecera**, que es un recuento y
+ * El cable lleva las cinco separadas —marcado caducado, fuentes que se
+ * contradicen, huella sin respaldo, segmento sin declarar, y evidencia que no
+ * verifica— porque mandan a mirar sitios distintos. Esta función las junta **para una cabecera**, que es un recuento y
  * no un diagnóstico.
  *
  * Que la agregación viva aquí y no en el agente es el punto entero de RPT-088:
@@ -86,7 +86,7 @@ export interface ResumenRespaldo {
   readonly declarados: number;
   /** Sin marcado propio, pero en un segmento declarado libre de críticos. */
   readonly porSegmento: number;
-  /** La evidencia falta o se contradice. Cada nodo dice cuál de los cuatro. */
+  /** La evidencia falta, se contradice o no verifica. Cada nodo dice cuál. */
   readonly ambiguos: number;
   /** Una fuente declarativa no se pudo consultar. Distinto de que no aporte. */
   readonly indeterminados: number;
@@ -121,6 +121,7 @@ export function resumirRespaldo(
       case "ambiguaConflictoEntreFuentes":
       case "ambiguaInferenciaSugiereCriticidad":
       case "ambiguaSegmentoPuedeAlojarCriticos":
+      case "ambiguaEvidenciaNoVerificable":
         ambiguos += 1;
         break;
       case "indeterminada":

@@ -83,6 +83,13 @@ pub struct Resultado {
     /// Distinto de `fallo_persistencia`: ahi la alerta existe y no llego al
     /// disco; aqui no llego a existir. Ver PA-72.
     pub perdidas: u64,
+    /// Inventario de lo observado, ya en la forma que viaja. RPT-090, PA-138b.
+    ///
+    /// Se compone **aqui y no en el manejador** por el mismo motivo que las
+    /// condiciones: el manejador toma referencias compartidas y no puede pedirle
+    /// al ciclo que clasifique mientras el ciclo se esta ejecutando. Se calcula
+    /// una vez por vuelta y se sirve tal cual hasta la siguiente.
+    pub inventario: Vec<eje_ipc::mensajes::NodoInventario>,
     /// Segmento archivado en esta vuelta, si se alcanzo el umbral.
     ///
     /// Ver PA-59. Que sea `None` es lo normal: se rota una vez cada
@@ -347,6 +354,44 @@ impl<D: Despacho> Ciclo<D> {
         }
     }
 
+    /// Clasifica un nodo del inventario con las mismas tres fuentes del ciclo.
+    ///
+    /// RPT-090, PA-138b.
+    ///
+    /// # El fallo de una fuente declarativa NO es ausencia de marcado
+    ///
+    /// Si `marcado` devuelve error —inventario que no verifica, firma invalida—
+    /// se declara `EvidenciaNoVerificable` y **no** se sigue como si el equipo
+    /// no tuviera marcado. RPT-010: una firma invalida indica manipulacion del
+    /// inventario, y leerla como ausencia borraria la acusacion.
+    fn clasificar_nodo(
+        &self,
+        vista: &guardian_cc::observacion::VistaNodo,
+        estado: &EstadoArranque,
+        ahora_s: u64,
+    ) -> guardian_cc::clasificacion::Clasificacion {
+        use guardian_cc::clasificacion::{Clasificacion, MotivoAmbiguedad};
+
+        let Ok(marcado) = estado.marcado(&vista.direccion) else {
+            return Clasificacion::Ambiguo {
+                motivo: MotivoAmbiguedad::EvidenciaNoVerificable,
+            };
+        };
+
+        guardian_cc::clasificacion::clasificar(&Evidencia {
+            marcado: marcado.map(|marcado| MarcadoDispositivo {
+                clase: marcado.clase(),
+                vigente: marcado.vigente_en(ahora_s),
+            }),
+            segmento: vista.segmento,
+            inferencia: self
+                .almacen
+                .indicio(&vista.direccion)
+                .unwrap_or(Indicio::Indeterminado)
+                .clase(),
+        })
+    }
+
     /// Ejecuta una vuelta completa.
     ///
     /// # El orden es el de RPT-034 §4 y no es negociable
@@ -580,11 +625,27 @@ impl<D: Despacho> Ciclo<D> {
             salida_bien = false;
         }
 
+        // RPT-090, PA-138b. Sobre el volatil entero y no sobre lo visto en esta
+        // vuelta: el inventario es lo que hay en la red, no lo que hablo en los
+        // ultimos quinientos milisegundos.
+        let inventario = self
+            .almacen
+            .inventario()
+            .iter()
+            .map(|vista| {
+                crate::inventario::nodo_en_el_cable(
+                    vista,
+                    self.clasificar_nodo(vista, estado, ahora_s),
+                )
+            })
+            .collect();
+
         Resultado {
             condiciones: Condiciones {
                 salida_no_disponible: !salida_bien,
                 ..vigentes
             },
+            inventario,
             con_marcado,
             contenibles,
             escalados,

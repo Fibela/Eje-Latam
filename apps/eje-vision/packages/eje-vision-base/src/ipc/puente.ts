@@ -32,10 +32,13 @@ export interface EstadoAgente {
  * único estado que permite acción automática. No confundir con las ambiguas,
  * que significan lo contrario: que no se sabe.
  *
- * Las cuatro ambigüedades mandan a mirar sitios distintos —marcado caducado,
- * fuentes que se contradicen, huella sin respaldo, segmento sin declarar—, así
- * que no se colapsan en una: es lo único que le dice al operador por dónde
- * empezar.
+ * Las cinco ambigüedades mandan a mirar sitios distintos —marcado caducado,
+ * fuentes que se contradicen, huella sin respaldo, segmento sin declarar, y
+ * evidencia que **no verifica**—, así que no se colapsan en una: es lo único
+ * que le dice al operador por dónde empezar. La última es la más grave: una
+ * firma inválida indica manipulación del inventario, no ausencia de marcado.
+ *
+ * `indeterminada` no es una sexta ambigüedad: es la **ausencia de veredicto**.
  */
 export type ClaseConocida =
   | "declaradaSoporteVital"
@@ -47,6 +50,7 @@ export type ClaseConocida =
   | "ambiguaConflictoEntreFuentes"
   | "ambiguaInferenciaSugiereCriticidad"
   | "ambiguaSegmentoPuedeAlojarCriticos"
+  | "ambiguaEvidenciaNoVerificable"
   | "indeterminada";
 
 /** Lo que el administrador declaró del segmento donde se vio al equipo. */

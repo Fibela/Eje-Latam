@@ -173,6 +173,12 @@ pub struct Manejadores<'a> {
     /// RPT-006 §4 prohibe. Se rechaza con motivo, y **solo el canal que las
     /// necesita**: las alertas ya persistidas se sirven igual.
     pub condiciones: Option<&'a eje_ipc::mensajes::Condiciones>,
+    /// Inventario de lo observado, ya en la forma que viaja. RPT-090, PA-138b.
+    ///
+    /// `None` en la primera vuelta, por el mismo motivo que las condiciones: aun
+    /// no se ha observado nada y una lista vacia diria «no hay dispositivos en
+    /// esta red», que no es lo mismo que «todavia no he mirado».
+    pub inventario: Option<&'a [eje_ipc::mensajes::NodoInventario]>,
     /// Ruta del segmento activo, para saber que hay archivado junto a el.
     ///
     /// PA-74. Sin esto la respuesta no puede decir donde empieza lo que entrega.
@@ -212,6 +218,17 @@ impl Atiende for Manejadores<'_> {
                 serde_json::to_vec(&respuesta)
                     .map_err(|error| format!("no se pudo serializar la respuesta: {error}"))
             }
+
+            // RPT-090, PA-138b. Tercer canal cableado de los seis.
+            Canal::ObtenerInventario => match self.inventario {
+                Some(nodos) => serde_json::to_vec(nodos)
+                    .map_err(|error| format!("no se pudo componer el inventario: {error}")),
+
+                // Una lista vacia aqui afirmaria que la red esta desierta.
+                None => Err("el sensor aun no ha completado su primera vuelta: no ha \
+                             observado ningun dispositivo todavia"
+                    .to_owned()),
+            },
 
             Canal::ObtenerCondiciones => match self.condiciones {
                 Some(vigentes) => serde_json::to_vec(vigentes)

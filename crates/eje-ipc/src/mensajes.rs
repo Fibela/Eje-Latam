@@ -89,10 +89,23 @@ pub enum ClaseConocida {
     AmbiguaInferenciaSugiereCriticidad,
     /// Sin marcado, en un segmento que admite criticos o sin declarar.
     AmbiguaSegmentoPuedeAlojarCriticos,
-    /// Una fuente declarativa no pudo consultarse.
+    /// Una fuente **declarativa** no respondio, o el inventario no verifica.
     ///
-    /// **No** es «no aporta»: es que no se sabe. RPT-006 §4. En el ciclo es el
-    /// caso que hoy se cuenta como `escalados`.
+    /// # No es «no se pudo consultar»
+    ///
+    /// Una firma invalida o una inclusion no probada indican **manipulacion del
+    /// inventario**, no que el dispositivo carezca de marcado (RPT-010). Se
+    /// separo de las demas porque acusar de manipulacion o no acusar no es un
+    /// matiz de presentacion.
+    AmbiguaEvidenciaNoVerificable,
+    /// El agente **no formo veredicto**.
+    ///
+    /// No es ninguna de las cinco ambiguedades: aquellas son juicios sobre la
+    /// evidencia, y esto es la ausencia de juicio. Corresponde a
+    /// `Clasificacion::NoClasificado`, que `guardian-cc` mantiene deliberadamente
+    /// inalcanzable para que nadie asuma que la evidencia siempre llega.
+    ///
+    /// No acusa a nadie ni absuelve a nadie.
     Indeterminada,
 }
 
@@ -157,6 +170,11 @@ pub struct NodoInventario {
     pub visto_en_segmento_critico: bool,
     /// Protocolos industriales observados, en el orden en que se anotaron.
     pub protocolos_observados: Vec<String>,
+    //
+    // NO lleva el reloj interno del almacen (`VistaNodo::visto_en`). Es un
+    // contador de vueltas, no una marca de tiempo: en pantalla se leeria como
+    // una fecha y no lo es. Que no pueda colarse lo sujeta `CAMPOS_*`, atado a
+    // este struct por desestructuracion exhaustiva.
 }
 
 /// Ocupación de la Bóveda Aislada. Respuesta de `obtener-estado-boveda`.

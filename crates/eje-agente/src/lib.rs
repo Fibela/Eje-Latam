@@ -13,6 +13,7 @@
 
 pub mod alertas;
 pub mod ciclo;
+pub mod inventario;
 pub mod salida;
 pub mod servicio;
 
@@ -1175,6 +1176,7 @@ mod pruebas {
         let mut manejadores = Manejadores {
             registro: &registro,
             condiciones: Some(&vigentes),
+            inventario: Some(inventario_de_prueba()),
             evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
             estado_agente: &estado_agente_de_prueba(),
         };
@@ -1197,22 +1199,48 @@ mod pruebas {
     fn un_canal_sin_manejador_se_rechaza_con_motivo_y_no_con_lista_vacia() {
         // «No hay nada» y «esto todavia no lo sirve nadie» no son lo mismo. Una
         // lista vacia haria creer a VIS-04 que el inventario esta vacio.
+        //
+        // El canal sale del contrato y NO esta escrito aqui. Lo estuvo:
+        // nombraba `obtener-inventario`, y el dia que se cableo (RPT-090) esta
+        // prueba se puso roja afirmando algo falso. Derivarlo del manifiesto la
+        // hace seguir al mundo en lugar de quedarse anclada a el.
         use crate::servicio::Manejadores;
+
+        let contenido = manifiesto_ipc();
+        let (_, no_servidos) = canales_por_servicio(&contenido);
+
+        // El dia que los seis se sirvan, esta prueba se retira a proposito y no
+        // se queda pasando en vacio.
+        assert!(
+            !no_servidos.is_empty(),
+            "ya no queda ningun canal sin servir: retira esta prueba en lugar de \
+             dejarla comprobando nada"
+        );
 
         let registro = registro_con(1);
         let vigentes = normales();
-        let mut manejadores = Manejadores {
-            registro: &registro,
-            condiciones: Some(&vigentes),
-            evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
-            estado_agente: &estado_agente_de_prueba(),
-        };
 
-        let peticion = componer_peticion(Canal::ObtenerInventario, b"").expect("permitido");
-        let cuerpo = respuesta_de(&mut manejadores, &peticion);
+        for nombre in &no_servidos {
+            let canal = Canal::desde_identificador(nombre)
+                .unwrap_or_else(|| panic!("'{nombre}' esta en el contrato y no en el enum"));
 
-        assert_eq!(cuerpo[0], CODIGO_RECHAZO);
-        assert!(String::from_utf8_lossy(&cuerpo[1..]).contains("manejador"));
+            let mut manejadores = Manejadores {
+                registro: &registro,
+                condiciones: Some(&vigentes),
+                inventario: Some(inventario_de_prueba()),
+                evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
+                estado_agente: &estado_agente_de_prueba(),
+            };
+
+            let peticion = componer_peticion(canal, carga_valida_de(nombre)).expect("permitido");
+            let cuerpo = respuesta_de(&mut manejadores, &peticion);
+
+            assert_eq!(cuerpo[0], CODIGO_RECHAZO, "{nombre}");
+            assert!(
+                String::from_utf8_lossy(&cuerpo[1..]).contains("manejador"),
+                "{nombre} tiene que decir POR QUE no responde"
+            );
+        }
     }
 
     #[test]
@@ -1224,6 +1252,7 @@ mod pruebas {
         let mut manejadores = Manejadores {
             registro: &registro,
             condiciones: Some(&vigentes),
+            inventario: Some(inventario_de_prueba()),
             evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
             estado_agente: &estado_agente_de_prueba(),
         };
@@ -1253,6 +1282,7 @@ mod pruebas {
         let mut manejadores = Manejadores {
             registro: &registro,
             condiciones: None,
+            inventario: None,
             evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
             estado_agente: &estado_agente_de_prueba(),
         };
@@ -1284,6 +1314,7 @@ mod pruebas {
         let mut manejadores = Manejadores {
             registro: &registro,
             condiciones: None,
+            inventario: None,
             evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
             estado_agente: &estado_agente_de_prueba(),
         };
@@ -1302,6 +1333,53 @@ mod pruebas {
                 "{canal:?} no depende de las condiciones y tiene que responder"
             );
         }
+    }
+
+    /// Un inventario minimo para las pruebas de los manejadores.
+    ///
+    /// Un solo nodo, con la clase mas cautelosa que el dominio produce: sin
+    /// marcado y en segmento que admite criticos.
+    fn inventario_de_prueba() -> &'static [eje_ipc::mensajes::NodoInventario] {
+        static UNO: std::sync::OnceLock<Vec<eje_ipc::mensajes::NodoInventario>> =
+            std::sync::OnceLock::new();
+
+        UNO.get_or_init(|| {
+            vec![eje_ipc::mensajes::NodoInventario {
+                direccion_enlace: "00:1b:21:00:00:01".to_owned(),
+                clase: eje_ipc::mensajes::ClaseConocida::AmbiguaSegmentoPuedeAlojarCriticos,
+                declaracion_segmento: eje_ipc::mensajes::DeclaracionSegmento::NoDeclarado,
+                visto_en_segmento_critico: true,
+                protocolos_observados: vec!["hl7".to_owned()],
+            }]
+        })
+    }
+
+    /// En la primera vuelta el inventario **se rechaza**, no sale vacio.
+    ///
+    /// RPT-090, PA-138b. Una lista vacia afirmaria que la red esta desierta, y
+    /// eso es distinto de no haber mirado todavia.
+    #[test]
+    fn en_la_primera_vuelta_el_inventario_se_rechaza_en_lugar_de_salir_vacio() {
+        use crate::servicio::Manejadores;
+        use eje_ipc::{CODIGO_RECHAZO, Canal, componer_peticion};
+
+        let registro = registro_con(2);
+        let mut manejadores = Manejadores {
+            registro: &registro,
+            condiciones: None,
+            inventario: None,
+            evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
+            estado_agente: &estado_agente_de_prueba(),
+        };
+
+        let peticion = componer_peticion(Canal::ObtenerInventario, b"").expect("permitido");
+        let cuerpo = respuesta_de(&mut manejadores, &peticion);
+
+        assert_eq!(cuerpo[0], CODIGO_RECHAZO);
+        assert!(
+            String::from_utf8_lossy(&cuerpo[1..]).contains("primera vuelta"),
+            "el rechazo tiene que decir por que"
+        );
     }
 
     /// Estado del agente para las pruebas de los manejadores.
@@ -1789,6 +1867,7 @@ mod pruebas {
             let mut manejadores = Manejadores {
                 registro: &registro,
                 condiciones: Some(&vigentes),
+                inventario: Some(inventario_de_prueba()),
                 evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
                 estado_agente: &estado_agente_de_prueba(),
             };
@@ -1873,6 +1952,7 @@ mod pruebas {
             let mut manejadores = Manejadores {
                 registro: &registro,
                 condiciones: Some(&vigentes),
+                inventario: Some(inventario_de_prueba()),
                 evidencia: std::path::Path::new("/datos/eje/evidencia.alm"),
                 estado_agente: &estado_agente_de_prueba(),
             };
@@ -1886,15 +1966,37 @@ mod pruebas {
 
             let valor: serde_json::Value =
                 serde_json::from_slice(&cuerpo[1..]).expect("la respuesta es JSON");
-            let objeto = valor.as_object().unwrap_or_else(|| {
+
+            // `lista<X>` responde un array de X, no un objeto. Se compara el
+            // primer elemento contra los campos de X. RPT-090, PA-138b: hasta
+            // hoy ningun canal servido devolvia una lista y esto asumia objeto.
+            let (registro_declarado, muestra) = match forma.strip_prefix("lista<") {
+                Some(resto) => {
+                    let interno = resto.trim_end_matches('>').to_owned();
+                    let elementos = valor.as_array().unwrap_or_else(|| {
+                        panic!("{canal:?} declara '{forma}' y no devolvio una lista")
+                    });
+
+                    // Sin al menos un elemento no se comprueba nada. El dato de
+                    // prueba trae uno justamente para eso.
+                    let primero = elementos.first().unwrap_or_else(|| {
+                        panic!("{canal:?} devolvio una lista vacia: no comprueba la forma")
+                    });
+
+                    (interno, primero.clone())
+                }
+                None => (forma.clone(), valor),
+            };
+
+            let objeto = muestra.as_object().unwrap_or_else(|| {
                 panic!("{canal:?} declara responder '{forma}' y devolvio algo que no es un objeto")
             });
 
             let mut entregadas: Vec<String> = objeto.keys().cloned().collect();
-            let mut declaradas = campos_de(&contenido, &forma);
+            let mut declaradas = campos_de(&contenido, &registro_declarado);
             assert!(
                 !declaradas.is_empty(),
-                "el registro '{forma}' no declara campos en el manifiesto"
+                "el registro '{registro_declarado}' no declara campos en el manifiesto"
             );
 
             // Se comparan como conjuntos: el ORDEN ya lo comprueba la paridad de

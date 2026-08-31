@@ -996,6 +996,11 @@ fn ejecutar() -> Result<(), ErrorAgente> {
     // Las condiciones de la vuelta anterior, para saber que cambio. No es una
     // lista aparte: se comparan con `enumerar()`, la misma fuente del contrato.
     let mut anteriores: Option<eje_ipc::mensajes::Condiciones> = None;
+
+    // RPT-090, PA-138b. Lo mismo que `anteriores` pero para el inventario: a
+    // mitad de vuelta se sirve el de la vuelta anterior, que es el ultimo
+    // completo. En la primera no hay, y entonces se rechaza con motivo.
+    let mut inventario_anterior: Option<Vec<eje_ipc::mensajes::NodoInventario>> = None;
     let mut ultimo_resumen: Option<i64> = None;
 
     println!();
@@ -1045,6 +1050,7 @@ fn ejecutar() -> Result<(), ErrorAgente> {
                     escucha.as_ref(),
                     &ciclo,
                     anteriores.as_ref(),
+                    inventario_anterior.as_deref(),
                     &estado_agente,
                 );
                 if atendidas > 0 && voz == Voz::Detallada {
@@ -1243,6 +1249,10 @@ fn ejecutar() -> Result<(), ErrorAgente> {
         tramos.presentar = marca.elapsed();
         anteriores = Some(resultado.condiciones);
 
+        // `inventario_anterior` se asigna DESPUES de atender: `Condiciones` es
+        // `Copy` y se puede mover aqui, pero el inventario es un `Vec` y moverlo
+        // antes dejaria sin nada que servir al final de esta misma vuelta.
+
         // Al final del ciclo, sobre lo ya persistido (RPT-034 §4). Una consulta
         // nunca responde con lo que aun vive solo en memoria.
         let marca = Instant::now();
@@ -1250,6 +1260,7 @@ fn ejecutar() -> Result<(), ErrorAgente> {
             escucha.as_ref(),
             &ciclo,
             Some(&resultado.condiciones),
+            Some(&resultado.inventario),
             &estado_agente,
         );
         // Se calla en modo demonio: una consola que pregunta cada dos segundos
@@ -1260,6 +1271,8 @@ fn ejecutar() -> Result<(), ErrorAgente> {
         }
         // Se ACUMULA: el tramo ya lleva lo gastado dentro del bucle de captura.
         tramos.atender += marca.elapsed();
+
+        inventario_anterior = Some(resultado.inventario);
 
         // RPT-083, PA-136. Solo con `--ciclos N` finito, que ya significa «hay
         // una persona mirando» (RPT-072). El modo servicio sigue callado.
@@ -1380,6 +1393,7 @@ fn atender_pendientes<D: eje_agente::salida::Despacho>(
     escucha: Option<&Escucha>,
     ciclo: &Ciclo<D>,
     condiciones: Option<&eje_ipc::mensajes::Condiciones>,
+    inventario: Option<&[eje_ipc::mensajes::NodoInventario]>,
     estado_agente: &EstadoAgente,
 ) -> usize {
     let Some(escucha) = escucha else {
@@ -1389,6 +1403,7 @@ fn atender_pendientes<D: eje_agente::salida::Despacho>(
     escucha.atender(&mut Manejadores {
         registro: ciclo.registro(),
         condiciones,
+        inventario,
         evidencia: ciclo.evidencia(),
         estado_agente,
     })

@@ -159,8 +159,7 @@ nombre = "obtener-inventario"
 vista = "VIS-04"
 direccion = "consulta"
 descripcion = "Inventario vivo de dispositivos IoT/OT observados, con la evidencia de cada uno."
-servido = false
-motivo_no_servido = "Sin productor todavia (PA-138b). Enumerar ya se puede desde RPT-087: AlmacenObservacion::inventario() lista el volatil ordenado. Lo que falta es que exista que decir: de los cuatro campos de NodoInventario, clase cruza dos taxonomias distintas y postura no tiene valor para no-se-sabe. Los decide PA-139; rellenarlos antes seria inventar dato."
+servido = true
 
 [[canal]]
 nombre = "obtener-estado-boveda"
@@ -304,7 +303,7 @@ tipo = "texto"
 registro = "NodoInventario"
 nombre = "clase"
 tipo = "enumerado"
-valores = "declaradaSoporteVital|declaradaSeguridadFuncional|declaradaCaminoDeGestion|declaradaNoCritica|segmentoDeclaradoSinCriticos|ambiguaMarcadoCaducado|ambiguaConflictoEntreFuentes|ambiguaInferenciaSugiereCriticidad|ambiguaSegmentoPuedeAlojarCriticos|indeterminada"
+valores = "declaradaSoporteVital|declaradaSeguridadFuncional|declaradaCaminoDeGestion|declaradaNoCritica|segmentoDeclaradoSinCriticos|ambiguaMarcadoCaducado|ambiguaConflictoEntreFuentes|ambiguaInferenciaSugiereCriticidad|ambiguaSegmentoPuedeAlojarCriticos|ambiguaEvidenciaNoVerificable|indeterminada"
 
 [[campo]]
 registro = "NodoInventario"
