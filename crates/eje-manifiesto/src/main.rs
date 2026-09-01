@@ -130,6 +130,37 @@ fn escribir(ruta: &Path, bytes: &[u8]) -> Result<(), ErrorHerramienta> {
     })
 }
 
+/// Lee las dos entradas de `emitir` y `configurar` **sin conocer secreto alguno**.
+///
+/// # PA-144, y por que esto es una funcion y no dos lineas movidas
+///
+/// `emitir` y `configurar` pedian la frase de paso ANTES de abrir la semilla.
+/// Con una ruta equivocada, la herramienta imprimia el aviso de PA-53, se
+/// tecleaba la frase en claro sobre la pantalla, y solo despues fallaba por un
+/// fichero que no existia. **El secreto se quemo en una corrida que no podia
+/// terminar bien.** Paso el 31 de agosto de 2026 aprovisionando la VM de PA-78 y
+/// costo una frase de paso, que hubo que dar por comprometida.
+///
+/// `generar` ya lo hacia al reves —comprueba el fichero y luego pregunta—, asi
+/// que el mismo programa tenia los dos ordenes a la vez.
+///
+/// Existiendo esta funcion, quien anada un tercer comando que abra una semilla
+/// tiene delante el orden correcto ya escrito. Mover dos lineas habria arreglado
+/// los dos sitios de hoy y ninguno de mañana.
+///
+/// # Errores
+///
+/// [`ErrorHerramienta::Fichero`] con la ruta que fallo, para que se vea cual de
+/// las dos es.
+fn entradas_sin_secreto(
+    ruta_semilla: &Path,
+    ruta_entrada: &Path,
+) -> Result<(Vec<u8>, String), ErrorHerramienta> {
+    let sellada = leer(ruta_semilla)?;
+    let texto = String::from_utf8_lossy(&leer(ruta_entrada)?).into_owned();
+    Ok((sellada, texto))
+}
+
 /// Pide la frase de paso por la entrada estandar.
 fn pedir_frase(motivo: &str) -> Result<Vec<u8>, ErrorHerramienta> {
     eprintln!("Frase de paso ({motivo}), y Enter al terminar.");
@@ -318,11 +349,12 @@ fn emitir(opciones: &Opciones) -> Result<(), ErrorHerramienta> {
         return Err(ErrorHerramienta::Uso);
     };
 
-    let frase = pedir_frase("la de esta semilla")?;
-    let emisor = Emisor::desde_semilla(abrir(&leer(ruta_semilla)?, &frase)?);
-
-    let texto = String::from_utf8_lossy(&leer(ruta_entrada)?).into_owned();
+    // PA-144. Todo lo que puede fallar sin secretos, antes del secreto.
+    let (semilla_sellada, texto) = entradas_sin_secreto(ruta_semilla, ruta_entrada)?;
     let entrada = Entrada::analizar(&texto)?;
+
+    let frase = pedir_frase("la de esta semilla")?;
+    let emisor = Emisor::desde_semilla(abrir(&semilla_sellada, &frase)?);
 
     let instante = ahora();
     let marcados = entrada.marcados(instante)?;
@@ -510,11 +542,12 @@ fn configurar(opciones: &Opciones) -> Result<(), ErrorHerramienta> {
         return Err(ErrorHerramienta::Uso);
     };
 
-    let frase = pedir_frase("la de esta semilla")?;
-    let emisor = Emisor::desde_semilla(abrir(&leer(ruta_semilla)?, &frase)?);
-
-    let texto = String::from_utf8_lossy(&leer(ruta_entrada)?).into_owned();
+    // PA-144. Todo lo que puede fallar sin secretos, antes del secreto.
+    let (semilla_sellada, texto) = entradas_sin_secreto(ruta_semilla, ruta_entrada)?;
     let entrada = ConfiguracionEntrada::analizar(&texto)?;
+
+    let frase = pedir_frase("la de esta semilla")?;
+    let emisor = Emisor::desde_semilla(abrir(&semilla_sellada, &frase)?);
 
     // La secuencia de la anterior, si existe. Se verifica contra **esta misma
     // maquina**: una configuracion de otro sensor no puede continuar esta serie,

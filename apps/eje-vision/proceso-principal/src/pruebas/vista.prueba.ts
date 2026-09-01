@@ -1,11 +1,16 @@
 /**
  * PA-102 y PA-106 — la vista es el sexto sitio donde vive el contrato.
  *
- * `vis04.js` y `diagnostico.js` son ficheros del renderer: no se compilan con
- * `tsc`, no los cruza `dependency-cruiser` y ninguna prueba los ejecuta. Escriben
- * a mano los nombres de las condiciones, igual que `preload.cts` escribe a mano
- * los canales, y por la misma razón: no pueden importar del paquete base con la
- * ventana en modo estricto.
+ * `diagnostico.js` es un fichero del renderer: no se compila con `tsc`, no lo
+ * cruza `dependency-cruiser` y ninguna prueba lo ejecuta. Escribe a mano los
+ * nombres de las condiciones, igual que `preload.cts` escribe a mano los
+ * canales.
+ *
+ * `vis04` ya no está en ese grupo: desde RPT-091 (PA-142) vive en
+ * `vista/src/vis04.ts`, lo compila `tsc` y su tabla de condiciones lleva un
+ * `satisfies keyof Condiciones`. **La comprobación de las trece la hace ahora el
+ * compilador**, y la prueba textual se queda como red de seguridad del orden y
+ * de los identificadores del HTML, que el tipo no ve.
  *
  * Lo que no se compara, diverge. `sinColector` acaba de entrar en el contrato; si
  * alguien la añade al agente y no aquí, el tablero mostrará nueve filas y quien
@@ -41,10 +46,19 @@ const DEL_CONTRATO: readonly string[] = CAMPOS_CONDICIONES.map(([nombre]) => nom
  * Anclado en `import.meta.url` y no en `process.cwd()`: el directorio de trabajo
  * depende de desde dónde se invoque npm, y esa fragilidad ya costó una suite
  * entera sin ejecutar.
+ *
+ * # Lee la fuente, no el artefacto. RPT-091, PA-142
+ *
+ * Desde que `vis04` se compila, hay dos ficheros: `src/vis04.ts` —lo que
+ * alguien escribió y lo que se revisa— y `dist/vis04.js` —lo que se emite—. Lo
+ * que estas barreras vigilan es la **intención**, así que miran el `.ts`.
+ *
+ * Que los dos coincidan no lo comprueba una prueba: lo garantiza `tsc`, y el
+ * `.js` ni siquiera está versionado.
  */
-function fuenteDeVista(nombre: string): string {
+function fuenteDeVista(relativa: string): string {
   const aqui = dirname(fileURLToPath(import.meta.url));
-  const ruta = join(aqui, "..", "..", "vista", nombre);
+  const ruta = join(aqui, "..", "..", "vista", ...relativa.split("/"));
 
   try {
     return sinComentarios(readFileSync(ruta, "utf8"));
@@ -65,8 +79,8 @@ function bloque(fuente: string, desde: string, hasta: string): string {
 }
 
 describe("PA-102 / PA-106 — la vista nombra las condiciones del contrato", () => {
-  it("vis04.js pinta exactamente las trece, sin faltar ni sobrar", () => {
-    const tabla = bloque(fuenteDeVista("vis04.js"), "const CONDICIONES = [", "];");
+  it("vis04.ts pinta exactamente las trece, sin faltar ni sobrar", () => {
+    const tabla = bloque(fuenteDeVista("src/vis04.ts"), "const CONDICIONES = [", "] as const satisfies");
     const nombradas = [...tabla.matchAll(/"([A-Za-z]+)"\s*,/g)].map((c) => c[1] ?? "");
 
     // Faltar es lo grave: una condición activa que el tablero no tiene fila donde
@@ -98,11 +112,11 @@ describe("PA-102 / PA-106 — la vista nombra las condiciones del contrato", () 
     assert.deepEqual([...nombradas].sort(), [...DEL_CONTRATO].sort());
   });
 
-  it("todo identificador que vis04.js busca existe en su HTML", () => {
+  it("todo identificador que vis04.ts busca existe en su HTML", () => {
     // PA-102. `getElementById` devuelve `null` y el fallo aparece más tarde, en
     // otra línea y como otra cosa. Un identificador renombrado en el HTML deja el
     // tablero en blanco sin decir por qué.
-    const guion = fuenteDeVista("vis04.js");
+    const guion = fuenteDeVista("src/vis04.ts");
     const html = readFileSync(
       join(dirname(fileURLToPath(import.meta.url)), "..", "..", "vista", "vis04.html"),
       "utf8",
@@ -158,7 +172,7 @@ describe("PA-102 / PA-106 — la vista nombra las condiciones del contrato", () 
  * invoca.
  */
 describe("PA-97 — la vista pagina de verdad", () => {
-  const FUENTE = fuenteDeVista("vis04.js");
+  const FUENTE = fuenteDeVista("src/vis04.ts");
 
   it("pide desde la marca de la bitacora y no desde el principio", () => {
     assert.match(

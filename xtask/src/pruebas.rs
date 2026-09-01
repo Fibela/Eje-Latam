@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use crate::exclusion::lineas_de_prueba;
+use crate::exclusion::{codigo_sin_comentarios, lineas_de_prueba};
 use crate::guardian::{Comprobacion, Hallazgo, analizar, comprobaciones};
 
 /// Los patrones del guardian, con la garantia de que hay alguno.
@@ -389,4 +389,125 @@ fn la_exclusion_cubre_exactamente_el_bloque() {
     assert!(excluidas[3], "linea 4 esta dentro del bloque");
     assert!(excluidas[4], "linea 5 cierra el bloque");
     assert!(!excluidas[5], "linea 6 vuelve a ser produccion");
+}
+
+// ---------------------------------------------------------------------------
+// PA-144 — el secreto se pide el ultimo
+// ---------------------------------------------------------------------------
+
+/// Ninguna orden de `eje-manifiesto` pide la frase de paso antes de leer sus
+/// entradas.
+///
+/// # Por que esta barrera vive aqui y no en `eje-manifiesto`
+///
+/// Porque lo que comprueba es **el orden de dos sentencias**, y eso el
+/// compilador no lo ve. Los lectores de texto valen justo para eso (RPT-090
+/// §5.1), y el unico analizador de comentarios del proyecto —el que sabe de
+/// bloques anidados, cadenas crudas y literales de caracter— esta en
+/// `exclusion.rs`. Escribir un segundo en el otro crate seria la duplicacion
+/// contra la que avisa el propio `Recorrido`: bastaria con que una copia se
+/// quedara atras para que la barrera empezara a mentir.
+///
+/// # El defecto que fija
+///
+/// `emitir` y `configurar` pedian la frase de paso antes de abrir la semilla.
+/// Con una ruta equivocada, la herramienta imprimia el aviso de PA-53, la frase
+/// se tecleaba en claro, y **despues** fallaba por un fichero inexistente. El 31
+/// de agosto de 2026 eso quemo una frase de paso real aprovisionando la VM de
+/// PA-78. `generar` ya lo hacia bien: el mismo binario llevaba los dos ordenes.
+#[test]
+fn ninguna_orden_pide_la_frase_antes_de_leer_sus_entradas() {
+    // Las dos ordenes que abren una semilla a partir de ficheros del disco.
+    // `generar` no entra: no lee entradas, crea la semilla, y su guarda es
+    // `ruta_semilla.exists()`, que ya esta por encima de la pregunta.
+    const ORDENES: [&str; 2] = ["emitir", "configurar"];
+
+    let ruta = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("crates/eje-manifiesto/src/main.rs");
+
+    // No poder mirar no es haber mirado: un fichero ilegible pone roja la
+    // barrera en lugar de dejarla en verde sin fuente que leer.
+    let fuente = std::fs::read_to_string(&ruta).unwrap_or_default();
+    assert!(
+        !fuente.is_empty(),
+        "no se pudo leer {}, o esta vacio",
+        ruta.display()
+    );
+
+    // Sin comentarios: la prosa de `entradas_sin_secreto` nombra el defecto y
+    // esta misma prueba nombra las dos agujas. Mirar la linea cruda cazaria la
+    // explicacion en lugar del codigo (RPT-076, PA-129).
+    let codigo = codigo_sin_comentarios(&fuente);
+    let de_prueba = lineas_de_prueba(&fuente);
+
+    // Las funciones de primer nivel, por su linea de apertura. `fn ` en la
+    // columna cero: lo indentado es un metodo o una clausura.
+    let aperturas: Vec<usize> = codigo
+        .iter()
+        .enumerate()
+        .filter(|(indice, linea)| {
+            !de_prueba.get(*indice).copied().unwrap_or(false) && linea.starts_with("fn ")
+        })
+        .map(|(indice, _)| indice)
+        .collect();
+
+    assert!(
+        !aperturas.is_empty(),
+        "no se reconocio ninguna funcion de primer nivel en {}: el lector esta \
+         roto y esta barrera pasaria en verde sin comprobar nada",
+        ruta.display()
+    );
+
+    for orden in ORDENES {
+        let apertura = format!("fn {orden}(");
+        let hallada = aperturas
+            .iter()
+            .copied()
+            .find(|indice| codigo.get(*indice).is_some_and(|l| l.starts_with(&apertura)));
+
+        assert!(
+            hallada.is_some(),
+            "'{orden}' ya no existe en {}. Si se renombro, renombrala aqui; si \
+             se retiro, retira tambien esta comprobacion a proposito.",
+            ruta.display()
+        );
+        let Some(inicio) = hallada else { continue };
+
+        // Hasta la siguiente funcion de primer nivel, o hasta el final.
+        let fin = aperturas
+            .iter()
+            .copied()
+            .find(|indice| *indice > inicio)
+            .unwrap_or(codigo.len());
+
+        let posicion = |aguja: &str| -> Option<usize> {
+            codigo
+                .get(inicio..fin)
+                .unwrap_or_default()
+                .iter()
+                .position(|linea| linea.contains(aguja))
+                .map(|relativa| inicio + relativa)
+        };
+
+        let par = (posicion("entradas_sin_secreto("), posicion("pedir_frase("));
+
+        assert!(
+            matches!(par, (Some(_), Some(_))),
+            "'{orden}' ya no llama a las dos: o dejo de pedir la frase, o dejo \
+             de leer sus entradas con `entradas_sin_secreto`. Las dos cosas \
+             cambian lo que esta barrera afirma (PA-144)."
+        );
+        let (Some(lee), Some(pregunta)) = par else { continue };
+
+        assert!(
+            lee < pregunta,
+            "PA-144 en '{orden}': pide la frase de paso en la linea {} y no lee \
+             sus entradas hasta la {}. Una ruta equivocada quema el secreto en \
+             pantalla antes de poder fallar.",
+            pregunta + 1,
+            lee + 1
+        );
+    }
 }

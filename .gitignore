@@ -31,6 +31,22 @@ out/
 secretos.toml
 credenciales.toml
 
+# Material de firma de eje-manifiesto. La semilla es el secreto raiz del
+# despliegue: quien la tenga puede firmar inventarios y configuraciones que el
+# agente creera. `generar` se ejecuta desde la raiz del arbol y escribe aqui,
+# asi que sin esta linea la semilla entra en el indice al primer `git add -A`.
+# No estaba, y el 31 de agosto de 2026 se ejecuto `generar` desde la raiz.
+*.sem
+
+# Artefactos emitidos y de despliegue. No son secretos —van firmados y su
+# validez la decide la firma, no el sitio— pero son de UNA maquina concreta, y
+# versionarlos invita a instalar el de otra.
+*.firmado
+*.inv
+*.rev
+configuracion-sensor.toml
+parque.toml
+
 # Bases de datos locales de desarrollo
 *.db
 *.db-journal

@@ -3,6 +3,7 @@
   "references": [
     { "path": "./packages/eje-vision-base" },
     { "path": "./packages/eje-vision-empresarial" },
-    { "path": "./proceso-principal" }
+    { "path": "./proceso-principal" },
+    { "path": "./proceso-principal/vista" }
   ]
 }

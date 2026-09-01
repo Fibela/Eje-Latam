@@ -94,8 +94,25 @@
     </div>
 
     <main>
+      <!--
+        RPT-091, PA-78 mitad B. Hasta hoy el sensor servia cuatro canales con
+        datos y esta pantalla consumia dos. Los otros dos estaban mudos: el
+        operador no veia ni contra que version habla ni que hay en su red.
+      -->
+      <h1>Sensor</h1>
+      <p id="estado-agente" class="sin-dato">Sin datos del sensor.</p>
+
       <h1>Condiciones</h1>
       <table id="condiciones"></table>
+
+      <h1>Inventario</h1>
+      <!--
+        El recuento por calidad del respaldo va ANTES de la lista: lo primero
+        que un operador necesita saber de un inventario no es cuantos equipos
+        hay, sino de cuantos se sabe algo con una firma detras.
+      -->
+      <p id="respaldo" class="sin-dato">Sin datos del sensor.</p>
+      <table id="inventario"></table>
 
       <h1>Alertas registradas</h1>
       <p id="salto" hidden></p>
@@ -117,6 +134,6 @@
       <span id="sello" class="roto">EL MÓDULO DE LA VISTA NO ARRANCÓ</span>
     </footer>
 
-    <script type="module" src="./vis04.js"></script>
+    <script type="module" src="./dist/vis04.js"></script>
   </body>
 </html>
