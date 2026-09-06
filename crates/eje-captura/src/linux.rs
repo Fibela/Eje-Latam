@@ -1,7 +1,9 @@
 //! Captura AF_PACKET en Linux.
 //!
-//! RPT-018 §2. **Este es el unico modulo del workspace donde se admite
-//! `unsafe`**, y la lista de lugares donde ocurre esta acotada a proposito:
+//! RPT-018 §2. Es uno de los **dos** modulos del workspace donde se admite
+//! `unsafe` —el otro es `eje-manifiesto::eco`, que apaga el eco de la terminal
+//! con `termios` y no viaja en el sensor (PA-53, RPT-094)—, y la lista de
+//! lugares donde ocurre aqui esta acotada a proposito:
 //!
 //! 1. `socket` — abrir el descriptor.
 //! 2. `if_nametoindex` — resolver el nombre de interfaz.

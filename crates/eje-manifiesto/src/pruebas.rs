@@ -853,3 +853,64 @@ fn el_emisor_no_entra_en_el_binario_del_agente() {
          poder firmar inventarios"
     );
 }
+
+// ---------------------------------------------------------------------------
+// PA-53 — el eco de la terminal
+// ---------------------------------------------------------------------------
+
+/// Una entrada que no es terminal **no** se lee como «eco apagado».
+///
+/// Es la rama que decide si la herramienta miente. Con dos estados en lugar de
+/// tres, un descriptor que no es tty caeria en «apagado» y `pedir_frase`
+/// imprimiria «no se vera» sobre una pantalla donde se ve.
+///
+/// Se prueba sobre `/dev/null` y no sobre `stdin` a proposito: el arnes de
+/// pruebas hereda una tty cuando se corre a mano y no la hereda en integracion
+/// continua, asi que mirar `stdin` daria una prueba que cambia de resultado
+/// segun quien la ejecute. Una prueba asi no comprueba nada, informa del sitio.
+#[test]
+fn una_entrada_que_no_es_terminal_no_se_lee_como_eco_apagado() {
+    use std::os::fd::AsRawFd;
+
+    let fichero = std::fs::File::open("/dev/null");
+    assert!(fichero.is_ok(), "/dev/null debe poder abrirse");
+    let Ok(fichero) = fichero else { return };
+
+    assert!(
+        matches!(eco::apagar_en(fichero.as_raw_fd()), eco::Eco::NoEsTerminal),
+        "un descriptor que no es terminal tiene que decirlo, no callar"
+    );
+}
+
+/// Un descriptor cerrado tampoco se lee como «apagado».
+///
+/// `isatty` sobre un descriptor invalido devuelve 0, asi que el resultado
+/// correcto es `NoEsTerminal`. Lo que **no** puede pasar es `Apagado`: eso
+/// afirmaria haber tocado una terminal que no existe.
+#[test]
+fn un_descriptor_invalido_no_afirma_haber_apagado_nada() {
+    assert!(
+        !matches!(eco::apagar_en(-1), eco::Eco::Apagado(_)),
+        "no se puede afirmar que se apago el eco de un descriptor invalido"
+    );
+}
+
+/// Los estados son **tres**, y esta prueba deja de compilar si se anaden.
+///
+/// No comprueba comportamiento: comprueba que nadie meta un cuarto caso sin
+/// decidir que imprime `pedir_frase` para el. El `match` sin comodin es la
+/// correa (RPT-090 §3); esto solo la ancla desde el lado de las pruebas para
+/// que el fallo salga aqui y no en la pantalla de un administrador.
+#[test]
+fn el_eco_tiene_exactamente_tres_estados() {
+    fn nombrar(estado: &eco::Eco) -> &'static str {
+        match estado {
+            eco::Eco::Apagado(_) => "apagado",
+            eco::Eco::NoEsTerminal => "no es terminal",
+            eco::Eco::NoSePudoApagar => "no se pudo apagar",
+        }
+    }
+
+    assert_eq!(nombrar(&eco::Eco::NoEsTerminal), "no es terminal");
+    assert_eq!(nombrar(&eco::Eco::NoSePudoApagar), "no se pudo apagar");
+}

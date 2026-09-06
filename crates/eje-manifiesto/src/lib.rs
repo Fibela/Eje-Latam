@@ -30,6 +30,7 @@
 //!
 //! No hace: generar la clave de recuperacion, ni rotar nada.
 
+pub mod eco;
 pub mod entrada;
 pub mod fragmento;
 pub mod reposo_semilla;

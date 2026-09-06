@@ -33,6 +33,10 @@ getrandom = "0.3"
 guardian-cc = { path = "../guardian-cc" }
 # Derivacion del par de firma desde la semilla y firma hibrida.
 motor-pqc = { path = "../motor-pqc" }
+# `termios`, para que la frase de paso no se vea al teclearla (PA-53, RPT-092).
+# No anade nada al arbol: `eje-captura` ya la trae y Cargo.lock ya la resuelve a
+# 0.2.189. Una dependencia auditada mas de un crate no es una dependencia mas.
+libc = "0.2"
 
 [lints]
 workspace = true

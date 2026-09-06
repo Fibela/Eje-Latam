@@ -29,6 +29,7 @@ use eje_manifiesto::fragmento::{
     analizar as analizar_fragmento, huella_de, reunir_verificando,
     serializar as serializar_fragmento,
 };
+use eje_manifiesto::eco::Eco;
 use eje_manifiesto::reposo_semilla::{LONGITUD_SAL, abrir, sellar};
 use eje_manifiesto::{Emisor, ErrorEmision};
 use guardian_cc::arranque::{RutasAlmacen, aprovisionar_clave};
@@ -162,15 +163,44 @@ fn entradas_sin_secreto(
 }
 
 /// Pide la frase de paso por la entrada estandar.
+///
+/// # PA-53
+///
+/// El eco se apaga **antes** de pedir nada, y el guardia vive hasta el final de
+/// la funcion: la terminal vuelve a su estado sola, tambien si `leer_frase` sale
+/// por error. Lo que se imprime depende de cual de los tres estados salio, y no
+/// hay rama que diga «no se vera» sobre una terminal donde se ve.
 fn pedir_frase(motivo: &str) -> Result<Vec<u8>, ErrorHerramienta> {
+    let eco = eje_manifiesto::eco::apagar();
+
     eprintln!("Frase de paso ({motivo}), y Enter al terminar.");
-    eprintln!("AVISO: se vera al teclearla; no la use delante de nadie (PA-53).");
+
+    match &eco {
+        Eco::Apagado(_) => eprintln!("No se vera al teclearla."),
+        // No hay terminal: nadie esta mirando una pantalla. Advertir aqui seria
+        // ruido en un guion, y el ruido que siempre aparece deja de leerse.
+        Eco::NoEsTerminal => {}
+        Eco::NoSePudoApagar => {
+            eprintln!("AVISO: no se pudo apagar el eco de esta terminal, asi que");
+            eprintln!("SE VERA al teclearla; no la use delante de nadie (PA-53).");
+        }
+    }
     // RPT-082, PA-134. «Y Enter al terminar» es la mitad del arreglo que se ve.
     // El aviso decia como se VE la frase y no como se TERMINA, y con
     // `read_to_string` no terminaba nunca. Decir que hacer no cuesta nada; que
     // alguien lo averigue a la tercera, si.
 
-    leer_frase(&mut std::io::stdin().lock())
+    let frase = leer_frase(&mut std::io::stdin().lock());
+
+    // El eco vuelve aqui, antes de escribir nada mas, y no al final de la
+    // funcion: lo que se imprima despues tiene que verse.
+    drop(eco);
+
+    // Con el eco apagado, el Enter que pulso el usuario no dejo salto de linea
+    // en pantalla. Sin esto, la siguiente linea se pega a la del aviso.
+    eprintln!();
+
+    frase
 }
 
 /// Lee **una linea** de la entrada y la toma por frase de paso.
