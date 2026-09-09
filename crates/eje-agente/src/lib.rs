@@ -332,6 +332,7 @@ mod pruebas {
                 false,
                 false,
                 EstadoConfiguracion::Firmada,
+                false,
             );
 
             assert!(vigentes.accion_administrativa, "{estado:?} debe avisar");
@@ -363,6 +364,7 @@ mod pruebas {
                 false,
                 false,
                 EstadoConfiguracion::Firmada,
+                false,
             );
 
             assert!(vigentes.hay_manipulacion());
@@ -385,6 +387,7 @@ mod pruebas {
             false,
             false,
             EstadoConfiguracion::Firmada,
+            false,
         );
 
         assert!(!vigentes.hay_degradacion());
@@ -818,6 +821,7 @@ mod pruebas {
             configuracion_no_verifica: false,
             registro_saturado: false,
             evidencia_en_riesgo: false,
+            sin_clave_de_recuperacion: false,
         }
     }
 
@@ -1269,7 +1273,7 @@ mod pruebas {
     /// RPT-084, PA-136. Desde que se atiende a mitad de vuelta, una consulta
     /// puede llegar antes de que exista una sola condición evaluada.
     ///
-    /// La salida cómoda sería devolver las trece en `false`. Diría **«este sensor
+    /// La salida cómoda sería devolver las catorce en `false`. Diría **«este sensor
     /// está sano»** sobre un sensor del que todavía no se sabe nada, que es
     /// exactamente la mentira que RPT-006 §4 prohíbe y que ya costó la décima
     /// condición (PA-118). Se rechaza, y el motivo dice por qué.
@@ -1516,6 +1520,7 @@ mod pruebas {
             false,
             false,
             EstadoConfiguracion::Firmada,
+            false,
         );
 
         assert!(vigentes.captura_con_perdida);

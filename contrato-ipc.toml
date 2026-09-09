@@ -581,6 +581,22 @@ registro = "Condiciones"
 nombre = "evidenciaEnRiesgo"
 tipo = "booleano"
 
+# PA-146a, RPT-015 §4. No hay `clave-recuperacion.pub` en el almacen.
+#
+# Es un hecho, no un juicio: dice que el fichero no esta, no que el nodo este
+# comprometido. La consecuencia —que sin esa clave no se puede leer un
+# certificado de revocacion, y revocar es el unico remedio si la identidad de
+# este sensor se compromete— la explica VIS-04, que es quien lee (RPT-088 §2).
+#
+# No cabe en `accionAdministrativa`: aquella cubre acciones sobre el almacen de
+# este sensor, y esta exige una ceremonia en otra maquina con tres custodios.
+# Juntarlas seria la fatiga de alertas de PA-45 con dos remedios incomparables
+# tras la misma casilla.
+[[campo]]
+registro = "Condiciones"
+nombre = "sinClaveDeRecuperacion"
+tipo = "booleano"
+
 # --- Mensajes por canal ----------------------------------------------------
 #
 # Un canal sin peticion declarada no lleva carga util en esa direccion.

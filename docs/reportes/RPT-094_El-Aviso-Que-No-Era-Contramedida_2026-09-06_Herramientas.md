@@ -102,13 +102,20 @@ suficiente aquí, pero no se presenta como una prueba que no existe.
 ## 7. Un error de edición, dos veces el mismo día
 
 Al marcar PA-78 y PA-53 como cerrados partí cada fila en dos —la nueva y una «(histórico)»—
-para conservar el texto anterior. Eso **mete un identificador duplicado en el tablero**,
-que `identificador_de` extrae igual y que sólo no rompió la cuenta porque
-`un_identificador_repetido_solo_cuenta_una_vez` existe desde hace semanas.
+para conservar el texto anterior. Las dos veces lo vi al releer, no al escribir.
 
-Las dos veces lo vi al releer, no al escribir. Se anota porque la barrera que lo habría
-cazado antes que yo —una que exija una fila por identificador— **no existe**, y hoy el
-trabajo lo hizo una prueba escrita para otra cosa.
+> **ERRATA — corregido por RPT-095 §5 el 8 de septiembre.** Este párrafo decía que aquello
+> «mete un identificador duplicado en el tablero» y que sólo no rompió la cuenta gracias a
+> `un_identificador_repetido_solo_cuenta_una_vez`. **Es falso, y en las dos afirmaciones.**
+> `identificador_de` exige que el sufijo tras los dígitos sea **una sola letra minúscula**;
+> `PA-53 (histórico)` deja ` (histórico)`, así que devuelve `None` y esa fila nunca entró
+> en la cuenta. La barrera que hizo el trabajo no es la de duplicados: es la regla del
+> sufijo, cuyo comentario dice —desde antes de que yo llegara— *«un punto fantasma no se
+> cierra nunca, porque no existe»*.
+>
+> Diagnostiqué una barrera ausente sin leer la que estaba. Es la misma forma que este
+> reporte documenta en §5.1 y que RPT-088 §7 documenta en otro sitio: **escribir de memoria
+> en lugar de mirar.** Lo demás del reporte se mantiene.
 
 ## 8. Puntos abiertos
 

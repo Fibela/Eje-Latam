@@ -174,6 +174,21 @@ pub struct Ciclo<D> {
     /// Vive aqui por lo mismo que los dos de arriba: leerla y verificarla es un
     /// hecho de fuera del ciclo, y lo sabe quien lo intento.
     configuracion: EstadoConfiguracion,
+    /// No hay clave de recuperacion en el almacen. PA-146a, RPT-015 §4.
+    ///
+    /// # Por que entra por el constructor y no por un `declarar_*`
+    ///
+    /// Los otros tres hechos de fuera se declaran porque **cambian o se
+    /// averiguan despues** de construir el ciclo: la escucha se abre mas tarde,
+    /// la captura puede caerse en marcha, la configuracion se relee. Este no:
+    /// se sabe al leer el almacen, antes de la primera vuelta, y no cambia
+    /// mientras el proceso vive.
+    ///
+    /// Un `declarar_*` con valor de partida `false` significaria «hay clave de
+    /// recuperacion» para cualquier `main` que olvidara llamarlo, que es
+    /// justamente el supuesto optimista contra el que avisa el comentario de
+    /// [`Self::configuracion`]. Por el constructor, olvidarlo no compila.
+    sin_clave_de_recuperacion: bool,
 }
 
 impl<D: Despacho> Ciclo<D> {
@@ -184,8 +199,10 @@ impl<D: Despacho> Ciclo<D> {
         perfil: PerfilSegmento,
         registro: RegistroEvidencia,
         emisor: Option<Emisor<D>>,
+        sin_clave_de_recuperacion: bool,
     ) -> Self {
         Self {
+            sin_clave_de_recuperacion,
             almacen: AlmacenObservacion::nuevo(),
             registro,
             emisor,
@@ -539,6 +556,7 @@ impl<D: Despacho> Ciclo<D> {
             self.emisor.is_none(),
             self.escucha_no_disponible,
             self.configuracion,
+            self.sin_clave_de_recuperacion,
         );
 
         // `evidenciaEnRiesgo` **si** es emisible, y hasta aqui salia siempre
@@ -755,6 +773,7 @@ mod pruebas {
                 PerfilSegmento::Ot,
                 registro,
                 Some(emisor),
+                false,
             ),
             buzon,
         )
@@ -787,6 +806,7 @@ mod pruebas {
                 PerfilSegmento::Ot,
                 RegistroEvidencia::nuevo(),
                 Some(emisor),
+                false,
             ),
             buzon,
             roto,
@@ -1563,6 +1583,7 @@ mod pruebas {
             PerfilSegmento::Ot,
             RegistroEvidencia::nuevo(),
             None,
+            false,
         );
 
         let resultado = ciclo.vuelta(&EstadoArranque::PrimerArranque, &[], 1_000, 1_000_000);

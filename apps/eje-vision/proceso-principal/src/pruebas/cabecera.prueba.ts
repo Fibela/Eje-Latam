@@ -31,6 +31,10 @@ const CALMA: Condiciones = {
   // quien controle el arranque no esta en calma (RPT-074, PA-79).
   configuracionSinFirmar: false,
   configuracionNoVerifica: false,
+  // Y con clave de recuperación. PA-146a: un sensor que no se puede revocar el
+  // día que su identidad se comprometa no está en calma, está sin salida — y
+  // que hoy no le pase nada es justo lo que hace que nadie se acuerde.
+  sinClaveDeRecuperacion: false,
   registroSaturado: false,
   evidenciaEnRiesgo: false,
 };
@@ -174,7 +178,7 @@ describe("RPT-048 §2 — la cabecera decide cómo se lee todo lo demás", () =>
 
   it("correr sin configuración firmada ocupa cabecera, no una fila", () => {
     // El riesgo de esta condición no es técnico: es que el estado degradado se
-    // vuelva el normal. Dejarla abajo entre trece filas es exactamente cómo se
+    // vuelva el normal. Dejarla abajo entre catorce filas es exactamente cómo se
     // aprende a ignorarla (RPT-074 §8).
     const cabecera = cabeceraDe({ ...CALMA, configuracionSinFirmar: true });
 
@@ -220,7 +224,7 @@ describe("RPT-048 §2 — la cabecera decide cómo se lee todo lo demás", () =>
   });
 
   it("una respuesta inesperada se declara en lugar de elegir una rama", () => {
-    // El agente siempre devuelve las trece condiciones. Si llega otra cosa, el
+    // El agente siempre devuelve las catorce condiciones. Si llega otra cosa, el
     // contrato cambió, y decirlo es mejor que suponer.
     const cabecera = componerCabecera({ clase: "vacio" });
 

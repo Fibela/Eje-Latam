@@ -236,7 +236,7 @@ impl Atiende for Manejadores<'_> {
 
                 // RPT-084, PA-136. La primera vuelta todavia no ha terminado.
                 // «Todavia no se sabe» no es «no hay nada»: quien pregunte tiene
-                // que poder distinguirlo, y con un objeto de trece falsos no
+                // que poder distinguirlo, y con un objeto de catorce falsos no
                 // podria.
                 None => Err("el sensor aun no ha completado su primera vuelta: no hay \
                      condiciones evaluadas todavia"

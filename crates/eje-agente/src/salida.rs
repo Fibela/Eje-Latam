@@ -544,12 +544,12 @@ impl Transicion {
 /// Es ademas el unico camino posible. Lo que podria contar que la consola no
 /// conecta es la consola, que es lo que no conecta. Sin esta linea, un sensor
 /// vivo e inalcanzable seria invisible tambien para la sala.
-const EMISIBLES: [(&str, bool); 11] = [
+const EMISIBLES: [(&str, bool); 12] = [
     ("inventarioSuprimido", true),
     ("inventarioNoVerifica", true),
     ("observacionSaturada", false),
     ("capturaConPerdida", false),
-    // RPT-047 §2, PA-81. La mas grave de las ocho, y la que justifica que el
+    // RPT-047 §2, PA-81. La mas grave de todas, y la que justifica que el
     // agente siga vivo cuando no puede capturar.
     //
     // Un proceso muerto lo reinicia el supervisor y alguien se entera. Un agente
@@ -587,6 +587,23 @@ const EMISIBLES: [(&str, bool); 11] = [
     // Perder durabilidad de la evidencia no es que alguien la tocara, pero
     // tampoco puede esperar: mientras dure, un corte de luz se lleva alertas.
     ("evidenciaEnRiesgo", true),
+    // PA-146a. Emisible, y sin acusar a nadie: no hay ataque, hay una ceremonia
+    // que no se hizo.
+    //
+    // # Por que sale, siendo la unica que no se puede resolver en esta maquina
+    //
+    // Precisamente por eso. El operador del sensor no puede crear la clave de
+    // recuperacion —vive en la maquina del administrador y se reparte entre tres
+    // custodios—, asi que decirselo solo a el es decirselo a quien no puede
+    // hacer nada. La sala si sabe cuantos sensores de su flota estan sin salida.
+    //
+    // # Y por que no inunda
+    //
+    // Es una transicion, no un latido: se emite una vez al arrancar y no vuelve
+    // hasta que cambie. Un sensor que lleve dos anos sin clave la emitira una
+    // vez por reinicio, que es exactamente la frecuencia con la que alguien
+    // deberia acordarse.
+    ("sinClaveDeRecuperacion", false),
 ];
 
 /// Valor de una condicion por su identificador.
@@ -596,7 +613,7 @@ const EMISIBLES: [(&str, bool); 11] = [
 /// [`EMISIBLES`] pareciera apagada **para siempre**, y una condicion que nunca
 /// se activa no la echa de menos nadie.
 ///
-/// Devuelve `Some` para **las trece**, incluidas las dos que no se emiten: esto es
+/// Devuelve `Some` para **las catorce**, incluidas las dos que no se emiten: esto es
 /// un accesor y no una politica. Quien decide que sale es [`EMISIBLES`], en un
 /// solo sitio y con el motivo escrito.
 fn valor_de(condiciones: &Condiciones, identificador: &str) -> Option<bool> {
@@ -953,7 +970,7 @@ mod pruebas_emisibles {
         Condiciones, DatosLatido, EMISIBLES, INTERVALO_LATIDO_MS, linea_de_latido, valor_de,
     };
 
-    /// Las trece condiciones a cierto, para ejercitar todas las salidas a la vez.
+    /// Las catorce condiciones a cierto, para ejercitar todas las salidas a la vez.
     fn todas_encendidas() -> Condiciones {
         Condiciones {
             inventario_suprimido: true,
@@ -969,6 +986,7 @@ mod pruebas_emisibles {
             configuracion_no_verifica: true,
             registro_saturado: true,
             evidencia_en_riesgo: true,
+            sin_clave_de_recuperacion: true,
         }
     }
 
@@ -1053,6 +1071,7 @@ mod pruebas_emisibles {
             sin_colector: false,
             registro_saturado: false,
             evidencia_en_riesgo: false,
+            sin_clave_de_recuperacion: false,
         };
 
         let linea = String::from_utf8_lossy(&linea_de_latido(&DatosLatido {
@@ -1099,6 +1118,7 @@ mod pruebas_emisibles {
             configuracion_no_verifica: false,
             registro_saturado: false,
             evidencia_en_riesgo: false,
+            sin_clave_de_recuperacion: false,
         };
 
         let linea = String::from_utf8_lossy(&linea_de_latido(&DatosLatido {
@@ -1184,6 +1204,7 @@ mod pruebas_emisibles {
             configuracion_no_verifica: false,
             registro_saturado: false,
             evidencia_en_riesgo: false,
+            sin_clave_de_recuperacion: false,
         };
 
         let linea = String::from_utf8_lossy(&linea_de_latido(&DatosLatido {

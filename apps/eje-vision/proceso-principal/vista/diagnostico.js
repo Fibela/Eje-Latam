@@ -20,6 +20,7 @@ const NOMBRES = {
   configuracionNoVerifica: "CONFIG NO VERIFICA",
   registroSaturado: "registro saturado",
   evidenciaEnRiesgo: "evidencia en riesgo",
+  sinClaveDeRecuperacion: "SIN CLAVE DE RECUPERACIÓN",
 };
 
 async function refrescar() {

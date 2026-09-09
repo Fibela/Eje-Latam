@@ -516,6 +516,37 @@ pub struct Condiciones {
     /// consulta. La constancia duradera de que hubo un tramo en riesgo es el
     /// asiento `persistencia-restablecida`, que se anexa al recuperar.
     pub evidencia_en_riesgo: bool,
+    /// **No hay clave de recuperacion en el almacen.**
+    ///
+    /// PA-146a, RPT-015 §4.
+    ///
+    /// # Que dice, y que no dice
+    ///
+    /// Dice un hecho: `clave-recuperacion.pub` no esta. **No** dice «este nodo
+    /// esta comprometido» ni «este nodo es desechable»: eso es una lectura, y
+    /// las lecturas las compone VIS-04 (RPT-088 §2). El agente es testigo.
+    ///
+    /// La consecuencia que la pantalla explica es que sin esa clave no se puede
+    /// leer un certificado de revocacion, y revocar es el unico remedio si la
+    /// identidad de este sensor se compromete. Un sensor asi no esta degradado
+    /// hoy: esta **sin salida** el dia que haga falta.
+    ///
+    /// # Por que no es `accion_administrativa`
+    ///
+    /// Aquella cubre estados que exigen una accion **sobre el almacen de este
+    /// sensor** —reemitir el inventario, aprovisionar la clave operativa—. Esta
+    /// exige una ceremonia en otra maquina y con tres custodios
+    /// (`eje-manifiesto recuperacion`), que no es algo que el operador de turno
+    /// pueda resolver. Meterla ahi produciria la fatiga de alertas de PA-45: la
+    /// misma casilla encendida por dos motivos con remedios incomparables.
+    ///
+    /// # Por que un booleano basta
+    ///
+    /// Un fichero de recuperacion mal formado aborta el arranque con
+    /// `ErrorArranque::Clave`, asi que a un agente vivo solo le llegan dos
+    /// estados. No hay tercero que colapsar; el dia que lo haya, este campo se
+    /// parte en dos como estan partidos los dos del inventario.
+    pub sin_clave_de_recuperacion: bool,
 }
 
 impl Condiciones {
@@ -551,7 +582,7 @@ impl Condiciones {
             || self.sin_colector
     }
 
-    /// Las trece condiciones con su identificador, en el orden del contrato.
+    /// Las catorce condiciones con su identificador, en el orden del contrato.
     ///
     /// RPT-058, PA-114.
     ///
@@ -570,7 +601,7 @@ impl Condiciones {
     /// El orden es el de [`CAMPOS_CONDICIONES`], y una prueba lo sujeta. No es
     /// estetico: es lo que permite que cualquiera de los dos sea la autoridad.
     #[must_use]
-    pub const fn enumerar(&self) -> [(&'static str, bool); 13] {
+    pub const fn enumerar(&self) -> [(&'static str, bool); 14] {
         let Self {
             inventario_suprimido,
             inventario_no_verifica,
@@ -585,6 +616,7 @@ impl Condiciones {
             configuracion_no_verifica,
             registro_saturado,
             evidencia_en_riesgo,
+            sin_clave_de_recuperacion,
         } = *self;
 
         [
@@ -601,6 +633,7 @@ impl Condiciones {
             ("configuracionNoVerifica", configuracion_no_verifica),
             ("registroSaturado", registro_saturado),
             ("evidenciaEnRiesgo", evidencia_en_riesgo),
+            ("sinClaveDeRecuperacion", sin_clave_de_recuperacion),
         ]
     }
 
@@ -681,7 +714,7 @@ pub const CAMPOS_RESPUESTA_ALERTAS: [(&str, &str); 3] = [
 ];
 
 /// Campos de [`Condiciones`].
-pub const CAMPOS_CONDICIONES: [(&str, &str); 13] = [
+pub const CAMPOS_CONDICIONES: [(&str, &str); 14] = [
     ("inventarioSuprimido", "booleano"),
     ("inventarioNoVerifica", "booleano"),
     ("observacionSaturada", "booleano"),
@@ -695,4 +728,5 @@ pub const CAMPOS_CONDICIONES: [(&str, &str); 13] = [
     ("configuracionNoVerifica", "booleano"),
     ("registroSaturado", "booleano"),
     ("evidenciaEnRiesgo", "booleano"),
+    ("sinClaveDeRecuperacion", "booleano"),
 ];

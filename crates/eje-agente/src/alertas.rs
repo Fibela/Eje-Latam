@@ -623,9 +623,16 @@ pub fn condiciones(
     sin_colector: bool,
     escucha_no_disponible: bool,
     configuracion: EstadoConfiguracion,
+    sin_clave_de_recuperacion: bool,
 ) -> Condiciones {
     Condiciones {
         salida_no_disponible: false,
+        // PA-146a. Parametro, por lo mismo que los tres de abajo: que exista
+        // `clave-recuperacion.pub` es un hecho del almacen que esta funcion no
+        // consulta, y lo sabe quien arranco. Rellenarlo despues lo dejaria en
+        // `false`, que se lee como «este sensor se puede revocar» — y esa es
+        // exactamente la suposicion que el 31 de agosto salio cara.
+        sin_clave_de_recuperacion,
         // RPT-070, PA-125. Parametro por lo mismo que los dos de abajo: si la
         // escucha local esta abierta es un hecho de fuera. Rellenarlo despues lo
         // dejaria en `false`, que se lee como «la consola puede conectarse», que

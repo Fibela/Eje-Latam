@@ -82,7 +82,7 @@ export function componerCabecera(estado: EstadoPanel<Condiciones>): Cabecera {
 
   if (estado.clase !== "datos") {
     // `vacio` y `noServido` no tienen sentido para las condiciones: el agente
-    // siempre devuelve las trece. Si llega uno de estos, algo cambió en el
+    // siempre devuelve las catorce. Si llega uno de estos, algo cambió en el
     // contrato y decirlo es mejor que elegir una rama al azar.
     return {
       urgencia: "critica",

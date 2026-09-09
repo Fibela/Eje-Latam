@@ -849,7 +849,20 @@ fn ejecutar() -> Result<(), ErrorAgente> {
     // PA-49. El agente lee su propio estado del almacen: claves, centinela,
     // revocaciones e inventario. Hasta aqui construia `PrimerArranque` a mano
     // porque `arrancar` exigia dos claves que nadie le daba.
-    let (estado, _centinela) = arrancar_con_almacen(&rutas)?;
+    let arranque = arrancar_con_almacen(&rutas)?;
+    let estado = arranque.estado;
+    let sin_clave_de_recuperacion = arranque.sin_clave_de_recuperacion;
+
+    // PA-146a. Se dice tambien por pantalla, donde se dicen las demas cosas que
+    // el operador tiene que saber al arrancar. `eje-manifiesto generar` ya lo
+    // avisaba en la maquina del administrador; el problema era que ahi se
+    // quedaba, y quien instala el sensor no es quien emitio la semilla.
+    if sin_clave_de_recuperacion {
+        println!("  !! SIN CLAVE DE RECUPERACION. Si la identidad de este sensor se");
+        println!("     compromete, no hay forma de revocarla: leer un certificado de");
+        println!("     revocacion exige esa clave (RPT-015 §4). Se crea con");
+        println!("     'eje-manifiesto recuperacion', y se reparte entre tres custodios.");
+    }
 
     // PA-58. El registro se carga del disco ANTES de observar nada, para que las
     // alertas de esta ejecucion continuen la serie en lugar de reiniciarla.
@@ -982,7 +995,13 @@ fn ejecutar() -> Result<(), ErrorAgente> {
     // durante la ejecucion. Ver `estado_del_agente`.
     let estado_agente = estado_del_agente(opciones.perfil, &estado);
 
-    let mut ciclo = Ciclo::nuevo(rutas.evidencia(), opciones.perfil, registro, emisor);
+    let mut ciclo = Ciclo::nuevo(
+        rutas.evidencia(),
+        opciones.perfil,
+        registro,
+        emisor,
+        sin_clave_de_recuperacion,
+    );
     ciclo.declarar_intervalo_latido(opciones.intervalo_latido);
 
     let mut vueltas = 0u64;
@@ -1843,6 +1862,7 @@ mod pruebas_voz {
             configuracion_no_verifica: false,
             registro_saturado: false,
             evidencia_en_riesgo: false,
+            sin_clave_de_recuperacion: false,
         }
     }
 

@@ -638,6 +638,33 @@ pub fn aprovisionar_clave(
     Ok(())
 }
 
+/// Lo que el agente averigua de su propio almacen al arrancar.
+///
+/// # Por que es un tipo y no una tupla mas larga
+///
+/// PA-146a. Hasta hoy esta funcion devolvia `(EstadoArranque, Centinelas)` y
+/// **tiraba** el tercer hecho que ya tenia en la mano: si hay clave de
+/// recuperacion. Anadirlo como tercer elemento de una tupla habria dejado un
+/// `bool` desnudo que en el sitio de destino no dice de que habla.
+pub struct Arranque {
+    /// En que estado esta el inventario del almacen.
+    pub estado: EstadoArranque,
+    /// Las dos marcas de frescura, la del inventario y la de configuracion.
+    pub centinelas: Centinelas,
+    /// **No hay `clave-recuperacion.pub`** en el almacen.
+    ///
+    /// PA-146a, RPT-015 §4. No impide arrancar y no es manipulacion: es que
+    /// este sensor **no tiene remedio si su identidad se compromete**, porque
+    /// leer un certificado de revocacion exige esa clave y no hay otra via.
+    ///
+    /// Se saca aqui porque aqui es donde se sabe. Antes se cargaba, se usaba
+    /// para las revocaciones, y el hecho de que faltara moria en esta funcion:
+    /// `eje-manifiesto generar` lo avisaba por pantalla y nadie mas se enteraba
+    /// nunca. Ese aviso llevaba desde el 6 de agosto sin ser un mecanismo, y el
+    /// 31 de agosto se pago (RPT-092, RPT-094 §1).
+    pub sin_clave_de_recuperacion: bool,
+}
+
 /// Arranca el agente leyendo tambien sus claves del almacen.
 ///
 /// # Que anade sobre [`arrancar`]
@@ -651,14 +678,21 @@ pub fn aprovisionar_clave(
 ///
 /// Las de [`arrancar`], mas [`ErrorArranque::Clave`] si alguno de los dos
 /// ficheros de clave existe y esta mal formado.
-pub fn arrancar_con_almacen(
-    rutas: &RutasAlmacen,
-) -> Result<(EstadoArranque, Centinelas), ErrorArranque> {
+///
+/// **Que el fichero de recuperacion este mal formado aborta el arranque**, y por
+/// eso [`Arranque::sin_clave_de_recuperacion`] puede ser un booleano sin
+/// colapsar nada: a un agente vivo solo le llegan dos estados, esta o no esta.
+/// Si algun dia ese error se degradara a `None`, este campo tendria que
+/// partirse en dos como lo estan `inventario_suprimido` e
+/// `inventario_no_verifica`.
+pub fn arrancar_con_almacen(rutas: &RutasAlmacen) -> Result<Arranque, ErrorArranque> {
     let operativa = cargar_clave(&rutas.clave_operativa(), DominioClave::Cliente)?;
     let recuperacion = cargar_clave(
         &rutas.clave_recuperacion(),
         DominioClave::ClienteRecuperacion,
     )?;
+
+    let sin_clave_de_recuperacion = recuperacion.is_none();
 
     let Some(operativa) = operativa else {
         let centinelas = cargar_centinela(rutas)?;
@@ -675,7 +709,11 @@ pub fn arrancar_con_almacen(
             Some(secuencia_conocida) => EstadoArranque::Supresion { secuencia_conocida },
         };
 
-        return Ok((estado, centinelas));
+        return Ok(Arranque {
+            estado,
+            centinelas,
+            sin_clave_de_recuperacion,
+        });
     };
 
     // La de recuperacion puede faltar sin que eso impida arrancar: solo sirve
@@ -688,7 +726,13 @@ pub fn arrancar_con_almacen(
     // operativa habria podido forjar un certificado que verificase, y con el
     // bajar el centinela por `reiniciar_por` para despues reponer un inventario
     // anterior. Es el ataque de PA-27 servido por la puerta que RPT-015 §4 cerro.
-    arrancar(rutas, &operativa, recuperacion.as_ref())
+    let (estado, centinelas) = arrancar(rutas, &operativa, recuperacion.as_ref())?;
+
+    Ok(Arranque {
+        estado,
+        centinelas,
+        sin_clave_de_recuperacion,
+    })
 }
 
 /// Arranca el agente sobre el almacen indicado.

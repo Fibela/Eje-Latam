@@ -3213,7 +3213,7 @@ mod pruebas {
         aprovisionar_claves(&almacen, &banco);
         aceptar_inventario(&almacen.rutas, &bytes_en_disco(&banco), 7).expect("aceptar");
 
-        let (estado, _) = arrancar_con_almacen(&almacen.rutas).expect("arranque");
+        let estado = arrancar_con_almacen(&almacen.rutas).expect("arranque").estado;
 
         assert!(matches!(estado, EstadoArranque::Operativo(_)));
         assert!(!estado.exige_alerta());
@@ -3235,7 +3235,7 @@ mod pruebas {
         // emitir un manifiesto que el agente ignora en silencio.
         let almacen = AlmacenDePrueba::nuevo("sin-clave");
 
-        let (estado, _) = arrancar_con_almacen(&almacen.rutas).expect("arranque");
+        let estado = arrancar_con_almacen(&almacen.rutas).expect("arranque").estado;
 
         assert!(matches!(estado, EstadoArranque::SinClaveAprovisionada));
         assert!(
@@ -3261,7 +3261,7 @@ mod pruebas {
         aceptar_inventario(&almacen.rutas, &bytes_en_disco(&banco), 7).expect("aceptar");
         std::fs::remove_file(almacen.rutas.clave_operativa()).expect("borrar la clave");
 
-        let (estado, _) = arrancar_con_almacen(&almacen.rutas).expect("arranque");
+        let estado = arrancar_con_almacen(&almacen.rutas).expect("arranque").estado;
 
         assert!(matches!(
             estado,

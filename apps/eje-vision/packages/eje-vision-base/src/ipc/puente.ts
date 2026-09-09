@@ -270,6 +270,17 @@ export interface Condiciones {
    * anotar; aquí anota y no consigue guardar.
    */
   readonly evidenciaEnRiesgo: boolean;
+  /**
+   * No hay clave de recuperación en el almacén de este sensor.
+   *
+   * PA-146a, RPT-015 §4. El agente sólo afirma que el fichero no está. La
+   * consecuencia —que sin esa clave no se puede leer un certificado de
+   * revocación, y revocar es el único remedio si esta identidad se
+   * compromete— la explica esta capa, que es donde vive el juicio.
+   *
+   * No es una degradación de hoy: es la ausencia de salida para mañana.
+   */
+  readonly sinClaveDeRecuperacion: boolean;
 }
 
 /**
@@ -449,6 +460,7 @@ export const CAMPOS_CONDICIONES = [
   ["configuracionNoVerifica", "booleano"],
   ["registroSaturado", "booleano"],
   ["evidenciaEnRiesgo", "booleano"],
+  ["sinClaveDeRecuperacion", "booleano"],
 ] as const satisfies readonly (readonly [keyof Condiciones, string])[];
 
 // Comprobación de exhaustividad. Estas llamadas no producen código: si una
