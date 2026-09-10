@@ -627,7 +627,7 @@ pub fn condiciones(
 ) -> Condiciones {
     Condiciones {
         salida_no_disponible: false,
-        // PA-146a, partido en PA-146b-1. Parametro, por lo mismo que los tres de
+        // PA-146a, partido en PA-150. Parametro, por lo mismo que los tres de
         // abajo: lo que dice el almacen sobre la clave de recuperacion es un
         // hecho que esta funcion no consulta, y lo sabe quien arranco.
         // Rellenarlo despues lo dejaria todo en `false`, que se lee como «este

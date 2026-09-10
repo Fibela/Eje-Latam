@@ -174,7 +174,7 @@ pub struct Ciclo<D> {
     /// Vive aqui por lo mismo que los dos de arriba: leerla y verificarla es un
     /// hecho de fuera del ciclo, y lo sabe quien lo intento.
     configuracion: EstadoConfiguracion,
-    /// Que dice el almacen sobre la clave de recuperacion. PA-146b-1, RPT-015 §4.
+    /// Que dice el almacen sobre la clave de recuperacion. PA-150, RPT-015 §4.
     ///
     /// # Por que entra por el constructor y no por un `declarar_*`
     ///

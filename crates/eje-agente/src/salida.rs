@@ -587,7 +587,7 @@ const EMISIBLES: [(&str, bool); 14] = [
     // Perder durabilidad de la evidencia no es que alguien la tocara, pero
     // tampoco puede esperar: mientras dure, un corte de luz se lleva alertas.
     ("evidenciaEnRiesgo", true),
-    // PA-146a, partido en PA-146b-1. Emisible y sin acusar a nadie: no hay
+    // PA-146a, partido en PA-150. Emisible y sin acusar a nadie: no hay
     // ataque, hay una ceremonia que no se hizo.
     //
     // # Por que sale, siendo la unica que no se puede resolver en esta maquina

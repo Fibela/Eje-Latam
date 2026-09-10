@@ -518,7 +518,7 @@ pub struct Condiciones {
     pub evidencia_en_riesgo: bool,
     /// **Nadie ancló una clave de recuperacion en este sensor.**
     ///
-    /// PA-146a la abrio como `sinClaveDeRecuperacion`; PA-146b-1 la parte en
+    /// PA-146a la abrio como `sinClaveDeRecuperacion`; PA-150 la parte en
     /// tres al darle memoria al centinela. RPT-015 §4.
     ///
     /// # Que dice, y que no dice
@@ -550,7 +550,7 @@ pub struct Condiciones {
     pub recuperacion_no_aprovisionada: bool,
     /// **Hubo clave de recuperacion anclada y su fichero ya no esta.**
     ///
-    /// PA-146b-1. Alguien borro una credencial del almacen.
+    /// PA-150. Alguien borro una credencial del almacen.
     ///
     /// Se separa de [`Self::recuperacion_no_aprovisionada`] por lo mismo que
     /// `inventario_suprimido` se separa de un primer arranque: **el centinela es
@@ -566,7 +566,7 @@ pub struct Condiciones {
     pub recuperacion_suprimida: bool,
     /// **Hay clave de recuperacion y no es la que se anclo.**
     ///
-    /// PA-146b-1. Alguien puso **otra** clave.
+    /// PA-150. Alguien puso **otra** clave.
     ///
     /// # Por que no se lee como supresion
     ///
@@ -682,7 +682,7 @@ impl Condiciones {
     pub const fn hay_manipulacion(&self) -> bool {
         self.inventario_suprimido
             || self.inventario_no_verifica
-            // PA-146b-1. Las dos de recuperacion entran por la misma puerta: una
+            // PA-150. Las dos de recuperacion entran por la misma puerta: una
             // credencial borrada y una credencial sustituida son alguien tocando
             // el almacen. `recuperacion_no_aprovisionada` NO entra: ahi nadie
             // hizo nada, y eso es justo el problema.

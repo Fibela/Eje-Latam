@@ -111,7 +111,7 @@ export function componerCabecera(estado: EstadoPanel<Condiciones>): Cabecera {
   // quién hay que avisar. `hay_manipulacion` en Rust marca las mismas cuatro.
   //
   // PA-149. Que sean **las mismas cuatro** no lo comprueba nadie: la lista está
-  // escrita a mano aquí y a mano allí. Cuando PA-146b-1 añadió las dos de
+  // escrita a mano aquí y a mano allí. Cuando PA-150 añadió las dos de
   // recuperación al lado de Rust, esta rama se quedó con dos, y un sensor con la
   // clave de recuperación sustituida titulaba sobre el colector. El comentario
   // que había aquí decía que respetaba la separación «en lugar de reinventarla»,

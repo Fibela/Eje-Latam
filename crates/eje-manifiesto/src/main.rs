@@ -643,7 +643,7 @@ fn configurar(opciones: &Opciones) -> Result<(), ErrorHerramienta> {
 
 /// Migra el centinela de un almacen de la version 2 a la 3.
 ///
-/// PA-146b-1.
+/// PA-150.
 ///
 /// # Que hace, en una frase
 ///

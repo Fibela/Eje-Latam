@@ -53,7 +53,7 @@ const CONDICIONES = [
   ["inventarioNoVerifica", "El inventario no verifica"],
   ["registroSaturado", "El registro de evidencia está lleno"],
   ["evidenciaEnRiesgo", "Hay alertas sin guardar en disco"],
-  // PA-146b-1. Las tres llevan la consecuencia y no sólo el hecho: los nombres
+  // PA-150. Las tres llevan la consecuencia y no sólo el hecho: los nombres
   // del contrato no le dicen nada a quien no conoce RPT-015 §4, y ninguna de
   // las tres se puede resolver desde esta máquina.
   //

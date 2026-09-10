@@ -387,7 +387,7 @@ eje-manifiesto migrar-centinela --almacen <directorio>
 ```
 
 **`migrar-centinela`** lleva el centinela de un almacén de la versión 2 a la 3
-(PA-146b-1). Conserva las dos marcas de agua y les añade el **ancla**: la huella
+(PA-150). Conserva las dos marcas de agua y les añade el **ancla**: la huella
 de la `clave-recuperacion.pub` que haya en ese mismo almacén.
 
 Se ejecuta sobre una **copia** del almacén del sensor, en la máquina del

@@ -31,7 +31,7 @@ const CALMA: Condiciones = {
   // quien controle el arranque no esta en calma (RPT-074, PA-79).
   configuracionSinFirmar: false,
   configuracionNoVerifica: false,
-  // Y con clave de recuperación anclada. PA-146b-1: un sensor que no se puede
+  // Y con clave de recuperación anclada. PA-150: un sensor que no se puede
   // revocar el día que su identidad se comprometa no está en calma, está sin
   // salida — y que hoy no le pase nada es justo lo que hace que nadie se
   // acuerde. Las otras dos son manipulación y por eso en calma van apagadas.
@@ -89,7 +89,7 @@ describe("RPT-048 §2 — la cabecera decide cómo se lee todo lo demás", () =>
   });
 
   it("una clave de recuperación sustituida ocupa la cabecera", () => {
-    // PA-146b-1 / PA-149. Esto lo descubrió una captura de pantalla, no una
+    // PA-150 / PA-149. Esto lo descubrió una captura de pantalla, no una
     // prueba: en `eje-prueba`, con la clave sustituida y el agente gritando
     // «trate este equipo como comprometido», la cabecera titulaba sobre el
     // colector que falta. La fila decía la verdad y nadie miraba la fila.

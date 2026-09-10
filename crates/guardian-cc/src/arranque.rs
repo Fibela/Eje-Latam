@@ -72,7 +72,7 @@ pub const MAGICO_CENTINELA: &[u8; 8] = b"EJE-CEN1";
 ///
 /// Ese dia llego el 9 de septiembre de 2026 con `eje-prueba` en marcha, y la
 /// frase se cumple al pie de la letra: el agente **no** migra nada. Migra
-/// `eje-manifiesto migrar-centinela`, con un humano delante (PA-146b-1).
+/// `eje-manifiesto migrar-centinela`, con un humano delante (PA-150).
 pub const VERSION_CENTINELA: u16 = 3;
 
 /// Longitud exacta del fichero de centinela.
@@ -290,7 +290,7 @@ pub struct Centinelas {
     pub configuracion: Centinela,
     /// Huella de la clave de recuperacion que este sensor **tuvo alguna vez**.
     ///
-    /// PA-146b-1.
+    /// PA-150.
     ///
     /// # Que compra esto, y que no
     ///
@@ -360,7 +360,7 @@ impl Centinelas {
     ///
     /// # Por que el ancla cuenta aqui
     ///
-    /// PA-146b-1. Hasta la version 3 esto miraba solo las dos secuencias, y el
+    /// PA-150. Hasta la version 3 esto miraba solo las dos secuencias, y el
     /// motivo era bueno: un fichero que no dice nada ya lo dice su ausencia.
     ///
     /// Con el ancla deja de ser cierto. Un sensor recien aprovisionado —clave de
@@ -391,7 +391,7 @@ pub fn huella_de_recuperacion(clave: &ClaveInventario) -> Resumen {
     absorbedor.finalizar()
 }
 
-/// Que dice el almacen sobre la clave de recuperacion. PA-146b-1.
+/// Que dice el almacen sobre la clave de recuperacion. PA-150.
 ///
 /// # Cuatro estados, y ninguno se puede colapsar
 ///
@@ -838,7 +838,7 @@ pub struct Arranque {
     /// Que dice el almacen sobre la clave de recuperacion.
     ///
     /// PA-146a lo saco de esta funcion como booleano —«esta o no esta»—;
-    /// PA-146b-1 lo convierte en cuatro estados al darle memoria al centinela.
+    /// PA-150 lo convierte en cuatro estados al darle memoria al centinela.
     /// El booleano no se equivoco: se le acabo el plazo que su propia
     /// documentacion le puso.
     ///

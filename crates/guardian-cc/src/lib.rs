@@ -2693,7 +2693,7 @@ mod pruebas {
     /// Un sensor recien aprovisionado: ancla puesta, sin inventario y sin
     /// configuracion.
     ///
-    /// PA-146b-1. **Con la regla de la version 2 este fichero era corrupto**,
+    /// PA-150. **Con la regla de la version 2 este fichero era corrupto**,
     /// porque `vacio()` miraba solo las dos secuencias. Y es el estado mas
     /// importante que el ancla existe para poder afirmar: el momento justo
     /// despues de la ceremonia de RPT-015 §4, cuando el sensor todavia no ha
@@ -2738,7 +2738,7 @@ mod pruebas {
 
     /// Los cuatro veredictos del ancla, y ninguno se confunde con otro.
     ///
-    /// PA-146b-1. La fila que decide el diseno es la segunda: **clave presente y
+    /// PA-150. La fila que decide el diseno es la segunda: **clave presente y
     /// sin anclar se lee como no aprovisionada**, no como anclada. Es la negativa
     /// al «anclar al primer uso»: si el agente aceptara la clave por estar ahi,
     /// borrar los dos ficheros y dejar la propia seria un ataque completo y
@@ -2888,7 +2888,7 @@ mod pruebas {
                     // las dos formas dejaria poner un centinela mudo donde habia
                     // uno que decia algo.
                     //
-                    // PA-146b-1: son 51 bytes de relleno y no 18 porque el ancla
+                    // PA-150: son 51 bytes de relleno y no 18 porque el ancla
                     // cuenta. Un fichero con SOLO el ancla ya no entra aqui: es
                     // legitimo, y tiene su propia prueba.
                     let mut bytes = arranque::MAGICO_CENTINELA.to_vec();

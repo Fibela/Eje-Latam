@@ -1,6 +1,6 @@
 //! Lector del centinela **version 2**, para migrarlo a la 3.
 //!
-//! PA-146b-1.
+//! PA-150.
 //!
 //! # Por que este lector vive aqui y no en `guardian-cc`
 //!

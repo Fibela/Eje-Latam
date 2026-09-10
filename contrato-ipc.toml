@@ -581,7 +581,7 @@ registro = "Condiciones"
 nombre = "evidenciaEnRiesgo"
 tipo = "booleano"
 
-# PA-146a, partido en PA-146b-1. RPT-015 §4.
+# PA-146a, partido en PA-150. RPT-015 §4.
 #
 # El centinela paso a version 3 y lleva la huella de la clave de recuperacion
 # que este sensor tuvo. Con memoria, «nunca la hubo» y «la habia y ya no esta»

@@ -273,7 +273,7 @@ export interface Condiciones {
   /**
    * Nadie ancló una clave de recuperación en este sensor.
    *
-   * PA-146a, partido en PA-146b-1. RPT-015 §4. Se enciende también con el
+   * PA-146a, partido en PA-150. RPT-015 §4. Se enciende también con el
    * fichero presente y sin anclar: el agente no ancla solo, porque hacerlo
    * convertiría el ataque en «borro los dos ficheros y dejo la mía».
    *
@@ -283,14 +283,14 @@ export interface Condiciones {
   /**
    * Hubo clave de recuperación anclada y su fichero ya no está.
    *
-   * PA-146b-1. Alguien borró una credencial. El centinela es el testigo, igual
+   * PA-150. Alguien borró una credencial. El centinela es el testigo, igual
    * que lo es para el inventario suprimido.
    */
   readonly recuperacionSuprimida: boolean;
   /**
    * Hay clave de recuperación y no es la que se ancló.
    *
-   * PA-146b-1. Secuestro de identidad, no sabotaje: existe una clave viva que
+   * PA-150. Secuestro de identidad, no sabotaje: existe una clave viva que
    * no es la nuestra, y con ella se firman certificados que este sensor
    * creería.
    */

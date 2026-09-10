@@ -853,7 +853,7 @@ fn ejecutar() -> Result<(), ErrorAgente> {
     let estado = arranque.estado;
     let recuperacion = arranque.recuperacion;
 
-    // PA-146a, ampliado en PA-146b-1. Se dice tambien por pantalla, donde se
+    // PA-146a, ampliado en PA-150. Se dice tambien por pantalla, donde se
     // dicen las demas cosas que el operador tiene que saber al arrancar.
     // `eje-manifiesto generar` ya avisaba de la clave que falta en la maquina
     // del administrador; el problema era que ahi se quedaba, y quien instala el

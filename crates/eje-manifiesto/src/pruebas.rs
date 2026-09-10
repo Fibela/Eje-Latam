@@ -855,7 +855,7 @@ fn el_emisor_no_entra_en_el_binario_del_agente() {
 }
 
 // ---------------------------------------------------------------------------
-// PA-146b-1 — el lector del centinela v2
+// PA-150 — el lector del centinela v2
 // ---------------------------------------------------------------------------
 
 /// Un centinela de version 2 se lee con sus dos marcas intactas.

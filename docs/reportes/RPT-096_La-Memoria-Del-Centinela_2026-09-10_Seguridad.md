@@ -1,6 +1,6 @@
 # RPT-096 — La memoria del centinela
 
-**Tema:** PA-146b-1. El centinela recuerda qué clave de recuperación tuvo, y lo que eso destapó
+**Tema:** PA-150. El centinela recuerda qué clave de recuperación tuvo, y lo que eso destapó
 **Nº de reporte:** 096
 **Fecha:** 10 de septiembre de 2026
 **Área designada:** Seguridad
@@ -8,7 +8,7 @@
 **Estado:** **Cerrado por observación en máquina real.** Tres capturas en `docs/evidencia/`
 
 - **Depende de:** RPT-015 §4 (las dos claves), RPT-078 (el centinela y su doctrina), RPT-095 (PA-146a), RPT-011 §2 (el `Absorbedor`)
-- **Aborda:** PA-146b-1 (cerrado). Abre PA-149. Desbloquea PA-146b-2
+- **Aborda:** PA-150 (cerrado). Abre PA-149. Desbloquea PA-146b
 
 ---
 
@@ -145,8 +145,8 @@ rehacerlo o escribir por qué la asimetría sobrevive.
 
 | ID | Punto |
 |---|---|
-| PA-146b-1 | **Cerrado.** §4 |
-| PA-146b-2 | El certificado de rotación, ya con un ancla en la que apoyarse |
+| PA-150 | **Cerrado.** §4 |
+| PA-146b | El certificado de rotación, ya con un ancla en la que apoyarse |
 | PA-149 | Dos listas de «manipulación» sin nada que las coteje. §5 |
 | PA-145, PA-147, PA-148 | Sin cambios |
 
