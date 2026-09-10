@@ -271,16 +271,30 @@ export interface Condiciones {
    */
   readonly evidenciaEnRiesgo: boolean;
   /**
-   * No hay clave de recuperación en el almacén de este sensor.
+   * Nadie ancló una clave de recuperación en este sensor.
    *
-   * PA-146a, RPT-015 §4. El agente sólo afirma que el fichero no está. La
-   * consecuencia —que sin esa clave no se puede leer un certificado de
-   * revocación, y revocar es el único remedio si esta identidad se
-   * compromete— la explica esta capa, que es donde vive el juicio.
+   * PA-146a, partido en PA-146b-1. RPT-015 §4. Se enciende también con el
+   * fichero presente y sin anclar: el agente no ancla solo, porque hacerlo
+   * convertiría el ataque en «borro los dos ficheros y dejo la mía».
    *
    * No es una degradación de hoy: es la ausencia de salida para mañana.
    */
-  readonly sinClaveDeRecuperacion: boolean;
+  readonly recuperacionNoAprovisionada: boolean;
+  /**
+   * Hubo clave de recuperación anclada y su fichero ya no está.
+   *
+   * PA-146b-1. Alguien borró una credencial. El centinela es el testigo, igual
+   * que lo es para el inventario suprimido.
+   */
+  readonly recuperacionSuprimida: boolean;
+  /**
+   * Hay clave de recuperación y no es la que se ancló.
+   *
+   * PA-146b-1. Secuestro de identidad, no sabotaje: existe una clave viva que
+   * no es la nuestra, y con ella se firman certificados que este sensor
+   * creería.
+   */
+  readonly recuperacionNoVerifica: boolean;
 }
 
 /**
@@ -460,7 +474,9 @@ export const CAMPOS_CONDICIONES = [
   ["configuracionNoVerifica", "booleano"],
   ["registroSaturado", "booleano"],
   ["evidenciaEnRiesgo", "booleano"],
-  ["sinClaveDeRecuperacion", "booleano"],
+  ["recuperacionNoAprovisionada", "booleano"],
+  ["recuperacionSuprimida", "booleano"],
+  ["recuperacionNoVerifica", "booleano"],
 ] as const satisfies readonly (readonly [keyof Condiciones, string])[];
 
 // Comprobación de exhaustividad. Estas llamadas no producen código: si una

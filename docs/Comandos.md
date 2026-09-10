@@ -383,7 +383,22 @@ eje-manifiesto emitir       --semilla <fichero> --entrada <toml> --salida <inv> 
 eje-manifiesto configurar   --semilla <fichero> --entrada <toml> --salida <cfg> [--anterior <cfg>]
 eje-manifiesto recuperacion --fragmentos <prefijo> --almacen <directorio>
 eje-manifiesto revocar      --fragmento-uno <frg> --fragmento-dos <frg> --almacen <dir> --sucesora <pub> --corte <n>
+eje-manifiesto migrar-centinela --almacen <directorio>
 ```
+
+**`migrar-centinela`** lleva el centinela de un almacén de la versión 2 a la 3
+(PA-146b-1). Conserva las dos marcas de agua y les añade el **ancla**: la huella
+de la `clave-recuperacion.pub` que haya en ese mismo almacén.
+
+Se ejecuta sobre una **copia** del almacén del sensor, en la máquina del
+administrador, y el resultado se devuelve al sensor. No la ejecuta el agente a
+propósito: si un sensor anclara solo la primera clave que ve, el ataque completo
+sería borrar el centinela y la clave y dejar la propia.
+
+Sin clave de recuperación en el almacén **migra igual y lo dice**: el sensor
+queda en la versión 3 —que es lo que el agente sabe leer— pero sin ancla, es
+decir, todavía sin remedio ante un compromiso de identidad. Negarse a migrar
+convertiría «le falta una ceremonia» en «no arranca».
 
 **`configurar`** emite la configuración firmada del sensor (RPT-074, PA-79). El
 administrador escribe un TOML y sale un binario firmado que sólo vale en la

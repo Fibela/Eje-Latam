@@ -82,7 +82,7 @@ export function componerCabecera(estado: EstadoPanel<Condiciones>): Cabecera {
 
   if (estado.clase !== "datos") {
     // `vacio` y `noServido` no tienen sentido para las condiciones: el agente
-    // siempre devuelve las catorce. Si llega uno de estos, algo cambió en el
+    // siempre devuelve las dieciséis. Si llega uno de estos, algo cambió en el
     // contrato y decirlo es mejor que elegir una rama al azar.
     return {
       urgencia: "critica",
@@ -108,13 +108,44 @@ export function componerCabecera(estado: EstadoPanel<Condiciones>): Cabecera {
   }
 
   // Manipulación antes que el resto: alguien tocó el almacén, y eso cambia a
-  // quién hay que avisar. `hay_manipulacion` en Rust separa estas dos de las
-  // demás; aquí se respeta esa separación en lugar de reinventarla.
+  // quién hay que avisar. `hay_manipulacion` en Rust marca las mismas cuatro.
+  //
+  // PA-149. Que sean **las mismas cuatro** no lo comprueba nadie: la lista está
+  // escrita a mano aquí y a mano allí. Cuando PA-146b-1 añadió las dos de
+  // recuperación al lado de Rust, esta rama se quedó con dos, y un sensor con la
+  // clave de recuperación sustituida titulaba sobre el colector. El comentario
+  // que había aquí decía que respetaba la separación «en lugar de reinventarla»,
+  // y la estaba reinventando mientras lo decía.
   if (condiciones.inventarioSuprimido || condiciones.inventarioNoVerifica) {
     return {
       urgencia: "critica",
       titulo: "La evidencia de este equipo no verifica",
       detalle: "Responder como incidente: alguien alteró el almacén del sensor.",
+      datosDeAntes: false,
+    };
+  }
+
+  // La clave sustituida va antes que la borrada: las dos son manipulación, pero
+  // borrar deja al sensor sin remedio y sustituir se lo da a otro. Con las dos
+  // encendidas —que no puede pasar, son excluyentes— mandaría la peor.
+  if (condiciones.recuperacionNoVerifica) {
+    return {
+      urgencia: "critica",
+      titulo: "La clave de recuperación de este sensor no es la suya",
+      detalle:
+        "Hay una clave de recuperación viva que no es la vuestra, y con ella se " +
+        "firman certificados de revocación. Tratar el equipo como comprometido.",
+      datosDeAntes: false,
+    };
+  }
+
+  if (condiciones.recuperacionSuprimida) {
+    return {
+      urgencia: "critica",
+      titulo: "Alguien borró la clave de recuperación de este sensor",
+      detalle:
+        "El sensor recuerda haberla tenido. Nadie la pierde por accidente, y sin " +
+        "ella este equipo no se puede revocar si su identidad se compromete.",
       datosDeAntes: false,
     };
   }

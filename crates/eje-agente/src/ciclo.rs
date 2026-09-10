@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 
 use eje_almacen::RegistroEvidencia;
 use eje_ipc::mensajes::{Condiciones, PeticionAlertas};
-use guardian_cc::arranque::EstadoArranque;
+use guardian_cc::arranque::{EstadoArranque, EstadoRecuperacion};
 use guardian_cc::clasificacion::{Evidencia, MarcadoDispositivo, clasificar};
 use guardian_cc::observacion::{AlmacenObservacion, Protocolo};
 use guardian_cc::proveedores::{
@@ -174,7 +174,7 @@ pub struct Ciclo<D> {
     /// Vive aqui por lo mismo que los dos de arriba: leerla y verificarla es un
     /// hecho de fuera del ciclo, y lo sabe quien lo intento.
     configuracion: EstadoConfiguracion,
-    /// No hay clave de recuperacion en el almacen. PA-146a, RPT-015 §4.
+    /// Que dice el almacen sobre la clave de recuperacion. PA-146b-1, RPT-015 §4.
     ///
     /// # Por que entra por el constructor y no por un `declarar_*`
     ///
@@ -184,11 +184,11 @@ pub struct Ciclo<D> {
     /// se sabe al leer el almacen, antes de la primera vuelta, y no cambia
     /// mientras el proceso vive.
     ///
-    /// Un `declarar_*` con valor de partida `false` significaria «hay clave de
-    /// recuperacion» para cualquier `main` que olvidara llamarlo, que es
-    /// justamente el supuesto optimista contra el que avisa el comentario de
-    /// [`Self::configuracion`]. Por el constructor, olvidarlo no compila.
-    sin_clave_de_recuperacion: bool,
+    /// Un `declarar_*` con valor de partida `NoAprovisionada` seria menos malo
+    /// que un booleano en `false` —al menos no afirma nada bueno—, pero seguiria
+    /// siendo un mecanismo que hay que acordarse de invocar. Por el constructor,
+    /// olvidarlo no compila.
+    recuperacion: EstadoRecuperacion,
 }
 
 impl<D: Despacho> Ciclo<D> {
@@ -199,10 +199,10 @@ impl<D: Despacho> Ciclo<D> {
         perfil: PerfilSegmento,
         registro: RegistroEvidencia,
         emisor: Option<Emisor<D>>,
-        sin_clave_de_recuperacion: bool,
+        recuperacion: EstadoRecuperacion,
     ) -> Self {
         Self {
-            sin_clave_de_recuperacion,
+            recuperacion,
             almacen: AlmacenObservacion::nuevo(),
             registro,
             emisor,
@@ -556,7 +556,7 @@ impl<D: Despacho> Ciclo<D> {
             self.emisor.is_none(),
             self.escucha_no_disponible,
             self.configuracion,
-            self.sin_clave_de_recuperacion,
+            self.recuperacion,
         );
 
         // `evidenciaEnRiesgo` **si** es emisible, y hasta aqui salia siempre
@@ -773,7 +773,7 @@ mod pruebas {
                 PerfilSegmento::Ot,
                 registro,
                 Some(emisor),
-                false,
+                EstadoRecuperacion::Anclada,
             ),
             buzon,
         )
@@ -806,7 +806,7 @@ mod pruebas {
                 PerfilSegmento::Ot,
                 RegistroEvidencia::nuevo(),
                 Some(emisor),
-                false,
+                EstadoRecuperacion::Anclada,
             ),
             buzon,
             roto,
@@ -1583,7 +1583,7 @@ mod pruebas {
             PerfilSegmento::Ot,
             RegistroEvidencia::nuevo(),
             None,
-            false,
+            EstadoRecuperacion::Anclada,
         );
 
         let resultado = ciclo.vuelta(&EstadoArranque::PrimerArranque, &[], 1_000, 1_000_000);

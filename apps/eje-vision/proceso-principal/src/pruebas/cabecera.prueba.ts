@@ -31,10 +31,13 @@ const CALMA: Condiciones = {
   // quien controle el arranque no esta en calma (RPT-074, PA-79).
   configuracionSinFirmar: false,
   configuracionNoVerifica: false,
-  // Y con clave de recuperación. PA-146a: un sensor que no se puede revocar el
-  // día que su identidad se comprometa no está en calma, está sin salida — y
-  // que hoy no le pase nada es justo lo que hace que nadie se acuerde.
-  sinClaveDeRecuperacion: false,
+  // Y con clave de recuperación anclada. PA-146b-1: un sensor que no se puede
+  // revocar el día que su identidad se comprometa no está en calma, está sin
+  // salida — y que hoy no le pase nada es justo lo que hace que nadie se
+  // acuerde. Las otras dos son manipulación y por eso en calma van apagadas.
+  recuperacionNoAprovisionada: false,
+  recuperacionSuprimida: false,
+  recuperacionNoVerifica: false,
   registroSaturado: false,
   evidenciaEnRiesgo: false,
 };
@@ -83,6 +86,56 @@ describe("RPT-048 §2 — la cabecera decide cómo se lee todo lo demás", () =>
     assert.equal(cabecera.urgencia, "critica");
     assert.match(cabecera.detalle, /incidente/);
     assert.equal(cabecera.datosDeAntes, false, "el sensor sigue observando");
+  });
+
+  it("una clave de recuperación sustituida ocupa la cabecera", () => {
+    // PA-146b-1 / PA-149. Esto lo descubrió una captura de pantalla, no una
+    // prueba: en `eje-prueba`, con la clave sustituida y el agente gritando
+    // «trate este equipo como comprometido», la cabecera titulaba sobre el
+    // colector que falta. La fila decía la verdad y nadie miraba la fila.
+    const cabecera = cabeceraDe({
+      ...CALMA,
+      sinColector: true,
+      recuperacionNoVerifica: true,
+    });
+
+    assert.equal(cabecera.urgencia, "critica");
+    assert.match(cabecera.titulo, /clave de recuperación/i);
+    assert.doesNotMatch(
+      cabecera.titulo,
+      /colector/i,
+      "una condición de atención no puede tapar una de manipulación",
+    );
+  });
+
+  it("una clave de recuperación borrada también, y con otro texto", () => {
+    // Borrar y sustituir se separaron en el contrato porque los remedios no se
+    // parecen. Si la cabecera los contara igual, esa separación no llegaría al
+    // único sitio donde alguien la lee.
+    const borrada = cabeceraDe({ ...CALMA, recuperacionSuprimida: true });
+    const sustituida = cabeceraDe({ ...CALMA, recuperacionNoVerifica: true });
+
+    assert.equal(borrada.urgencia, "critica");
+    assert.match(borrada.titulo, /borró|borro/i);
+    assert.notEqual(
+      borrada.titulo,
+      sustituida.titulo,
+      "sabotaje y secuestro no pueden titular igual",
+    );
+  });
+
+  it("la ceremonia pendiente NO ocupa la cabecera", () => {
+    // `recuperacionNoAprovisionada` es la tercera del grupo y no es
+    // manipulación: nadie tocó nada, falta una ceremonia. Subirla a la cabecera
+    // pondría en crítica a todos los sensores recién instalados, y en un mes
+    // nadie miraría la cabecera.
+    const cabecera = cabeceraDe({
+      ...CALMA,
+      recuperacionNoAprovisionada: true,
+    });
+
+    assert.equal(cabecera.urgencia, "normal");
+    assert.equal(cabecera.titulo, "");
   });
 
   it("el registro lleno es crítico y NO se presenta como manipulación", () => {
@@ -178,7 +231,7 @@ describe("RPT-048 §2 — la cabecera decide cómo se lee todo lo demás", () =>
 
   it("correr sin configuración firmada ocupa cabecera, no una fila", () => {
     // El riesgo de esta condición no es técnico: es que el estado degradado se
-    // vuelva el normal. Dejarla abajo entre catorce filas es exactamente cómo se
+    // vuelva el normal. Dejarla abajo entre dieciséis filas es exactamente cómo se
     // aprende a ignorarla (RPT-074 §8).
     const cabecera = cabeceraDe({ ...CALMA, configuracionSinFirmar: true });
 
@@ -224,7 +277,7 @@ describe("RPT-048 §2 — la cabecera decide cómo se lee todo lo demás", () =>
   });
 
   it("una respuesta inesperada se declara en lugar de elegir una rama", () => {
-    // El agente siempre devuelve las catorce condiciones. Si llega otra cosa, el
+    // El agente siempre devuelve las dieciséis condiciones. Si llega otra cosa, el
     // contrato cambió, y decirlo es mejor que suponer.
     const cabecera = componerCabecera({ clase: "vacio" });
 

@@ -49,8 +49,8 @@ use eje_captura::{DireccionEnlace, ErrorCaptura, FuentePasiva, abrir};
 use eje_ipc::mensajes::EstadoAgente;
 use guardian_cc::PerfilSegmento;
 use guardian_cc::arranque::{
-    ErrorArranque, EstadoArranque, RutasAlmacen, aceptar_configuracion, arrancar_con_almacen,
-    cargar_centinela,
+    ErrorArranque, EstadoArranque, EstadoRecuperacion, RutasAlmacen, aceptar_configuracion,
+    arrancar_con_almacen, cargar_centinela,
 };
 use guardian_cc::clave::analizar as analizar_clave;
 use guardian_cc::inventario::DominioClave;
@@ -851,17 +851,37 @@ fn ejecutar() -> Result<(), ErrorAgente> {
     // porque `arrancar` exigia dos claves que nadie le daba.
     let arranque = arrancar_con_almacen(&rutas)?;
     let estado = arranque.estado;
-    let sin_clave_de_recuperacion = arranque.sin_clave_de_recuperacion;
+    let recuperacion = arranque.recuperacion;
 
-    // PA-146a. Se dice tambien por pantalla, donde se dicen las demas cosas que
-    // el operador tiene que saber al arrancar. `eje-manifiesto generar` ya lo
-    // avisaba en la maquina del administrador; el problema era que ahi se
-    // quedaba, y quien instala el sensor no es quien emitio la semilla.
-    if sin_clave_de_recuperacion {
-        println!("  !! SIN CLAVE DE RECUPERACION. Si la identidad de este sensor se");
-        println!("     compromete, no hay forma de revocarla: leer un certificado de");
-        println!("     revocacion exige esa clave (RPT-015 §4). Se crea con");
-        println!("     'eje-manifiesto recuperacion', y se reparte entre tres custodios.");
+    // PA-146a, ampliado en PA-146b-1. Se dice tambien por pantalla, donde se
+    // dicen las demas cosas que el operador tiene que saber al arrancar.
+    // `eje-manifiesto generar` ya avisaba de la clave que falta en la maquina
+    // del administrador; el problema era que ahi se quedaba, y quien instala el
+    // sensor no es quien emitio la semilla.
+    //
+    // El `match` no lleva comodin: si aparece un quinto estado, aqui deja de
+    // compilar en lugar de salir por pantalla como el mas parecido (RPT-090 §3).
+    match recuperacion {
+        EstadoRecuperacion::Anclada => {}
+        EstadoRecuperacion::NoAprovisionada => {
+            println!("  !! SIN CLAVE DE RECUPERACION ANCLADA. Si la identidad de este");
+            println!("     sensor se compromete, no hay forma de revocarla: leer un");
+            println!("     certificado de revocacion exige esa clave (RPT-015 §4). Se");
+            println!("     crea con 'eje-manifiesto recuperacion' y se ancla con");
+            println!("     'eje-manifiesto migrar-centinela'.");
+        }
+        EstadoRecuperacion::Suprimida => {
+            println!("  !! CLAVE DE RECUPERACION SUPRIMIDA. El centinela recuerda una y");
+            println!("     el fichero ya no esta. Nadie la pierde por accidente: alguien");
+            println!("     la borro, y este sensor se ha quedado sin remedio ante un");
+            println!("     compromiso de su identidad. Es un incidente, no un aviso.");
+        }
+        EstadoRecuperacion::NoVerifica => {
+            println!("  !! CLAVE DE RECUPERACION SUSTITUIDA. Hay una y NO es la que este");
+            println!("     sensor tiene anclada. Existe una clave de recuperacion viva");
+            println!("     que no es la vuestra, y con ella se firman certificados de");
+            println!("     revocacion. Trate este equipo como comprometido.");
+        }
     }
 
     // PA-58. El registro se carga del disco ANTES de observar nada, para que las
@@ -1000,7 +1020,7 @@ fn ejecutar() -> Result<(), ErrorAgente> {
         opciones.perfil,
         registro,
         emisor,
-        sin_clave_de_recuperacion,
+        recuperacion,
     );
     ciclo.declarar_intervalo_latido(opciones.intervalo_latido);
 
@@ -1862,7 +1882,9 @@ mod pruebas_voz {
             configuracion_no_verifica: false,
             registro_saturado: false,
             evidencia_en_riesgo: false,
-            sin_clave_de_recuperacion: false,
+            recuperacion_no_aprovisionada: false,
+            recuperacion_suprimida: false,
+            recuperacion_no_verifica: false,
         }
     }
 

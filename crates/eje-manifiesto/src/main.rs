@@ -32,10 +32,14 @@ use eje_manifiesto::fragmento::{
 use eje_manifiesto::eco::Eco;
 use eje_manifiesto::reposo_semilla::{LONGITUD_SAL, abrir, sellar};
 use eje_manifiesto::{Emisor, ErrorEmision};
-use guardian_cc::arranque::{RutasAlmacen, aprovisionar_clave};
+use eje_manifiesto::centinela_v2::analizar_v2;
+use guardian_cc::arranque::{
+    Centinelas, RutasAlmacen, aprovisionar_clave, cargar_clave, huella_de_recuperacion,
+    serializar_centinela,
+};
 use guardian_cc::clave::analizar as analizar_clave;
 use guardian_cc::configuracion;
-use guardian_cc::inventario::DominioClave;
+use guardian_cc::inventario::{Centinela, DominioClave};
 use guardian_cc::revocacion::{
     Anotacion, ArchivoRevocaciones, CertificadoRevocacion, mensaje_de_certificado,
 };
@@ -58,9 +62,14 @@ enum ErrorHerramienta {
          [--anterior <cfg>]\n  \
          eje-manifiesto recuperacion --fragmentos <prefijo> --almacen <directorio>\n  \
          eje-manifiesto revocar      --fragmento-uno <frg> --fragmento-dos <frg> \
-         --almacen <directorio> --sucesora <pub> --corte <n>"
+         --almacen <directorio> --sucesora <pub> --corte <n>\n  \
+         eje-manifiesto migrar-centinela --almacen <directorio>"
     )]
     Uso,
+
+    /// El centinela que se quiere migrar no es de version 2.
+    #[error(transparent)]
+    CentinelaV2(#[from] eje_manifiesto::centinela_v2::ErrorCentinelaV2),
 
     /// Un fragmento de la clave de recuperacion no es valido.
     #[error(transparent)]
@@ -632,6 +641,109 @@ fn configurar(opciones: &Opciones) -> Result<(), ErrorHerramienta> {
     Ok(())
 }
 
+/// Migra el centinela de un almacen de la version 2 a la 3.
+///
+/// PA-146b-1.
+///
+/// # Que hace, en una frase
+///
+/// Conserva las dos marcas de agua tal cual y les anade el ancla: la huella de
+/// la `clave-recuperacion.pub` que haya en ese mismo almacen.
+///
+/// # Por que no la escribe el agente
+///
+/// Porque si el sensor anclara solo la primera clave que ve, el ataque completo
+/// seria «borro el centinela y la clave, y dejo la mia»: el agente leeria un
+/// almacen sin ancla, lo tomaria por recien instalado, y anclaria la del
+/// atacante. El ancla la pone quien tiene la ceremonia, no quien tiene el disco.
+///
+/// # Por que **no** se niega a migrar sin clave de recuperacion
+///
+/// Un sensor sin clave es un despliegue real y frecuente —`eje-prueba` lo es
+/// hoy—, y negarse dejaria su centinela en la version 2, es decir, ilegible para
+/// el agente nuevo: convertiriamos «le falta una ceremonia» en «no arranca».
+///
+/// Lo que si hace es **decirlo en voz alta**, porque el resultado de esa
+/// migracion es un sensor que sigue sin remedio ante un compromiso, y el aviso
+/// que nadie leyo es el origen de todo este punto (RPT-094 §1).
+///
+/// # Errores
+///
+/// [`ErrorHerramienta::Uso`] sin `--almacen`, [`ErrorHerramienta::Fichero`] si el
+/// centinela no se puede leer o escribir, y
+/// [`ErrorHerramienta::CentinelaV2`] si lo que hay no es un centinela de version
+/// 2 —lo que incluye uno ya migrado, que se dice con su propio mensaje.
+fn migrar_centinela(opciones: &Opciones) -> Result<(), ErrorHerramienta> {
+    let Some(almacen) = &opciones.almacen else {
+        return Err(ErrorHerramienta::Uso);
+    };
+
+    let rutas = RutasAlmacen::nuevo(almacen.clone());
+
+    let marcas = analizar_v2(&leer(&rutas.centinela())?)?;
+
+    // La clave se lee del MISMO almacen, no de una ruta aparte. Un `--clave`
+    // suelto permitiria anclar en el centinela de un sensor la huella de la
+    // clave de otro, y el resultado —un sensor que se acusa a si mismo de
+    // sustitucion en cuanto arranque— seria dificil de diagnosticar y facil de
+    // provocar por descuido.
+    let recuperacion = cargar_clave(
+        &rutas.clave_recuperacion(),
+        DominioClave::ClienteRecuperacion,
+    )
+    .map_err(|error| ErrorHerramienta::Aprovisionamiento {
+        detalle: error.to_string(),
+    })?;
+
+    let huella = recuperacion.as_ref().map(huella_de_recuperacion);
+
+    let centinelas = Centinelas::SIN_ESTABLECER
+        .con_inventario(marcas.inventario)
+        .con_configuracion(marcas.configuracion)
+        .con_recuperacion(huella);
+
+    escribir(&rutas.centinela(), &serializar_centinela(centinelas))?;
+
+    println!("Centinela migrado    : {}", rutas.centinela().display());
+    println!("Version              : 2 -> 3");
+    println!(
+        "Marca de inventario  : {}",
+        describir_marca(marcas.inventario)
+    );
+    println!(
+        "Marca de configuracion: {}",
+        describir_marca(marcas.configuracion)
+    );
+    println!();
+
+    match huella {
+        Some(resumen) => {
+            println!("Ancla de recuperacion: {}", resumen.hexadecimal());
+            println!();
+            println!("A partir de ahora, que esa clave desaparezca o cambie deja de");
+            println!("parecerse a una instalacion recien hecha.");
+        }
+        None => {
+            println!("  !! SIN ANCLA. No hay clave de recuperacion en este almacen, asi");
+            println!("     que el centinela migrado no recuerda ninguna y este sensor");
+            println!("     sigue sin remedio si su identidad se compromete.");
+            println!();
+            println!("     Se arregla con 'eje-manifiesto recuperacion', copiando la");
+            println!("     clave publica al almacen del sensor, y volviendo a ejecutar");
+            println!("     esta orden. Migrar sin ancla es valido y esta a medias.");
+        }
+    }
+
+    Ok(())
+}
+
+/// Describe una marca de agua para la salida por pantalla.
+fn describir_marca(marca: Centinela) -> String {
+    marca
+        .secuencia()
+        .map_or_else(|| "sin establecer".to_owned(), |valor| valor.to_string())
+}
+
 fn main() -> Result<(), ErrorHerramienta> {
     let argumentos: Vec<String> = std::env::args().skip(1).collect();
     let Some((orden, resto)) = argumentos.split_first() else {
@@ -646,6 +758,7 @@ fn main() -> Result<(), ErrorHerramienta> {
         "configurar" => configurar(&opciones),
         "recuperacion" => recuperacion(&opciones),
         "revocar" => revocar(&opciones),
+        "migrar-centinela" => migrar_centinela(&opciones),
         _ => Err(ErrorHerramienta::Uso),
     }
 }

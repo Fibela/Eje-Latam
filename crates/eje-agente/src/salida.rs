@@ -544,7 +544,7 @@ impl Transicion {
 /// Es ademas el unico camino posible. Lo que podria contar que la consola no
 /// conecta es la consola, que es lo que no conecta. Sin esta linea, un sensor
 /// vivo e inalcanzable seria invisible tambien para la sala.
-const EMISIBLES: [(&str, bool); 12] = [
+const EMISIBLES: [(&str, bool); 14] = [
     ("inventarioSuprimido", true),
     ("inventarioNoVerifica", true),
     ("observacionSaturada", false),
@@ -587,8 +587,8 @@ const EMISIBLES: [(&str, bool); 12] = [
     // Perder durabilidad de la evidencia no es que alguien la tocara, pero
     // tampoco puede esperar: mientras dure, un corte de luz se lleva alertas.
     ("evidenciaEnRiesgo", true),
-    // PA-146a. Emisible, y sin acusar a nadie: no hay ataque, hay una ceremonia
-    // que no se hizo.
+    // PA-146a, partido en PA-146b-1. Emisible y sin acusar a nadie: no hay
+    // ataque, hay una ceremonia que no se hizo.
     //
     // # Por que sale, siendo la unica que no se puede resolver en esta maquina
     //
@@ -603,7 +603,16 @@ const EMISIBLES: [(&str, bool); 12] = [
     // hasta que cambie. Un sensor que lleve dos anos sin clave la emitira una
     // vez por reinicio, que es exactamente la frecuencia con la que alguien
     // deberia acordarse.
-    ("sinClaveDeRecuperacion", false),
+    ("recuperacionNoAprovisionada", false),
+    // Las dos siguientes SI acusan. El centinela recordaba una clave: que ya no
+    // este, o que sea otra, exige que alguien tocara el almacen.
+    //
+    // Van con la gravedad de la manipulacion porque el remedio no espera al
+    // lunes. Y van al SIEM por la misma razon que `capturaNoDisponible`: un
+    // sensor sin clave de recuperacion sigue observando, respondiendo y
+    // pintando, asi que pasa por sano mientras dure.
+    ("recuperacionSuprimida", true),
+    ("recuperacionNoVerifica", true),
 ];
 
 /// Valor de una condicion por su identificador.
@@ -613,7 +622,7 @@ const EMISIBLES: [(&str, bool); 12] = [
 /// [`EMISIBLES`] pareciera apagada **para siempre**, y una condicion que nunca
 /// se activa no la echa de menos nadie.
 ///
-/// Devuelve `Some` para **las catorce**, incluidas las dos que no se emiten: esto es
+/// Devuelve `Some` para **las dieciseis**, incluidas las dos que no se emiten: esto es
 /// un accesor y no una politica. Quien decide que sale es [`EMISIBLES`], en un
 /// solo sitio y con el motivo escrito.
 fn valor_de(condiciones: &Condiciones, identificador: &str) -> Option<bool> {
@@ -970,7 +979,12 @@ mod pruebas_emisibles {
         Condiciones, DatosLatido, EMISIBLES, INTERVALO_LATIDO_MS, linea_de_latido, valor_de,
     };
 
-    /// Las catorce condiciones a cierto, para ejercitar todas las salidas a la vez.
+    /// Las dieciseis condiciones a cierto, para ejercitar todas las salidas a la vez.
+    ///
+    /// Las tres de recuperacion se encienden juntas **aunque en produccion sean
+    /// mutuamente excluyentes**: esto no es un estado alcanzable, es un
+    /// ejercitador de salidas. Que no sea alcanzable lo garantiza el `match` de
+    /// `condiciones`, no este dato.
     fn todas_encendidas() -> Condiciones {
         Condiciones {
             inventario_suprimido: true,
@@ -986,7 +1000,9 @@ mod pruebas_emisibles {
             configuracion_no_verifica: true,
             registro_saturado: true,
             evidencia_en_riesgo: true,
-            sin_clave_de_recuperacion: true,
+            recuperacion_no_aprovisionada: true,
+            recuperacion_suprimida: true,
+            recuperacion_no_verifica: true,
         }
     }
 
@@ -1071,7 +1087,9 @@ mod pruebas_emisibles {
             sin_colector: false,
             registro_saturado: false,
             evidencia_en_riesgo: false,
-            sin_clave_de_recuperacion: false,
+            recuperacion_no_aprovisionada: false,
+            recuperacion_suprimida: false,
+            recuperacion_no_verifica: false,
         };
 
         let linea = String::from_utf8_lossy(&linea_de_latido(&DatosLatido {
@@ -1118,7 +1136,9 @@ mod pruebas_emisibles {
             configuracion_no_verifica: false,
             registro_saturado: false,
             evidencia_en_riesgo: false,
-            sin_clave_de_recuperacion: false,
+            recuperacion_no_aprovisionada: false,
+            recuperacion_suprimida: false,
+            recuperacion_no_verifica: false,
         };
 
         let linea = String::from_utf8_lossy(&linea_de_latido(&DatosLatido {
@@ -1204,7 +1224,9 @@ mod pruebas_emisibles {
             configuracion_no_verifica: false,
             registro_saturado: false,
             evidencia_en_riesgo: false,
-            sin_clave_de_recuperacion: false,
+            recuperacion_no_aprovisionada: false,
+            recuperacion_suprimida: false,
+            recuperacion_no_verifica: false,
         };
 
         let linea = String::from_utf8_lossy(&linea_de_latido(&DatosLatido {

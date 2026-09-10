@@ -2648,8 +2648,9 @@ mod pruebas {
     use std::path::PathBuf;
 
     use arranque::{
-        Centinelas, ErrorArranque, EstadoArranque, RutasAlmacen, aceptar_configuracion,
-        aceptar_inventario, analizar_centinela, arrancar, cargar_centinela, serializar_centinela,
+        Centinelas, ErrorArranque, EstadoArranque, EstadoRecuperacion, RutasAlmacen,
+        aceptar_configuracion, aceptar_inventario, analizar_centinela, arrancar, cargar_centinela,
+        huella_de_recuperacion, serializar_centinela,
     };
 
     /// Almacen aislado en disco, retirado al terminar.
@@ -2679,12 +2680,113 @@ mod pruebas {
         clave_de_recuperacion(DominioClave::ClienteRecuperacion).1
     }
 
-    /// Un centinela con las dos marcas puestas, para las pruebas de formato.
+    /// Un centinela con las dos marcas y el ancla puestas, para las pruebas de
+    /// formato.
     fn centinelas_de_prueba() -> Centinelas {
         Centinelas {
             inventario: Centinela::Establecido(42),
             configuracion: Centinela::Establecido(3),
+            huella_recuperacion: Some(huella_de_recuperacion(&clave_recuperacion_de_prueba())),
         }
+    }
+
+    /// Un sensor recien aprovisionado: ancla puesta, sin inventario y sin
+    /// configuracion.
+    ///
+    /// PA-146b-1. **Con la regla de la version 2 este fichero era corrupto**,
+    /// porque `vacio()` miraba solo las dos secuencias. Y es el estado mas
+    /// importante que el ancla existe para poder afirmar: el momento justo
+    /// despues de la ceremonia de RPT-015 §4, cuando el sensor todavia no ha
+    /// aceptado nada.
+    ///
+    /// Si esta prueba se pone roja, no se ajusta: significa que alguien
+    /// devolvio `vacio()` a mirar dos campos y que aprovisionar la clave de
+    /// recuperacion volvio a ser irrepresentable.
+    #[test]
+    fn un_centinela_con_solo_el_ancla_es_legitimo() {
+        let centinelas = Centinelas::SIN_ESTABLECER
+            .con_recuperacion(Some(huella_de_recuperacion(&clave_recuperacion_de_prueba())));
+
+        assert!(!centinelas.vacio(), "el ancla sola ya afirma algo");
+        assert_eq!(
+            analizar_centinela(&serializar_centinela(centinelas)).expect("debe analizar"),
+            centinelas
+        );
+    }
+
+    /// El ancla no se contagia de las marcas ni al reves.
+    ///
+    /// Mismo motivo que `las_dos_marcas_del_centinela_no_se_contagian`, ahora con
+    /// tres campos: aceptar un inventario no puede borrar el ancla, o quitar la
+    /// clave de recuperacion dejaria de notarse justo despues de la operacion
+    /// mas comun del almacen.
+    #[test]
+    fn el_ancla_sobrevive_a_las_dos_marcas() {
+        let huella = huella_de_recuperacion(&clave_recuperacion_de_prueba());
+
+        let despues = Centinelas::SIN_ESTABLECER
+            .con_recuperacion(Some(huella))
+            .con_inventario(Centinela::Establecido(7))
+            .con_configuracion(Centinela::Establecido(2));
+
+        assert_eq!(despues.huella_recuperacion, Some(huella));
+        assert_eq!(
+            analizar_centinela(&serializar_centinela(despues)).expect("debe analizar"),
+            despues
+        );
+    }
+
+    /// Los cuatro veredictos del ancla, y ninguno se confunde con otro.
+    ///
+    /// PA-146b-1. La fila que decide el diseno es la segunda: **clave presente y
+    /// sin anclar se lee como no aprovisionada**, no como anclada. Es la negativa
+    /// al «anclar al primer uso»: si el agente aceptara la clave por estar ahi,
+    /// borrar los dos ficheros y dejar la propia seria un ataque completo y
+    /// silencioso, y todo este formato no serviria de nada.
+    #[test]
+    fn el_ancla_distingue_los_cuatro_estados_de_la_recuperacion() {
+        let clave = clave_recuperacion_de_prueba();
+        let huella = huella_de_recuperacion(&clave);
+
+        // Una clave DISTINTA. `clave_de_recuperacion` es determinista —misma
+        // semilla, misma clave—, asi que llamarla otra vez habria dado la misma
+        // y esta prueba habria pasado en verde sin comprobar la sustitucion.
+        let otra = {
+            let (_, verificadora) = generar_par(&mut GeneradorDeterminista::nuevo(0x4F_54_52));
+            ClaveInventario::nueva(verificadora, DominioClave::ClienteRecuperacion)
+        };
+        assert_ne!(
+            huella,
+            huella_de_recuperacion(&otra),
+            "las dos claves de esta prueba tienen que ser distintas de verdad"
+        );
+
+        assert_eq!(
+            EstadoRecuperacion::evaluar(None, None),
+            EstadoRecuperacion::NoAprovisionada
+        );
+        assert_eq!(
+            EstadoRecuperacion::evaluar(None, Some(&clave)),
+            EstadoRecuperacion::NoAprovisionada,
+            "una clave sin anclar NO se adopta por estar en el disco"
+        );
+        assert_eq!(
+            EstadoRecuperacion::evaluar(Some(huella), None),
+            EstadoRecuperacion::Suprimida
+        );
+        assert_eq!(
+            EstadoRecuperacion::evaluar(Some(huella), Some(&otra)),
+            EstadoRecuperacion::NoVerifica,
+            "otra clave no es la nuestra, y no es lo mismo que no haber ninguna"
+        );
+        assert_eq!(
+            EstadoRecuperacion::evaluar(Some(huella), Some(&clave)),
+            EstadoRecuperacion::Anclada
+        );
+
+        assert!(!EstadoRecuperacion::NoAprovisionada.es_manipulacion());
+        assert!(EstadoRecuperacion::Suprimida.es_manipulacion());
+        assert!(EstadoRecuperacion::NoVerifica.es_manipulacion());
     }
 
     #[test]
@@ -2713,6 +2815,7 @@ mod pruebas {
             let centinelas = Centinelas {
                 inventario,
                 configuracion,
+                huella_recuperacion: None,
             };
 
             assert_eq!(
@@ -2734,6 +2837,7 @@ mod pruebas {
         let mut bytes = serializar_centinela(Centinelas {
             inventario: Centinela::Establecido(9),
             configuracion: Centinela::SinEstablecer,
+            huella_recuperacion: None,
         });
         // La marca de configuracion empieza en 19: presencia en 19, valor en 20.
         bytes[27] = 5;
@@ -2750,7 +2854,7 @@ mod pruebas {
         // un primer arranque, borrar el inventario volveria a funcionar.
         let casos: Vec<(Vec<u8>, &str)> = vec![
             (vec![], "vacio"),
-            (vec![0u8; 28], "ceros con la longitud correcta"),
+            (vec![0u8; 61], "ceros con la longitud correcta"),
             (
                 serializar_centinela(centinelas_de_prueba())[..27].to_vec(),
                 "truncado por un byte",
@@ -2779,13 +2883,17 @@ mod pruebas {
             ),
             (
                 {
-                    // Un fichero que no afirma ninguna de las dos series. Eso ya
-                    // lo dice la AUSENCIA del fichero, y admitir las dos formas
-                    // dejaria poner un centinela que no dice nada donde habia uno
-                    // que decia algo.
+                    // Un fichero que no afirma NADA: ni las dos series ni el
+                    // ancla. Eso ya lo dice la AUSENCIA del fichero, y admitir
+                    // las dos formas dejaria poner un centinela mudo donde habia
+                    // uno que decia algo.
+                    //
+                    // PA-146b-1: son 51 bytes de relleno y no 18 porque el ancla
+                    // cuenta. Un fichero con SOLO el ancla ya no entra aqui: es
+                    // legitimo, y tiene su propia prueba.
                     let mut bytes = arranque::MAGICO_CENTINELA.to_vec();
                     bytes.extend_from_slice(&arranque::VERSION_CENTINELA.to_be_bytes());
-                    bytes.extend_from_slice(&[0u8; 18]);
+                    bytes.extend_from_slice(&[0u8; 51]);
                     bytes
                 },
                 "presente y sin afirmar nada",

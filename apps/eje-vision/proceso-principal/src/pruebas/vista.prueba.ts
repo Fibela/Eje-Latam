@@ -8,7 +8,7 @@
  *
  * `vis04` ya no está en ese grupo: desde RPT-091 (PA-142) vive en
  * `vista/src/vis04.ts`, lo compila `tsc` y su tabla de condiciones lleva un
- * `satisfies keyof Condiciones`. **La comprobación de las catorce la hace ahora el
+ * `satisfies keyof Condiciones`. **La comprobación de las dieciséis la hace ahora el
  * compilador**, y la prueba textual se queda como red de seguridad del orden y
  * de los identificadores del HTML, que el tipo no ve.
  *
@@ -22,7 +22,7 @@
  * la llevan, y no deben**: `salidaNoDisponible` y `sinColector` no pueden viajar
  * por syslog porque emitirlas exigiría el canal que falta (RPT-055 §4).
  *
- * La paridad que se puede exigir es otra: que **la vista nombre las catorce** y que
+ * La paridad que se puede exigir es otra: que **la vista nombre las dieciséis** y que
  * el lado de syslog declare por escrito cuáles excluye. Lo segundo lo sujeta
  * `pruebas_emisibles` en Rust; lo primero es este fichero.
  */
@@ -79,7 +79,7 @@ function bloque(fuente: string, desde: string, hasta: string): string {
 }
 
 describe("PA-102 / PA-106 — la vista nombra las condiciones del contrato", () => {
-  it("vis04.ts pinta exactamente las catorce, sin faltar ni sobrar", () => {
+  it("vis04.ts pinta exactamente las dieciséis, sin faltar ni sobrar", () => {
     const tabla = bloque(fuenteDeVista("src/vis04.ts"), "const CONDICIONES = [", "] as const satisfies");
     const nombradas = [...tabla.matchAll(/"([A-Za-z]+)"\s*,/g)].map((c) => c[1] ?? "");
 
@@ -105,7 +105,7 @@ describe("PA-102 / PA-106 — la vista nombra las condiciones del contrato", () 
     assert.equal(nombradas.length, DEL_CONTRATO.length);
   });
 
-  it("el panel de diagnóstico traduce las catorce", () => {
+  it("el panel de diagnóstico traduce las dieciséis", () => {
     const tabla = bloque(fuenteDeVista("diagnostico.js"), "const NOMBRES = {", "};");
     const nombradas = [...tabla.matchAll(/([A-Za-z]+)\s*:/g)].map((c) => c[1] ?? "");
 

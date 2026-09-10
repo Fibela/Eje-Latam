@@ -855,6 +855,73 @@ fn el_emisor_no_entra_en_el_binario_del_agente() {
 }
 
 // ---------------------------------------------------------------------------
+// PA-146b-1 — el lector del centinela v2
+// ---------------------------------------------------------------------------
+
+/// Un centinela de version 2 se lee con sus dos marcas intactas.
+#[test]
+fn el_lector_de_v2_devuelve_las_dos_marcas() {
+    use guardian_cc::arranque::MAGICO_CENTINELA;
+    use guardian_cc::inventario::Centinela;
+
+    let mut bytes = MAGICO_CENTINELA.to_vec();
+    bytes.extend_from_slice(&2u16.to_be_bytes());
+    bytes.push(1);
+    bytes.extend_from_slice(&42u64.to_be_bytes());
+    bytes.push(0);
+    bytes.extend_from_slice(&[0u8; 8]);
+
+    let marcas = centinela_v2::analizar_v2(&bytes).expect("es un v2 valido");
+
+    assert_eq!(marcas.inventario, Centinela::Establecido(42));
+    assert_eq!(marcas.configuracion, Centinela::SinEstablecer);
+}
+
+/// Migrar dos veces se dice como «ya esta migrado», no como fichero corrupto.
+///
+/// Es la distincion que decide si quien lo ejecute por segunda vez cree que ha
+/// roto el almacen. `NoEsV2` mandaria a alguien a buscar una averia que no
+/// existe, a las tres de la manana, sobre un fichero sano.
+#[test]
+fn un_centinela_ya_migrado_dice_que_es_de_otra_version() {
+    use guardian_cc::arranque::{Centinelas, serializar_centinela};
+
+    let error = centinela_v2::analizar_v2(&serializar_centinela(
+        Centinelas::SIN_ESTABLECER.con_inventario(guardian_cc::inventario::Centinela::Establecido(1)),
+    ))
+    .expect_err("un v3 no es un v2");
+
+    assert!(matches!(
+        error,
+        centinela_v2::ErrorCentinelaV2::OtraVersion { encontrada: 3 }
+    ));
+}
+
+/// Una marca ausente con valor encima tampoco pasa por el lector antiguo.
+///
+/// El lector de v2 repite la codificacion de marcas en lugar de reutilizar la
+/// del v3, y esta prueba existe porque esa duplicacion es deliberada: si alguien
+/// «arregla» la duplicacion haciendo que el lector antiguo llame al nuevo, el
+/// lector antiguo dejara de leer el formato antiguo, que es lo unico que existe
+/// para leer.
+#[test]
+fn el_lector_de_v2_rechaza_la_segunda_codificacion_de_ausente() {
+    use guardian_cc::arranque::MAGICO_CENTINELA;
+
+    let mut bytes = MAGICO_CENTINELA.to_vec();
+    bytes.extend_from_slice(&2u16.to_be_bytes());
+    bytes.push(1);
+    bytes.extend_from_slice(&9u64.to_be_bytes());
+    bytes.push(0); // ausente...
+    bytes.extend_from_slice(&5u64.to_be_bytes()); // ...con valor encima
+
+    assert!(matches!(
+        centinela_v2::analizar_v2(&bytes),
+        Err(centinela_v2::ErrorCentinelaV2::NoEsV2)
+    ));
+}
+
+// ---------------------------------------------------------------------------
 // PA-53 — el eco de la terminal
 // ---------------------------------------------------------------------------
 

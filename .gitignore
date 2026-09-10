@@ -47,6 +47,17 @@ credenciales.toml
 configuracion-sensor.toml
 parque.toml
 
+# Almacenes de trabajo del administrador: copias del estado de UN sensor —claves
+# publicas, centinela— que se traen, se tocan y se devuelven. No son secretos,
+# pero versionarlos invita a instalar el estado de una maquina en otra, y eso se
+# lee como sustitucion de identidad justo despues (PA-146b-1).
+#
+# Los fragmentos de la clave de recuperacion SI son secreto: dos de tres
+# reconstruyen la clave. La linea esta por si alguna vez caen aqui; el sitio
+# correcto es fuera del arbol, y repartidos.
+almacen-*/
+*.frg
+
 # Bases de datos locales de desarrollo
 *.db
 *.db-journal

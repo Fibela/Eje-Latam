@@ -581,20 +581,47 @@ registro = "Condiciones"
 nombre = "evidenciaEnRiesgo"
 tipo = "booleano"
 
-# PA-146a, RPT-015 §4. No hay `clave-recuperacion.pub` en el almacen.
+# PA-146a, partido en PA-146b-1. RPT-015 §4.
 #
-# Es un hecho, no un juicio: dice que el fichero no esta, no que el nodo este
-# comprometido. La consecuencia —que sin esa clave no se puede leer un
-# certificado de revocacion, y revocar es el unico remedio si la identidad de
-# este sensor se compromete— la explica VIS-04, que es quien lee (RPT-088 §2).
+# El centinela paso a version 3 y lleva la huella de la clave de recuperacion
+# que este sensor tuvo. Con memoria, «nunca la hubo» y «la habia y ya no esta»
+# dejan de verse igual, y aparece un tercero: «hay una y no es la nuestra».
 #
-# No cabe en `accionAdministrativa`: aquella cubre acciones sobre el almacen de
-# este sensor, y esta exige una ceremonia en otra maquina con tres custodios.
-# Juntarlas seria la fatiga de alertas de PA-45 con dos remedios incomparables
-# tras la misma casilla.
+# Los tres son hechos, no juicios. La consecuencia —que sin clave de
+# recuperacion no se puede leer un certificado de revocacion, y revocar es el
+# unico remedio ante un compromiso de identidad— la explica VIS-04, que es quien
+# lee (RPT-088 §2).
+#
+# Ninguno cabe en `accionAdministrativa`: aquella cubre acciones sobre el
+# almacen de este sensor, y estas exigen una ceremonia en otra maquina con tres
+# custodios. Juntarlas seria la fatiga de alertas de PA-45 con remedios
+# incomparables tras la misma casilla.
+
+# Nadie anclo una clave. Se enciende TAMBIEN con el fichero presente y sin
+# anclar: si el agente aceptara la clave por estar ahi, el ataque seria «borro
+# los dos ficheros y dejo la mia» y el centinela no diria nada.
 [[campo]]
 registro = "Condiciones"
-nombre = "sinClaveDeRecuperacion"
+nombre = "recuperacionNoAprovisionada"
+tipo = "booleano"
+
+# Hubo clave anclada y su fichero ya no esta. Alguien borro una credencial.
+#
+# NO es resistencia a root —quien borra la clave puede borrar el centinela—:
+# es que el borrado deje de ser silencioso (RPT-078 §5).
+[[campo]]
+registro = "Condiciones"
+nombre = "recuperacionSuprimida"
+tipo = "booleano"
+
+# Hay clave y no es la anclada. Alguien puso otra.
+#
+# Se separa de la anterior porque los remedios no se parecen: una supresion se
+# repone, y esto significa que existe una clave de recuperacion viva que no es
+# la nuestra. Mismo par que `inventarioSuprimido` / `inventarioNoVerifica`.
+[[campo]]
+registro = "Condiciones"
+nombre = "recuperacionNoVerifica"
 tipo = "booleano"
 
 # --- Mensajes por canal ----------------------------------------------------

@@ -516,20 +516,28 @@ pub struct Condiciones {
     /// consulta. La constancia duradera de que hubo un tramo en riesgo es el
     /// asiento `persistencia-restablecida`, que se anexa al recuperar.
     pub evidencia_en_riesgo: bool,
-    /// **No hay clave de recuperacion en el almacen.**
+    /// **Nadie ancló una clave de recuperacion en este sensor.**
     ///
-    /// PA-146a, RPT-015 §4.
+    /// PA-146a la abrio como `sinClaveDeRecuperacion`; PA-146b-1 la parte en
+    /// tres al darle memoria al centinela. RPT-015 §4.
     ///
     /// # Que dice, y que no dice
     ///
-    /// Dice un hecho: `clave-recuperacion.pub` no esta. **No** dice «este nodo
-    /// esta comprometido» ni «este nodo es desechable»: eso es una lectura, y
-    /// las lecturas las compone VIS-04 (RPT-088 §2). El agente es testigo.
+    /// Dice un hecho: el centinela no lleva ancla. **No** dice «este nodo esta
+    /// comprometido» ni «este nodo es desechable»: eso es una lectura, y las
+    /// lecturas las compone VIS-04 (RPT-088 §2). El agente es testigo.
     ///
     /// La consecuencia que la pantalla explica es que sin esa clave no se puede
     /// leer un certificado de revocacion, y revocar es el unico remedio si la
     /// identidad de este sensor se compromete. Un sensor asi no esta degradado
     /// hoy: esta **sin salida** el dia que haga falta.
+    ///
+    /// # Tambien se enciende con el fichero presente
+    ///
+    /// Si hay `clave-recuperacion.pub` y nadie la ancló, esta condicion sigue
+    /// encendida. Es la negativa al «anclar al primer uso»: un agente que
+    /// aceptara la clave por estar ahi convertiria el ataque en «borro los dos
+    /// ficheros y dejo la mia», y el centinela volveria a no decir nada.
     ///
     /// # Por que no es `accion_administrativa`
     ///
@@ -539,14 +547,37 @@ pub struct Condiciones {
     /// (`eje-manifiesto recuperacion`), que no es algo que el operador de turno
     /// pueda resolver. Meterla ahi produciria la fatiga de alertas de PA-45: la
     /// misma casilla encendida por dos motivos con remedios incomparables.
+    pub recuperacion_no_aprovisionada: bool,
+    /// **Hubo clave de recuperacion anclada y su fichero ya no esta.**
     ///
-    /// # Por que un booleano basta
+    /// PA-146b-1. Alguien borro una credencial del almacen.
     ///
-    /// Un fichero de recuperacion mal formado aborta el arranque con
-    /// `ErrorArranque::Clave`, asi que a un agente vivo solo le llegan dos
-    /// estados. No hay tercero que colapsar; el dia que lo haya, este campo se
-    /// parte en dos como estan partidos los dos del inventario.
-    pub sin_clave_de_recuperacion: bool,
+    /// Se separa de [`Self::recuperacion_no_aprovisionada`] por lo mismo que
+    /// `inventario_suprimido` se separa de un primer arranque: **el centinela es
+    /// el testigo**. Un sensor que nunca tuvo clave y uno al que se la quitaron
+    /// se ven igual en el disco y no son lo mismo en absoluto.
+    ///
+    /// # Esto no detiene a `root`
+    ///
+    /// Quien borre la clave puede borrar el centinela. Lo que se consigue es que
+    /// el borrado **no sea silencioso**, que es lo mismo que el centinela
+    /// consigue para las dos series (RPT-078 §5). Presentarlo como una barrera
+    /// haria que alguien dejara de buscar la defensa real.
+    pub recuperacion_suprimida: bool,
+    /// **Hay clave de recuperacion y no es la que se anclo.**
+    ///
+    /// PA-146b-1. Alguien puso **otra** clave.
+    ///
+    /// # Por que no se lee como supresion
+    ///
+    /// Porque los remedios no se parecen. Una supresion se repone; esto
+    /// significa que existe una clave de recuperacion viva que no es la nuestra,
+    /// y con ella se firman certificados de revocacion que este sensor creeria.
+    /// Lo primero es sabotaje; lo segundo es secuestro de identidad.
+    ///
+    /// Es el mismo par que el inventario lleva partido desde RPT-017 en
+    /// `inventario_suprimido` e `inventario_no_verifica`, y por el mismo motivo.
+    pub recuperacion_no_verifica: bool,
 }
 
 impl Condiciones {
@@ -582,7 +613,7 @@ impl Condiciones {
             || self.sin_colector
     }
 
-    /// Las catorce condiciones con su identificador, en el orden del contrato.
+    /// Las dieciseis condiciones con su identificador, en el orden del contrato.
     ///
     /// RPT-058, PA-114.
     ///
@@ -601,7 +632,7 @@ impl Condiciones {
     /// El orden es el de [`CAMPOS_CONDICIONES`], y una prueba lo sujeta. No es
     /// estetico: es lo que permite que cualquiera de los dos sea la autoridad.
     #[must_use]
-    pub const fn enumerar(&self) -> [(&'static str, bool); 14] {
+    pub const fn enumerar(&self) -> [(&'static str, bool); 16] {
         let Self {
             inventario_suprimido,
             inventario_no_verifica,
@@ -616,7 +647,9 @@ impl Condiciones {
             configuracion_no_verifica,
             registro_saturado,
             evidencia_en_riesgo,
-            sin_clave_de_recuperacion,
+            recuperacion_no_aprovisionada,
+            recuperacion_suprimida,
+            recuperacion_no_verifica,
         } = *self;
 
         [
@@ -633,7 +666,9 @@ impl Condiciones {
             ("configuracionNoVerifica", configuracion_no_verifica),
             ("registroSaturado", registro_saturado),
             ("evidenciaEnRiesgo", evidencia_en_riesgo),
-            ("sinClaveDeRecuperacion", sin_clave_de_recuperacion),
+            ("recuperacionNoAprovisionada", recuperacion_no_aprovisionada),
+            ("recuperacionSuprimida", recuperacion_suprimida),
+            ("recuperacionNoVerifica", recuperacion_no_verifica),
         ]
     }
 
@@ -645,7 +680,14 @@ impl Condiciones {
     /// inventario» y «alguien borro el inventario».
     #[must_use]
     pub const fn hay_manipulacion(&self) -> bool {
-        self.inventario_suprimido || self.inventario_no_verifica
+        self.inventario_suprimido
+            || self.inventario_no_verifica
+            // PA-146b-1. Las dos de recuperacion entran por la misma puerta: una
+            // credencial borrada y una credencial sustituida son alguien tocando
+            // el almacen. `recuperacion_no_aprovisionada` NO entra: ahi nadie
+            // hizo nada, y eso es justo el problema.
+            || self.recuperacion_suprimida
+            || self.recuperacion_no_verifica
     }
 }
 
@@ -714,7 +756,7 @@ pub const CAMPOS_RESPUESTA_ALERTAS: [(&str, &str); 3] = [
 ];
 
 /// Campos de [`Condiciones`].
-pub const CAMPOS_CONDICIONES: [(&str, &str); 14] = [
+pub const CAMPOS_CONDICIONES: [(&str, &str); 16] = [
     ("inventarioSuprimido", "booleano"),
     ("inventarioNoVerifica", "booleano"),
     ("observacionSaturada", "booleano"),
@@ -728,5 +770,7 @@ pub const CAMPOS_CONDICIONES: [(&str, &str); 14] = [
     ("configuracionNoVerifica", "booleano"),
     ("registroSaturado", "booleano"),
     ("evidenciaEnRiesgo", "booleano"),
-    ("sinClaveDeRecuperacion", "booleano"),
+    ("recuperacionNoAprovisionada", "booleano"),
+    ("recuperacionSuprimida", "booleano"),
+    ("recuperacionNoVerifica", "booleano"),
 ];

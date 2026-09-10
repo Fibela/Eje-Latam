@@ -475,7 +475,9 @@ fn las_constantes_estan_atadas_a_los_structs() {
         configuracion_no_verifica,
         registro_saturado,
         evidencia_en_riesgo,
-        sin_clave_de_recuperacion,
+        recuperacion_no_aprovisionada,
+        recuperacion_suprimida,
+        recuperacion_no_verifica,
     } = Condiciones {
         inventario_suprimido: false,
         inventario_no_verifica: false,
@@ -490,7 +492,9 @@ fn las_constantes_estan_atadas_a_los_structs() {
         configuracion_no_verifica: false,
         registro_saturado: false,
         evidencia_en_riesgo: false,
-        sin_clave_de_recuperacion: false,
+        recuperacion_no_aprovisionada: false,
+        recuperacion_suprimida: false,
+        recuperacion_no_verifica: false,
     };
     let _ = (
         inventario_suprimido,
@@ -506,9 +510,11 @@ fn las_constantes_estan_atadas_a_los_structs() {
         configuracion_no_verifica,
         registro_saturado,
         evidencia_en_riesgo,
-        sin_clave_de_recuperacion,
+        recuperacion_no_aprovisionada,
+        recuperacion_suprimida,
+        recuperacion_no_verifica,
     );
-    assert_eq!(CAMPOS_CONDICIONES.len(), 14);
+    assert_eq!(CAMPOS_CONDICIONES.len(), 16);
 }
 
 #[test]
@@ -527,7 +533,9 @@ fn las_condiciones_distinguen_lo_degradado_de_lo_normal() {
         configuracion_no_verifica: false,
         registro_saturado: false,
         evidencia_en_riesgo: false,
-        sin_clave_de_recuperacion: false,
+        recuperacion_no_aprovisionada: false,
+        recuperacion_suprimida: false,
+        recuperacion_no_verifica: false,
     };
     assert!(!normal.hay_degradacion());
     assert!(!normal.hay_manipulacion());
@@ -566,7 +574,9 @@ fn las_condiciones_distinguen_lo_degradado_de_lo_normal() {
         },
         Condiciones {
             evidencia_en_riesgo: true,
-            sin_clave_de_recuperacion: false,
+            recuperacion_no_aprovisionada: false,
+        recuperacion_suprimida: false,
+        recuperacion_no_verifica: false,
             ..normal
         },
     ] {
@@ -594,7 +604,9 @@ fn la_manipulacion_no_se_confunde_con_la_accion_administrativa() {
         configuracion_no_verifica: false,
         registro_saturado: false,
         evidencia_en_riesgo: false,
-        sin_clave_de_recuperacion: false,
+        recuperacion_no_aprovisionada: false,
+        recuperacion_suprimida: false,
+        recuperacion_no_verifica: false,
     };
 
     for manipulada in [

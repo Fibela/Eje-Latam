@@ -40,10 +40,10 @@ import {
 } from "../../../packages/eje-vision-base/dist/indice.js";
 
 /**
- * Nombres legibles de las catorce condiciones, en el orden del contrato.
+ * Nombres legibles de las dieciséis condiciones, en el orden del contrato.
  *
  * El `satisfies` sobre `keyof Condiciones` es nuevo con PA-142 y **sustituye a
- * media barrera**: hasta hoy que estuvieran las catorce y ninguna sobrara lo
+ * media barrera**: hasta hoy que estuvieran las dieciséis y ninguna sobrara lo
  * comprobaba una prueba leyendo este fichero como texto. Ahora una clave mal
  * escrita no compila.
  */
@@ -53,12 +53,23 @@ const CONDICIONES = [
   ["inventarioNoVerifica", "El inventario no verifica"],
   ["registroSaturado", "El registro de evidencia está lleno"],
   ["evidenciaEnRiesgo", "Hay alertas sin guardar en disco"],
-  // PA-146a. La etiqueta lleva la consecuencia y no sólo el hecho: «sin clave
-  // de recuperación» no le dice nada a quien no conoce RPT-015 §4, y esta
-  // condición no se puede resolver desde esta máquina.
+  // PA-146b-1. Las tres llevan la consecuencia y no sólo el hecho: los nombres
+  // del contrato no le dicen nada a quien no conoce RPT-015 §4, y ninguna de
+  // las tres se puede resolver desde esta máquina.
+  //
+  // Las dos últimas van juntas y arriba del todo entre las de recuperación
+  // porque son manipulación; la primera es una ceremonia pendiente.
   [
-    "sinClaveDeRecuperacion",
-    "Sin clave de recuperación: si esta identidad se compromete, no hay forma de revocarla",
+    "recuperacionNoVerifica",
+    "Clave de recuperación SUSTITUIDA: hay una y no es la de este sensor",
+  ],
+  [
+    "recuperacionSuprimida",
+    "Clave de recuperación BORRADA: la hubo y alguien la quitó",
+  ],
+  [
+    "recuperacionNoAprovisionada",
+    "Sin clave de recuperación anclada: si esta identidad se compromete, no hay forma de revocarla",
   ],
   ["salidaNoDisponible", "Las alertas no salen de este equipo"],
   ["sinColector", "Sin colector: este sensor no informa a ninguna sala"],
