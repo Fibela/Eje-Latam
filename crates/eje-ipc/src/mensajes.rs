@@ -678,16 +678,28 @@ impl Condiciones {
     /// `EstadoArranque::es_manipulacion` se separo de `exige_alerta`: quien
     /// consuma esto debe poder presentar de forma distinta «hay que reemitir el
     /// inventario» y «alguien borro el inventario».
+    /// # Por que se deriva y ya no se enumera
+    ///
+    /// PA-149. Esto llevaba su propia lista escrita a mano, y la cascada de
+    /// `componerCabecera` en TypeScript llevaba otra. El 10 de septiembre de
+    /// 2026 se anadieron dos condiciones aqui y la de TypeScript se quedo con
+    /// dos de cuatro: un sensor con la clave de recuperacion sustituida
+    /// titulaba sobre el colector que faltaba, con 412 pruebas en verde
+    /// (RPT-096 §5).
+    ///
+    /// Ahora el hecho lo declara `contrato-ipc.toml` y este metodo lo lee de
+    /// [`CAMPOS_CONDICIONES`], cruzandolo con [`Self::enumerar`]. Los dos lados
+    /// dejan de ser dos listas y pasan a ser dos lectores de la misma fuente.
+    ///
+    /// Deja de ser `const`, que nunca fue el punto.
     #[must_use]
-    pub const fn hay_manipulacion(&self) -> bool {
-        self.inventario_suprimido
-            || self.inventario_no_verifica
-            // PA-150. Las dos de recuperacion entran por la misma puerta: una
-            // credencial borrada y una credencial sustituida son alguien tocando
-            // el almacen. `recuperacion_no_aprovisionada` NO entra: ahi nadie
-            // hizo nada, y eso es justo el problema.
-            || self.recuperacion_suprimida
-            || self.recuperacion_no_verifica
+    pub fn hay_manipulacion(&self) -> bool {
+        self.enumerar().into_iter().any(|(nombre, encendida)| {
+            encendida
+                && CAMPOS_CONDICIONES
+                    .iter()
+                    .any(|(campo, _, manipulacion)| *campo == nombre && *manipulacion)
+        })
     }
 }
 
@@ -755,22 +767,30 @@ pub const CAMPOS_RESPUESTA_ALERTAS: [(&str, &str); 3] = [
     ("sucesos", "lista"),
 ];
 
-/// Campos de [`Condiciones`].
-pub const CAMPOS_CONDICIONES: [(&str, &str); 16] = [
-    ("inventarioSuprimido", "booleano"),
-    ("inventarioNoVerifica", "booleano"),
-    ("observacionSaturada", "booleano"),
-    ("capturaConPerdida", "booleano"),
-    ("capturaNoDisponible", "booleano"),
-    ("accionAdministrativa", "booleano"),
-    ("salidaNoDisponible", "booleano"),
-    ("sinColector", "booleano"),
-    ("escuchaNoDisponible", "booleano"),
-    ("configuracionSinFirmar", "booleano"),
-    ("configuracionNoVerifica", "booleano"),
-    ("registroSaturado", "booleano"),
-    ("evidenciaEnRiesgo", "booleano"),
-    ("recuperacionNoAprovisionada", "booleano"),
-    ("recuperacionSuprimida", "booleano"),
-    ("recuperacionNoVerifica", "booleano"),
+/// Campos de [`Condiciones`]: nombre, tipo y **si es manipulacion**.
+///
+/// PA-149. El tercer elemento dice si esa condicion, encendida, significa que
+/// alguien toco el almacen. No es lo mismo que ser grave: `registroSaturado` es
+/// tan urgente como la manipulacion sin serlo.
+///
+/// Se declara para las dieciseis, tambien cuando es `false`. Si la ausencia
+/// significara `false`, anadir una condicion y olvidarse la dejaria fuera **en
+/// silencio**, que es el defecto que esta columna viene a cerrar.
+pub const CAMPOS_CONDICIONES: [(&str, &str, bool); 16] = [
+    ("inventarioSuprimido", "booleano", true),
+    ("inventarioNoVerifica", "booleano", true),
+    ("observacionSaturada", "booleano", false),
+    ("capturaConPerdida", "booleano", false),
+    ("capturaNoDisponible", "booleano", false),
+    ("accionAdministrativa", "booleano", false),
+    ("salidaNoDisponible", "booleano", false),
+    ("sinColector", "booleano", false),
+    ("escuchaNoDisponible", "booleano", false),
+    ("configuracionSinFirmar", "booleano", false),
+    ("configuracionNoVerifica", "booleano", false),
+    ("registroSaturado", "booleano", false),
+    ("evidenciaEnRiesgo", "booleano", false),
+    ("recuperacionNoAprovisionada", "booleano", false),
+    ("recuperacionSuprimida", "booleano", true),
+    ("recuperacionNoVerifica", "booleano", true),
 ];

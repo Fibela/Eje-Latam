@@ -435,25 +435,53 @@ tipo = "lista"
 nombre = "Condiciones"
 descripcion = "Estados degradados vigentes. No son sucesos: son verdaderos hasta que alguien interviene."
 
+# `manipulacion` — la clave que este registro lleva y ningun otro. PA-149.
+#
+# Dice si esa condicion, cuando esta encendida, significa que **alguien toco el
+# almacen**. No es lo mismo que ser grave: `registroSaturado` es tan urgente como
+# la manipulacion sin serlo, y presentarlo como ataque manda a un operador a
+# buscar a alguien que no existe.
+#
+# # Por que vive aqui y no en cada lado
+#
+# Estaba escrita a mano dos veces y en dos idiomas: `hay_manipulacion()` en Rust
+# y la cascada de `componerCabecera` en TypeScript. El 10 de septiembre de 2026
+# se anadieron dos condiciones al lado de Rust, la de TypeScript se quedo con dos
+# de cuatro, y un sensor con la clave de recuperacion sustituida titulaba sobre
+# el colector que faltaba. Lo encontro una captura de pantalla con 412 pruebas en
+# verde (RPT-096 §5).
+#
+# Desde aqui, los dos lados dejan de ser dos listas y pasan a ser dos lectores.
+#
+# # Se declara SIEMPRE, tambien cuando es `false`
+#
+# Si «ausente» significara `false`, anadir una condicion y olvidar la clave la
+# convertiria en no-manipulacion **en silencio**, que es exactamente el defecto
+# que esta clave viene a cerrar. La paridad exige las dieciseis.
+
 [[campo]]
 registro = "Condiciones"
 nombre = "inventarioSuprimido"
 tipo = "booleano"
+manipulacion = true
 
 [[campo]]
 registro = "Condiciones"
 nombre = "inventarioNoVerifica"
 tipo = "booleano"
+manipulacion = true
 
 [[campo]]
 registro = "Condiciones"
 nombre = "observacionSaturada"
 tipo = "booleano"
+manipulacion = false
 
 [[campo]]
 registro = "Condiciones"
 nombre = "capturaConPerdida"
 tipo = "booleano"
+manipulacion = false
 
 # Anadido en RPT-047 (PA-81). El agente moria cuando la captura no podia
 # abrirse, y se llevaba la escucha con el: el momento en que mas falta hace la
@@ -470,6 +498,7 @@ tipo = "booleano"
 registro = "Condiciones"
 nombre = "capturaNoDisponible"
 tipo = "booleano"
+manipulacion = false
 
 # Anadido en RPT-028 (PA-43). Al cablear los manejadores aparecio que DOS
 # estados de arranque que exigen alerta no tenian por donde llegar al operador:
@@ -485,6 +514,7 @@ tipo = "booleano"
 registro = "Condiciones"
 nombre = "accionAdministrativa"
 tipo = "booleano"
+manipulacion = false
 
 # Anadido en RPT-032 (PA-42). La alerta sale por syslog hacia el SIEM del
 # cliente, y si el colector no responde hay que decirlo: un canal de alertas
@@ -496,6 +526,7 @@ tipo = "booleano"
 registro = "Condiciones"
 nombre = "salidaNoDisponible"
 tipo = "booleano"
+manipulacion = false
 
 # Anadido en RPT-054 (PA-109). Distinta de la anterior y no por matiz: aquella
 # dice que el colector existe y ahora no responde —una averia que se resuelve
@@ -513,6 +544,7 @@ tipo = "booleano"
 registro = "Condiciones"
 nombre = "sinColector"
 tipo = "booleano"
+manipulacion = false
 
 # Anadido en RPT-070 (PA-125). NO se dedujo: se observo ocurriendo. En systemd
 # real, el conjunto acotado de capacidades impedia asignar el grupo al socket y
@@ -530,6 +562,7 @@ tipo = "booleano"
 registro = "Condiciones"
 nombre = "escuchaNoDisponible"
 tipo = "booleano"
+manipulacion = false
 
 # Anadidas en RPT-074 (PA-79). Dos y no una, por lo mismo que inventarioSuprimido
 # no es inventarioNoVerifica: «todavia no se ha aprovisionado» y «hay una y no
@@ -545,6 +578,7 @@ tipo = "booleano"
 registro = "Condiciones"
 nombre = "configuracionSinFirmar"
 tipo = "booleano"
+manipulacion = false
 
 # `configuracionNoVerifica` NO cuenta como manipulacion, aunque la firma rota
 # apunte a ello: una configuracion emitida para otra maquina, una clave rotada o
@@ -556,6 +590,10 @@ tipo = "booleano"
 registro = "Condiciones"
 nombre = "configuracionNoVerifica"
 tipo = "booleano"
+# `false` a pesar del nombre, y no es un descuido: una firma que no verifica
+# apunta a manipulacion, pero una maquina ajena o una clave rotada dan la misma
+# condicion y no son un ataque. Es la misma distincion que hace EMISIBLES.
+manipulacion = false
 
 # Anadido en RPT-039 (PA-72). `anexar` no comprobaba el techo del formato: al
 # superar ASIENTOS_MAXIMOS se seguia anexando en memoria y el fichero resultante
@@ -568,6 +606,10 @@ tipo = "booleano"
 registro = "Condiciones"
 nombre = "registroSaturado"
 tipo = "booleano"
+# Tan grave como la manipulacion **sin serlo**: el sensor dejo de anotar
+# amenazas y nadie toco nada. Mezclarlos manda a buscar un atacante que no
+# existe (RPT-072).
+manipulacion = false
 
 # Anadido en RPT-044 (PA-69). Una alerta anexada cuya escritura fallo existe y
 # esta completa en memoria; lo que no esta es su durabilidad. `main.rs` lo
@@ -580,6 +622,7 @@ tipo = "booleano"
 registro = "Condiciones"
 nombre = "evidenciaEnRiesgo"
 tipo = "booleano"
+manipulacion = false
 
 # PA-146a, partido en PA-150. RPT-015 §4.
 #
@@ -604,6 +647,10 @@ tipo = "booleano"
 registro = "Condiciones"
 nombre = "recuperacionNoAprovisionada"
 tipo = "booleano"
+# `false`: nadie toco nada, falta una ceremonia. Subirla a manipulacion pondria
+# en critica a todos los sensores recien instalados, y en un mes nadie miraria
+# la cabecera.
+manipulacion = false
 
 # Hubo clave anclada y su fichero ya no esta. Alguien borro una credencial.
 #
@@ -613,6 +660,7 @@ tipo = "booleano"
 registro = "Condiciones"
 nombre = "recuperacionSuprimida"
 tipo = "booleano"
+manipulacion = true
 
 # Hay clave y no es la anclada. Alguien puso otra.
 #
@@ -623,6 +671,7 @@ tipo = "booleano"
 registro = "Condiciones"
 nombre = "recuperacionNoVerifica"
 tipo = "booleano"
+manipulacion = true
 
 # --- Mensajes por canal ----------------------------------------------------
 #

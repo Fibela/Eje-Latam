@@ -374,8 +374,104 @@ fn los_registros_coinciden_con_el_manifiesto() {
     comprobar_registro("ResultadoConsulta", &CAMPOS_RESULTADO_CONSULTA);
     comprobar_registro("PeticionAlertas", &CAMPOS_PETICION_ALERTAS);
     comprobar_registro("SucesoAlerta", &CAMPOS_SUCESO_ALERTA);
-    comprobar_registro("Condiciones", &CAMPOS_CONDICIONES);
+    // PA-149. La tercera columna se comprueba aparte, en
+    // `la_manipulacion_declarada_coincide_con_el_manifiesto`: aqui se coteja
+    // nombre y tipo como en los demas registros.
+    comprobar_registro(
+        "Condiciones",
+        &CAMPOS_CONDICIONES.map(|(nombre, tipo, _)| (nombre, tipo)),
+    );
     comprobar_registro("RespuestaAlertas", &CAMPOS_RESPUESTA_ALERTAS);
+}
+
+/// La columna `manipulacion` del contrato y la del codigo dicen lo mismo.
+///
+/// PA-149. Es la tercera pata de la cadena: hasta hoy, «que condiciones son
+/// manipulacion» estaba escrito a mano en Rust y otra vez a mano en TypeScript,
+/// y nadie las comparaba. El 10 de septiembre de 2026 divergieron y lo encontro
+/// una captura de pantalla (RPT-096 §5).
+///
+/// Exige las **dieciseis**, tambien las que declaran `false`. Si el contrato
+/// pudiera omitir la clave, anadir una condicion y olvidarla la dejaria fuera de
+/// la manipulacion en silencio — el defecto que esta columna cierra.
+#[test]
+fn la_manipulacion_declarada_coincide_con_el_manifiesto() {
+    let contenido = manifiesto();
+
+    let declarada: Vec<(String, bool)> = manipulacion_declarada(&contenido);
+    let implementada: Vec<(String, bool)> = CAMPOS_CONDICIONES
+        .iter()
+        .map(|(nombre, _, manipulacion)| ((*nombre).to_owned(), *manipulacion))
+        .collect();
+
+    assert_eq!(
+        declarada.len(),
+        CAMPOS_CONDICIONES.len(),
+        "el contrato declara 'manipulacion' en {} condiciones y hay {}. \
+         Se declara SIEMPRE, tambien cuando es false: si la ausencia valiera \
+         por 'false', olvidarla dejaria una condicion fuera en silencio.",
+        declarada.len(),
+        CAMPOS_CONDICIONES.len()
+    );
+
+    assert_eq!(
+        declarada, implementada,
+        "la columna 'manipulacion' diverge entre contrato-ipc.toml y el codigo"
+    );
+
+    // Anti-vacuidad. Si ninguna fuera manipulacion, las dos listas coincidirian
+    // en un vacio y esta prueba pasaria sin comprobar nada.
+    assert!(
+        implementada.iter().any(|(_, es)| *es),
+        "alguna condicion tiene que ser manipulacion, o esta prueba no comprueba nada"
+    );
+}
+
+/// Extrae `nombre -> manipulacion` de los campos de `Condiciones`.
+fn manipulacion_declarada(contenido: &str) -> Vec<(String, bool)> {
+    let mut salida = Vec::new();
+    let mut nombre = String::new();
+    let mut registro = String::new();
+    let mut marca: Option<bool> = None;
+
+    for linea in contenido.lines() {
+        let limpia = linea.trim();
+
+        if limpia.starts_with('[') {
+            if registro == "Condiciones" && !nombre.is_empty() {
+                if let Some(valor) = marca {
+                    salida.push((std::mem::take(&mut nombre), valor));
+                }
+            }
+            nombre.clear();
+            registro.clear();
+            marca = None;
+            continue;
+        }
+        if limpia.starts_with('#') {
+            continue;
+        }
+
+        if let Some(valor) = entrecomillado(limpia, "registro = ") {
+            registro = valor;
+        } else if let Some(valor) = entrecomillado(limpia, "nombre = ") {
+            nombre = valor;
+        } else if let Some(valor) = limpia.strip_prefix("manipulacion = ") {
+            marca = match valor.trim() {
+                "true" => Some(true),
+                "false" => Some(false),
+                _ => None,
+            };
+        }
+    }
+
+    if registro == "Condiciones" && !nombre.is_empty() {
+        if let Some(valor) = marca {
+            salida.push((nombre, valor));
+        }
+    }
+
+    salida
 }
 
 #[test]

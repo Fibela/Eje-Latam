@@ -108,14 +108,27 @@ export function componerCabecera(estado: EstadoPanel<Condiciones>): Cabecera {
   }
 
   // Manipulación antes que el resto: alguien tocó el almacén, y eso cambia a
-  // quién hay que avisar. `hay_manipulacion` en Rust marca las mismas cuatro.
+  // quién hay que avisar.
   //
-  // PA-149. Que sean **las mismas cuatro** no lo comprueba nadie: la lista está
-  // escrita a mano aquí y a mano allí. Cuando PA-150 añadió las dos de
-  // recuperación al lado de Rust, esta rama se quedó con dos, y un sensor con la
-  // clave de recuperación sustituida titulaba sobre el colector. El comentario
-  // que había aquí decía que respetaba la separación «en lugar de reinventarla»,
-  // y la estaba reinventando mientras lo decía.
+  // # Esta cascada NO deriva de nada, y aun así está sujeta
+  //
+  // PA-149. Las ramas siguen escritas a mano porque su valor es exactamente lo
+  // que una derivación destruiría: **el orden** —que es la prioridad, y no es
+  // negociable— y **la prosa**, que es lo que le dice al operador qué hacer.
+  // Dieciséis frases generadas sobre las claves del objeto serían peores que no
+  // tener cabecera.
+  //
+  // Lo que ya no se escribe dos veces es *qué condiciones son manipulación*: eso
+  // lo declara `contrato-ipc.toml`, `hay_manipulacion` lo lee de ahí, y la
+  // prueba «toda condición de manipulación ocupa la cabecera de VIS-04» exige
+  // que esta cascada las cubra todas. Declarar una en el contrato y no traerla
+  // aquí pone roja esa prueba.
+  //
+  // Antes de esa barrera, aquí había un comentario que decía respetar la
+  // separación de Rust «en lugar de reinventarla» — mientras la reinventaba. La
+  // lista se quedó con dos de cuatro y un sensor con la clave de recuperación
+  // sustituida titulaba sobre el colector que faltaba. Lo encontró una captura
+  // de pantalla, con 412 pruebas en verde (RPT-096 §5).
   if (condiciones.inventarioSuprimido || condiciones.inventarioNoVerifica) {
     return {
       urgencia: "critica",

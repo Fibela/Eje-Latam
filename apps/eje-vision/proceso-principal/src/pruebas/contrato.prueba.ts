@@ -20,6 +20,9 @@ import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { componerCabecera } from "@eje/vision-base";
+import type { Condiciones } from "@eje/vision-base";
+
 import {
   CAMPOS_CONDICIONES,
   CAMPOS_RESPUESTA_ALERTAS,
@@ -195,6 +198,66 @@ function camposDe(contenido: string, registro: string): [string, string][] {
   return campos;
 }
 
+/**
+ * Condiciones que el contrato declara como manipulación. PA-149.
+ *
+ * Lee **el contrato**, no `CAMPOS_CONDICIONES` de TypeScript: si el espejo de
+ * este lado estuviera mal, una prueba que lo usara heredaría el error en lugar
+ * de encontrarlo.
+ */
+function manipulacionesDelContrato(contenido: string): string[] {
+  const nombres: string[] = [];
+  let registro = "";
+  let nombre = "";
+  let marca: boolean | null = null;
+
+  const cerrar = (): void => {
+    if (registro === "Condiciones" && nombre !== "" && marca === true) {
+      nombres.push(nombre);
+    }
+    registro = "";
+    nombre = "";
+    marca = null;
+  };
+
+  for (const linea of contenido.split("\n")) {
+    const limpia = linea.trim();
+
+    if (limpia.startsWith("[")) {
+      cerrar();
+      continue;
+    }
+    if (limpia.startsWith("#")) {
+      continue;
+    }
+
+    const texto = /^(registro|nombre)\s*=\s*"([^"]+)"/u.exec(limpia);
+    if (texto?.[1] === "registro" && texto[2] !== undefined) {
+      registro = texto[2];
+    } else if (texto?.[1] === "nombre" && texto[2] !== undefined) {
+      nombre = texto[2];
+    } else if (limpia === "manipulacion = true") {
+      marca = true;
+    } else if (limpia === "manipulacion = false") {
+      marca = false;
+    }
+  }
+  cerrar();
+
+  return nombres;
+}
+
+/**
+ * Todo apagado, **derivado** de `CAMPOS_CONDICIONES`. PA-149.
+ *
+ * No se escribe a mano. Sería una lista más de dieciséis nombres dentro del
+ * arreglo del defecto de las listas de dieciséis nombres, y quedaría atrás en
+ * cuanto el contrato ganara una condición.
+ */
+const CALMA_CONTRATO = Object.fromEntries(
+  CAMPOS_CONDICIONES.map(([nombre]) => [nombre, false]),
+) as unknown as Condiciones;
+
 function nombresBajo(contenido: string, cabecera: string): string[] {
   const nombres: string[] = [];
   let dentro = false;
@@ -292,6 +355,46 @@ describe("PA-20 — paridad con contrato-ipc.toml", () => {
         `el registro '${nombre}' diverge entre contrato-ipc.toml y el codigo.\n` +
           `  manifiesto: ${JSON.stringify(declarados)}\n` +
           `  codigo    : ${JSON.stringify(implementados)}`,
+      );
+    }
+  });
+
+  it("toda condición de manipulación ocupa la cabecera de VIS-04", () => {
+    // PA-149. La barrera que faltaba.
+    //
+    // La cascada de `componerCabecera` conserva su orden y su prosa —eso es su
+    // valor, y derivarla de las claves del objeto la destruiría—, pero **qué
+    // condiciones son manipulación** ya no puede escribirse dos veces. El
+    // contrato lo declara y esto exige que la cabecera las cubra todas.
+    //
+    // El 10 de septiembre de 2026 esa lista tenía dos de cuatro, y un sensor con
+    // la clave de recuperación sustituida titulaba sobre el colector que
+    // faltaba. Lo encontró una captura de pantalla, con 412 pruebas en verde.
+    const manipulaciones = manipulacionesDelContrato(manifiesto());
+
+    assert.ok(
+      manipulaciones.length > 0,
+      "el contrato no declara ninguna manipulación: o falta la clave, o esta " +
+        "prueba pasaría en verde sin comprobar nada",
+    );
+
+    for (const condicion of manipulaciones) {
+      const cabecera = componerCabecera({
+        clase: "datos",
+        valor: { ...CALMA_CONTRATO, [condicion]: true },
+      });
+
+      assert.equal(
+        cabecera.urgencia,
+        "critica",
+        `'${condicion}' es manipulación en el contrato y la cabecera no la ` +
+          `presenta como crítica. La cascada de componerCabecera no la cubre.`,
+      );
+      assert.notEqual(
+        cabecera.titulo,
+        "",
+        `'${condicion}' es manipulación y no produce título: el operador ve un ` +
+          `tablero en calma con alguien dentro del almacén`,
       );
     }
   });
