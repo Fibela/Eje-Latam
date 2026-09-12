@@ -210,7 +210,53 @@ impl CertificadoVerificado {
 /// nuevo (RPT-015 §5).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RegistroRevocaciones {
-    entradas: Vec<(IdentificadorClave, u64)>,
+    entradas: Vec<Entrada>,
+}
+
+/// Lo que el registro recuerda de una clave revocada.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Entrada {
+    /// Clave que deja de valer por encima del corte.
+    revocada: IdentificadorClave,
+    /// Corte mas bajo anotado para ella.
+    corte: u64,
+    /// Quien la sustituye, si los certificados se ponen de acuerdo.
+    sucesora: Sucesion,
+}
+
+/// Que dice el registro sobre quien sustituye a una clave revocada.
+///
+/// PA-146b fase 1. La `sucesora` existe en el certificado desde RPT-015 y hasta
+/// hoy se **tiraba** al construir el registro; esto es lo que la rescata.
+///
+/// # Dos estados, y no tres
+///
+/// Al escribir esto se anadio un tercero, `EnConflicto`, para dos certificados
+/// que nombraran sucesoras distintas para la misma clave. **Ese caso no puede
+/// ocurrir**, y se retiro: RPT-088 §4.1 ya dejo escrito que una variante para un
+/// caso imposible invita a rellenarla.
+///
+/// La invariante que lo impide vive en dos sitios, ninguno de ellos aqui:
+/// [`ArchivoRevocaciones::anotar`] funde por clave revocada conservando el corte
+/// mas bajo, y [`ArchivoRevocaciones::analizar`] exige que los identificadores
+/// del fichero vayan **estrictamente crecientes**, lo que prohibe un duplicado
+/// tambien en un fichero escrito a mano.
+///
+/// Si alguna de esas dos cambiara, el conflicto pasaria a ser alcanzable y
+/// habria que decidir que hacer con el. Lo sujeta
+/// `un_archivo_no_admite_dos_certificados_para_la_misma_clave`.
+///
+/// # Por que un enumerado y no `Option`
+///
+/// `SinRevocar` dice algo que `None` no dice. Quien consuma esto en la fase 3
+/// tiene que distinguir «esta clave esta bien» de «esta clave se revoco», y un
+/// `None` obliga a recordar cual de las dos era.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sucesion {
+    /// Esa clave no figura como revocada.
+    SinRevocar,
+    /// Quien la sustituye, segun el certificado que la revoco.
+    Declarada(IdentificadorClave),
 }
 
 impl RegistroRevocaciones {
@@ -227,6 +273,18 @@ impl RegistroRevocaciones {
     /// Si la clave ya figuraba, **se conserva el corte mas bajo**. Un corte
     /// posterior mas alto aflojaria una revocacion existente, y una revocacion
     /// que se puede aflojar no es una revocacion.
+    /// Anota un certificado verificado.
+    ///
+    /// Si la clave ya figuraba, **se conserva el corte mas bajo**. Un corte
+    /// posterior mas alto aflojaria una revocacion existente, y una revocacion
+    /// que se puede aflojar no es una revocacion.
+    ///
+    /// # Y la sucesora del ultimo que gane el corte
+    ///
+    /// PA-146b fase 1. No hay regla que inventar: si dos certificados llegan
+    /// aqui para la misma clave, se conserva la sucesora del que impuso el corte
+    /// —son del mismo certificado— y punto. Que eso no ocurra en el camino real
+    /// lo garantiza [`ArchivoRevocaciones`]; ver [`Sucesion`].
     pub fn anotar(&mut self, certificado: &CertificadoVerificado) {
         let revocada = certificado.revocada();
         let corte = certificado.hasta_secuencia();
@@ -234,13 +292,20 @@ impl RegistroRevocaciones {
         if let Some(entrada) = self
             .entradas
             .iter_mut()
-            .find(|(identificador, _)| *identificador == revocada)
+            .find(|entrada| entrada.revocada == revocada)
         {
-            entrada.1 = entrada.1.min(corte);
+            if corte < entrada.corte {
+                entrada.corte = corte;
+                entrada.sucesora = Sucesion::Declarada(certificado.sucesora());
+            }
             return;
         }
 
-        self.entradas.push((revocada, corte));
+        self.entradas.push(Entrada {
+            revocada,
+            corte,
+            sucesora: Sucesion::Declarada(certificado.sucesora()),
+        });
     }
 
     /// Corte anotado para una clave, si esta revocada.
@@ -248,8 +313,23 @@ impl RegistroRevocaciones {
     pub fn corte_de(&self, identificador: &IdentificadorClave) -> Option<u64> {
         self.entradas
             .iter()
-            .find(|(anotado, _)| anotado == identificador)
-            .map(|(_, corte)| *corte)
+            .find(|entrada| entrada.revocada == *identificador)
+            .map(|entrada| entrada.corte)
+    }
+
+    /// Quien sustituye a una clave revocada, segun los certificados anotados.
+    ///
+    /// PA-146b fase 1. Devuelve [`Sucesion::SinRevocar`] para una clave que no
+    /// figura: **no se colapsa con «revocada y sin sucesora declarada»**, que no
+    /// puede ocurrir —el certificado siempre nombra una— pero que colapsado
+    /// dejaria a quien consuma sin poder distinguir «esta clave esta bien» de
+    /// «esta clave se revoco y no se quien la sustituye».
+    #[must_use]
+    pub fn sucesora_de(&self, identificador: &IdentificadorClave) -> Sucesion {
+        self.entradas
+            .iter()
+            .find(|entrada| entrada.revocada == *identificador)
+            .map_or(Sucesion::SinRevocar, |entrada| entrada.sucesora)
     }
 
     /// Indica si la clave puede haber firmado esa secuencia.
@@ -270,6 +350,7 @@ impl RegistroRevocaciones {
         self.entradas.len()
     }
 }
+
 
 // ---------------------------------------------------------------------------
 // Persistencia — RPT-016, PA-34
@@ -418,10 +499,16 @@ impl ArchivoRevocaciones {
     pub fn registro(&self) -> RegistroRevocaciones {
         let mut registro = RegistroRevocaciones::nuevo();
         for anotacion in &self.anotaciones {
-            registro.entradas.push((
-                anotacion.certificado.revocada,
-                anotacion.certificado.hasta_secuencia,
-            ));
+            // PA-146b fase 1. Aqui es donde `sucesora` se tiraba: el certificado
+            // la traia verificada desde RPT-015 y este bucle componia pares.
+            //
+            // No hace falta fundir: `anotar` y `analizar` garantizan que no hay
+            // dos anotaciones para la misma clave revocada. Ver [`Sucesion`].
+            registro.entradas.push(Entrada {
+                revocada: anotacion.certificado.revocada,
+                corte: anotacion.certificado.hasta_secuencia,
+                sucesora: Sucesion::Declarada(anotacion.certificado.sucesora),
+            });
         }
         registro
     }

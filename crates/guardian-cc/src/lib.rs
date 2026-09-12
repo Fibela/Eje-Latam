@@ -2225,7 +2225,7 @@ mod pruebas {
 
     use revocacion::{
         Anotacion, ArchivoRevocaciones, CertificadoRevocacion, CertificadoVerificado, ErrorArchivo,
-        ErrorRevocacion, IdentificadorClave, RegistroRevocaciones, mensaje_de_certificado,
+        ErrorRevocacion, IdentificadorClave, RegistroRevocaciones, Sucesion, mensaje_de_certificado,
     };
 
     /// Par de recuperacion, distinto del operativo por semilla.
@@ -2505,6 +2505,111 @@ mod pruebas {
             firma: firmar_certificado(&certificado, firmante),
             certificado,
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // PA-146b fase 1 — la sucesora deja de tirarse
+    // -----------------------------------------------------------------------
+
+    /// Una clave que no figura como revocada no tiene sucesora, y se dice.
+    ///
+    /// `SinRevocar` no se colapsa con «revocada y sin sucesora conocida»: quien
+    /// consuma esto tiene que poder distinguir «esta clave esta bien» de «esta
+    /// clave se revoco y no se quien la sustituye».
+    #[test]
+    fn una_clave_no_revocada_no_tiene_sucesora() {
+        let banco = banco(DominioClave::Cliente);
+
+        assert_eq!(
+            RegistroRevocaciones::nuevo().sucesora_de(&banco.clave.identificador()),
+            Sucesion::SinRevocar
+        );
+    }
+
+    /// El campo que llevaba desde RPT-015 sin llegar a ninguna parte.
+    #[test]
+    fn un_certificado_verificado_declara_a_su_sucesora() {
+        let banco = banco(DominioClave::Cliente);
+        let (firmante, clave) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+
+        let certificado = certificado_para(&banco, 7);
+        let verificado = CertificadoVerificado::verificar(
+            certificado,
+            &firmar_certificado(&certificado, &firmante),
+            &clave,
+        )
+        .expect("debe verificar");
+
+        let mut registro = RegistroRevocaciones::nuevo();
+        registro.anotar(&verificado);
+
+        assert_eq!(
+            registro.sucesora_de(&banco.clave.identificador()),
+            Sucesion::Declarada(certificado.sucesora)
+        );
+    }
+
+    /// La invariante que hace imposible el conflicto de sucesoras.
+    ///
+    /// PA-146b fase 1. Al rescatar `sucesora` se anadio un tercer estado,
+    /// `EnConflicto`, para dos certificados que nombraran sucesoras distintas
+    /// para la misma clave. **Se retiro porque ese caso no puede ocurrir**, y
+    /// esta prueba es lo que sujeta esa afirmacion.
+    ///
+    /// Dos barreras lo impiden, y se comprueban las dos:
+    ///
+    /// 1. `ArchivoRevocaciones::anotar` funde por clave revocada y conserva el
+    ///    corte mas bajo, asi que el archivo nunca lleva dos.
+    /// 2. `analizar` exige identificadores **estrictamente crecientes**, asi que
+    ///    un fichero escrito a mano con un duplicado se rechaza.
+    ///
+    /// Si alguna cambiara, el conflicto pasaria a ser alcanzable y habria que
+    /// decidir que hace el agente con dos ordenes de sucesion incompatibles.
+    /// Esta prueba se pondria roja primero.
+    #[test]
+    fn un_archivo_no_admite_dos_certificados_para_la_misma_clave() {
+        let banco = banco(DominioClave::Cliente);
+        let (firmante, clave) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+
+        let mut archivo = ArchivoRevocaciones::nuevo();
+        // El flojo primero: si el segundo no ganara, la revocacion se aflojaria.
+        archivo.anotar(anotacion_para(&banco, 99, &firmante));
+        archivo.anotar(anotacion_para(&banco, 4, &firmante));
+
+        assert_eq!(
+            archivo.anotaciones().len(),
+            1,
+            "el archivo funde por clave revocada: dos certificados, una anotacion"
+        );
+
+        let registro = ArchivoRevocaciones::analizar(&archivo.serializar(), &clave)
+            .expect("debe verificar")
+            .registro();
+
+        assert_eq!(registro.anotadas(), 1);
+        assert_eq!(
+            registro.corte_de(&banco.clave.identificador()),
+            Some(4),
+            "se conserva el corte mas bajo: una revocacion que se afloja no es \
+             una revocacion"
+        );
+
+        // Y la segunda barrera: un fichero con el duplicado escrito a mano.
+        let mut archivo = ArchivoRevocaciones::nuevo();
+        archivo.anotar(anotacion_para(&banco, 4, &firmante));
+        let una = archivo.serializar();
+
+        // La cabecera mide 14: magico (8), version (2) y numero de anotaciones
+        // (4). Mismo literal que usa `alterar_un_corte_en_el_fichero_se_detecta`.
+        let mut dos = una.clone();
+        dos[10..14].copy_from_slice(&2u32.to_be_bytes());
+        dos.extend_from_slice(&una[14..]);
+
+        assert!(
+            ArchivoRevocaciones::analizar(&dos, &clave).is_err(),
+            "un fichero con dos anotaciones de la misma clave tiene que \
+             rechazarse: el orden estrictamente creciente lo prohibe"
+        );
     }
 
     #[test]
