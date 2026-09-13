@@ -27,8 +27,18 @@ use guardian_cc::inventario::Centinela;
 /// Longitud exacta del centinela de version 2.
 const LONGITUD_V2: usize = 8 + 2 + (1 + 8) + (1 + 8);
 
-/// Version que este modulo sabe leer, y la unica.
-const VERSION_V2: u16 = 2;
+/// Longitud exacta del centinela de version 3: las dos marcas y un ancla.
+const LONGITUD_V3: usize = LONGITUD_V2 + (1 + 32);
+
+/// Versiones que este modulo sabe leer.
+///
+/// PA-146b fase 2. La 3 se anade el mismo dia que nace la 4, y por el mismo
+/// motivo por el que estaba la 2: `eje-prueba` esta en la 3 y hay que poder
+/// llevarla a la 4 sin rehacer su almacen.
+///
+/// Cada version que se retira de aqui es un sensor desplegado que ya no se puede
+/// migrar y hay que reaprovisionar a mano. Por eso se acumulan.
+const VERSIONES_LEGIBLES: [u16; 2] = [2, 3];
 
 /// Fallos al leer un centinela de version 2.
 #[derive(Debug, thiserror::Error)]
@@ -66,28 +76,37 @@ pub struct MarcasV2 {
 /// incluye un v3 ya migrado—, y [`ErrorCentinelaV2::NoEsV2`] si no cuadra nada
 /// mas.
 pub fn analizar_v2(bytes: &[u8]) -> Result<MarcasV2, ErrorCentinelaV2> {
-    // La version se mira ANTES que la longitud. Un v3 mide sesenta y un bytes y
-    // fallaria por longitud, y el mensaje diria «esto no es un centinela» sobre
-    // un fichero perfectamente sano y ya migrado.
-    if bytes.len() >= 10 && &bytes[..8] == MAGICO_CENTINELA {
-        let version = u16::from_be_bytes([bytes[8], bytes[9]]);
-        if version != VERSION_V2 {
-            return Err(ErrorCentinelaV2::OtraVersion {
-                encontrada: version,
-            });
-        }
-    }
-
-    if bytes.len() != LONGITUD_V2 || &bytes[..8] != MAGICO_CENTINELA {
+    // La version se mira ANTES que la longitud. Un v4 mide noventa y cuatro
+    // bytes y fallaria por longitud, y el mensaje diria «esto no es un centinela»
+    // sobre un fichero perfectamente sano y ya migrado.
+    if bytes.len() < 10 || &bytes[..8] != MAGICO_CENTINELA {
         return Err(ErrorCentinelaV2::NoEsV2);
     }
 
+    let version = u16::from_be_bytes([bytes[8], bytes[9]]);
+    if !VERSIONES_LEGIBLES.contains(&version) {
+        return Err(ErrorCentinelaV2::OtraVersion {
+            encontrada: version,
+        });
+    }
+
+    let esperada = if version == 2 { LONGITUD_V2 } else { LONGITUD_V3 };
+    if bytes.len() != esperada {
+        return Err(ErrorCentinelaV2::NoEsV2);
+    }
+
+    // Las dos marcas ocupan el mismo sitio en las dos versiones: la 3 solo
+    // anadio bytes al final. Por eso este lector sirve para ambas.
     let (Some(inventario), Some(configuracion)) =
         (leer_marca(&bytes[10..19]), leer_marca(&bytes[19..28]))
     else {
         return Err(ErrorCentinelaV2::NoEsV2);
     };
 
+    // El ancla de la version 3 **no se lee**: la migracion la recalcula de la
+    // clave que hay en el almacen. Leerla y arrastrarla permitiria migrar un
+    // fichero cuya ancla no corresponde a ninguna clave presente, y el sensor
+    // arrancaria acusando una sustitucion que no ocurrio.
     Ok(MarcasV2 {
         inventario,
         configuracion,

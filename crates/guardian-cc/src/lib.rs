@@ -2753,9 +2753,9 @@ mod pruebas {
     use std::path::PathBuf;
 
     use arranque::{
-        Centinelas, ErrorArranque, EstadoArranque, EstadoRecuperacion, RutasAlmacen,
-        aceptar_configuracion, aceptar_inventario, analizar_centinela, arrancar, cargar_centinela,
-        huella_de_recuperacion, serializar_centinela,
+        Centinelas, ErrorArranque, EstadoArranque, EstadoOperativa, EstadoRecuperacion,
+        RutasAlmacen, aceptar_configuracion, aceptar_inventario, analizar_centinela, ancla_de_clave,
+        arrancar, cargar_centinela, serializar_centinela,
     };
 
     /// Almacen aislado en disco, retirado al terminar.
@@ -2791,7 +2791,8 @@ mod pruebas {
         Centinelas {
             inventario: Centinela::Establecido(42),
             configuracion: Centinela::Establecido(3),
-            huella_recuperacion: Some(huella_de_recuperacion(&clave_recuperacion_de_prueba())),
+            huella_recuperacion: Some(ancla_de_clave(&clave_recuperacion_de_prueba())),
+            huella_operativa: Some(ancla_de_clave(&banco(DominioClave::Cliente).clave)),
         }
     }
 
@@ -2810,7 +2811,7 @@ mod pruebas {
     #[test]
     fn un_centinela_con_solo_el_ancla_es_legitimo() {
         let centinelas = Centinelas::SIN_ESTABLECER
-            .con_recuperacion(Some(huella_de_recuperacion(&clave_recuperacion_de_prueba())));
+            .con_recuperacion(Some(ancla_de_clave(&clave_recuperacion_de_prueba())));
 
         assert!(!centinelas.vacio(), "el ancla sola ya afirma algo");
         assert_eq!(
@@ -2827,7 +2828,7 @@ mod pruebas {
     /// mas comun del almacen.
     #[test]
     fn el_ancla_sobrevive_a_las_dos_marcas() {
-        let huella = huella_de_recuperacion(&clave_recuperacion_de_prueba());
+        let huella = ancla_de_clave(&clave_recuperacion_de_prueba());
 
         let despues = Centinelas::SIN_ESTABLECER
             .con_recuperacion(Some(huella))
@@ -2851,7 +2852,7 @@ mod pruebas {
     #[test]
     fn el_ancla_distingue_los_cuatro_estados_de_la_recuperacion() {
         let clave = clave_recuperacion_de_prueba();
-        let huella = huella_de_recuperacion(&clave);
+        let huella = ancla_de_clave(&clave);
 
         // Una clave DISTINTA. `clave_de_recuperacion` es determinista —misma
         // semilla, misma clave—, asi que llamarla otra vez habria dado la misma
@@ -2862,7 +2863,7 @@ mod pruebas {
         };
         assert_ne!(
             huella,
-            huella_de_recuperacion(&otra),
+            ancla_de_clave(&otra),
             "las dos claves de esta prueba tienen que ser distintas de verdad"
         );
 
@@ -2894,6 +2895,119 @@ mod pruebas {
         assert!(EstadoRecuperacion::NoVerifica.es_manipulacion());
     }
 
+    /// Los cinco estados de la clave operativa, y el que los separa.
+    ///
+    /// PA-146b fase 2. La fila que justifica todo el punto es la cuarta: **la
+    /// misma clave sustituida** se lee como secuestro sin certificado y como
+    /// rotacion con el. Si las dos dieran lo mismo, o el sensor acusaria a cada
+    /// rotacion legitima, o dejaria pasar cada secuestro.
+    #[test]
+    fn la_operativa_distingue_el_secuestro_de_la_rotacion() {
+        let banco = banco(DominioClave::Cliente);
+        let (firmante, recuperacion) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+
+        let anclada = ancla_de_clave(&banco.clave);
+        let vacio = RegistroRevocaciones::nuevo();
+
+        assert_eq!(
+            EstadoOperativa::evaluar(None, Some(&banco.clave), &vacio),
+            EstadoOperativa::NoAprovisionada,
+            "una clave sin anclar no se adopta por estar en el disco"
+        );
+        assert_eq!(
+            EstadoOperativa::evaluar(Some(anclada), None, &vacio),
+            EstadoOperativa::Suprimida
+        );
+        assert_eq!(
+            EstadoOperativa::evaluar(Some(anclada), Some(&banco.clave), &vacio),
+            EstadoOperativa::Anclada
+        );
+
+        // La sucesora del certificado: otra clave operativa distinta.
+        let (_, verificadora) = generar_par(&mut GeneradorDeterminista::nuevo(0x5543_4553));
+        let nueva = ClaveInventario::nueva(verificadora, DominioClave::Cliente);
+        assert_ne!(ancla_de_clave(&nueva), anclada, "tienen que ser distintas");
+
+        // Sin certificado: la clave cambio y nadie lo autorizo.
+        assert_eq!(
+            EstadoOperativa::evaluar(Some(anclada), Some(&nueva), &vacio),
+            EstadoOperativa::NoVerifica,
+            "sustituir sin certificado es secuestro"
+        );
+
+        // Con certificado que la nombra sucesora: rotacion.
+        let certificado = CertificadoRevocacion {
+            revocada: anclada,
+            hasta_secuencia: 7,
+            sucesora: ancla_de_clave(&nueva),
+            emitido_en: AHORA,
+        };
+        let mut registro = RegistroRevocaciones::nuevo();
+        registro.anotar(
+            &CertificadoVerificado::verificar(
+                certificado,
+                &firmar_certificado(&certificado, &firmante),
+                &recuperacion,
+            )
+            .expect("debe verificar"),
+        );
+
+        assert_eq!(
+            EstadoOperativa::evaluar(Some(anclada), Some(&nueva), &registro),
+            EstadoOperativa::Rotada,
+            "el mismo cambio, con un certificado verificado que lo nombra, es rotacion"
+        );
+
+        assert!(!EstadoOperativa::Rotada.es_manipulacion());
+        assert!(EstadoOperativa::NoVerifica.es_manipulacion());
+        assert!(EstadoOperativa::Suprimida.es_manipulacion());
+    }
+
+    /// Un certificado que nombra a **otra** sucesora no autoriza a esta.
+    ///
+    /// Es el filo del quinto estado: si bastara con que exista un certificado
+    /// sobre la clave anclada, cualquier revocacion legitima serviria de permiso
+    /// para instalar la clave del atacante.
+    #[test]
+    fn un_certificado_para_otra_sucesora_no_autoriza_esta_clave() {
+        let banco = banco(DominioClave::Cliente);
+        let (firmante, recuperacion) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+
+        let anclada = ancla_de_clave(&banco.clave);
+
+        let (_, prevista) = generar_par(&mut GeneradorDeterminista::nuevo(0x5543_4554));
+        let prevista = ClaveInventario::nueva(prevista, DominioClave::Cliente);
+
+        let (_, intrusa) = generar_par(&mut GeneradorDeterminista::nuevo(0x5543_4555));
+        let intrusa = ClaveInventario::nueva(intrusa, DominioClave::Cliente);
+
+        let certificado = CertificadoRevocacion {
+            revocada: anclada,
+            hasta_secuencia: 7,
+            sucesora: ancla_de_clave(&prevista),
+            emitido_en: AHORA,
+        };
+        let mut registro = RegistroRevocaciones::nuevo();
+        registro.anotar(
+            &CertificadoVerificado::verificar(
+                certificado,
+                &firmar_certificado(&certificado, &firmante),
+                &recuperacion,
+            )
+            .expect("debe verificar"),
+        );
+
+        assert_eq!(
+            EstadoOperativa::evaluar(Some(anclada), Some(&intrusa), &registro),
+            EstadoOperativa::NoVerifica,
+            "hay certificado sobre esta clave, pero nombra a otra sucesora"
+        );
+        assert_eq!(
+            EstadoOperativa::evaluar(Some(anclada), Some(&prevista), &registro),
+            EstadoOperativa::Rotada
+        );
+    }
+
     #[test]
     fn el_centinela_es_reversible_en_disco() {
         assert_eq!(
@@ -2921,6 +3035,7 @@ mod pruebas {
                 inventario,
                 configuracion,
                 huella_recuperacion: None,
+                huella_operativa: None,
             };
 
             assert_eq!(
@@ -2943,6 +3058,7 @@ mod pruebas {
             inventario: Centinela::Establecido(9),
             configuracion: Centinela::SinEstablecer,
             huella_recuperacion: None,
+            huella_operativa: None,
         });
         // La marca de configuracion empieza en 19: presencia en 19, valor en 20.
         bytes[27] = 5;
@@ -2959,7 +3075,7 @@ mod pruebas {
         // un primer arranque, borrar el inventario volveria a funcionar.
         let casos: Vec<(Vec<u8>, &str)> = vec![
             (vec![], "vacio"),
-            (vec![0u8; 61], "ceros con la longitud correcta"),
+            (vec![0u8; 94], "ceros con la longitud correcta"),
             (
                 serializar_centinela(centinelas_de_prueba())[..27].to_vec(),
                 "truncado por un byte",
@@ -2993,12 +3109,12 @@ mod pruebas {
                     // las dos formas dejaria poner un centinela mudo donde habia
                     // uno que decia algo.
                     //
-                    // PA-150: son 51 bytes de relleno y no 18 porque el ancla
-                    // cuenta. Un fichero con SOLO el ancla ya no entra aqui: es
-                    // legitimo, y tiene su propia prueba.
+                    // PA-150 y PA-146b: son 84 bytes de relleno y no 18 porque
+                    // las DOS anclas cuentan. Un fichero con solo un ancla ya no
+                    // entra aqui: es legitimo, y tiene su propia prueba.
                     let mut bytes = arranque::MAGICO_CENTINELA.to_vec();
                     bytes.extend_from_slice(&arranque::VERSION_CENTINELA.to_be_bytes());
-                    bytes.extend_from_slice(&[0u8; 51]);
+                    bytes.extend_from_slice(&[0u8; 84]);
                     bytes
                 },
                 "presente y sin afirmar nada",

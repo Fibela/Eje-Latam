@@ -78,6 +78,20 @@ impl IdentificadorClave {
     pub const fn resumen(&self) -> &Resumen {
         &self.0
     }
+
+    /// Reconstruye el identificador leido de disco.
+    ///
+    /// PA-146b fase 2. La escribe el centinela al leer sus anclas: guarda
+    /// identificadores de claves que quiza ya no existan, y para eso **no** hay
+    /// clave de la que derivarlos.
+    ///
+    /// No es un atajo para fabricar identificadores: quien tenga la clave debe
+    /// usar [`Self::de`], que es la unica forma de obtener uno que corresponda a
+    /// una clave real.
+    #[must_use]
+    pub const fn desde_resumen(resumen: Resumen) -> Self {
+        Self(resumen)
+    }
 }
 
 /// Errores de la revocacion.

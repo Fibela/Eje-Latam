@@ -882,19 +882,62 @@ fn el_lector_de_v2_devuelve_las_dos_marcas() {
 /// Es la distincion que decide si quien lo ejecute por segunda vez cree que ha
 /// roto el almacen. `NoEsV2` mandaria a alguien a buscar una averia que no
 /// existe, a las tres de la manana, sobre un fichero sano.
+///
+/// # La version esperada NO se escribe a mano
+///
+/// PA-146b fase 2. Esta prueba nacio con `encontrada: 3` escrito como literal, y
+/// se puso roja el dia que el centinela paso a la 4 — no porque nada se hubiera
+/// roto, sino porque el numero estaba a mano. Se compara contra
+/// `VERSION_CENTINELA`, que es lo que la prueba quiere decir: **la version que el
+/// sensor escribe hoy no la lee el migrador**, sea cual sea ese numero.
 #[test]
 fn un_centinela_ya_migrado_dice_que_es_de_otra_version() {
-    use guardian_cc::arranque::{Centinelas, serializar_centinela};
+    use guardian_cc::arranque::{Centinelas, VERSION_CENTINELA, serializar_centinela};
 
     let error = centinela_v2::analizar_v2(&serializar_centinela(
         Centinelas::SIN_ESTABLECER.con_inventario(guardian_cc::inventario::Centinela::Establecido(1)),
     ))
-    .expect_err("un v3 no es un v2");
+    .expect_err("el formato vigente no es un formato migrable");
 
-    assert!(matches!(
-        error,
-        centinela_v2::ErrorCentinelaV2::OtraVersion { encontrada: 3 }
-    ));
+    assert!(
+        matches!(
+            error,
+            centinela_v2::ErrorCentinelaV2::OtraVersion { encontrada }
+                if encontrada == VERSION_CENTINELA
+        ),
+        "se esperaba OtraVersion({VERSION_CENTINELA}) y salio {error:?}"
+    );
+}
+
+/// Un centinela de version 3 **si** se puede migrar.
+///
+/// PA-146b fase 2. Es la razon de que `VERSIONES_LEGIBLES` acumule en vez de
+/// sustituir: `eje-prueba` esta en la 3, y si el migrador solo supiera leer la 2,
+/// esa maquina habria que reaprovisionarla a mano.
+///
+/// Cada version que se retire de esa lista es un sensor desplegado que deja de
+/// poder migrarse. Si esta prueba se pone roja, esa es la pregunta: **que
+/// sensores acabamos de dejar sin camino.**
+#[test]
+fn un_centinela_de_version_tres_todavia_se_puede_migrar() {
+    use guardian_cc::arranque::MAGICO_CENTINELA;
+
+    let mut bytes = MAGICO_CENTINELA.to_vec();
+    bytes.extend_from_slice(&3u16.to_be_bytes());
+    bytes.push(1);
+    bytes.extend_from_slice(&42u64.to_be_bytes());
+    bytes.push(1);
+    bytes.extend_from_slice(&7u64.to_be_bytes());
+    // El ancla de la v3: presencia y treinta y dos bytes cualesquiera. La
+    // migracion NO la lee —la recalcula de la clave del almacen— y por eso aqui
+    // da igual lo que digan.
+    bytes.push(1);
+    bytes.extend_from_slice(&[0xAB; 32]);
+
+    let marcas = centinela_v2::analizar_v2(&bytes).expect("un v3 tiene que ser migrable");
+
+    assert_eq!(marcas.inventario, Centinela::Establecido(42));
+    assert_eq!(marcas.configuracion, Centinela::Establecido(7));
 }
 
 /// Una marca ausente con valor encima tampoco pasa por el lector antiguo.

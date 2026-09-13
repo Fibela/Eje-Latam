@@ -42,7 +42,9 @@ use crate::disco::{ErrorDisco, escribir_atomico, leer};
 use crate::formato::ErrorFormato;
 use crate::inventario::{Centinela, ClaveInventario, DominioClave};
 use crate::proveedores::{DireccionEnlace, ErrorProveedor, ProveedorInventario};
-use crate::revocacion::{ArchivoRevocaciones, RegistroRevocaciones};
+use crate::revocacion::{
+    ArchivoRevocaciones, IdentificadorClave, RegistroRevocaciones, Sucesion,
+};
 use eje_almacen::resumen::{Absorbedor, Resumen};
 
 /// Magico del fichero de centinela.
@@ -70,10 +72,27 @@ pub const MAGICO_CENTINELA: &[u8; 8] = b"EJE-CEN1";
 /// desplegado; cuando lo haya, la migracion tendra que ser una operacion
 /// deliberada del emisor, no una lectura tolerante del agente»*.
 ///
+/// La 3 anclaba la de recuperacion y **no la operativa**, que es la que firma el
+/// inventario y la configuracion que el sensor obedece cada dia. Aceptarla se
+/// leeria como «esta clave operativa nunca se ancló», y sustituirla volveria a no
+/// encender nada: es lo que paso el 1 de septiembre de 2026 reinstalando la
+/// identidad de `eje-prueba` a mano, sin que el sensor dijera una palabra.
+///
+/// # Y aqui la migracion dejo de ser hipotetica
+///
+/// La version 2 decia: *«se puede permitir porque no hay ningun sensor
+/// desplegado; cuando lo haya, la migracion tendra que ser una operacion
+/// deliberada del emisor, no una lectura tolerante del agente»*.
+///
 /// Ese dia llego el 9 de septiembre de 2026 con `eje-prueba` en marcha, y la
 /// frase se cumple al pie de la letra: el agente **no** migra nada. Migra
-/// `eje-manifiesto migrar-centinela`, con un humano delante (PA-150).
-pub const VERSION_CENTINELA: u16 = 3;
+/// `eje-manifiesto migrar-centinela`, con un humano delante (PA-150, PA-146b).
+///
+/// La 4 llega un dia despues que la 3, y eso es un error de diseño mio: la
+/// pregunta que me hice fue «como damos testigo a la clave de recuperacion» en
+/// vez de «que claves merecen testigo». Con la segunda, las dos anclas habrian
+/// entrado juntas y el despliegue pasaria por **una** parada en vez de dos.
+pub const VERSION_CENTINELA: u16 = 4;
 
 /// Longitud exacta del fichero de centinela.
 ///
@@ -82,15 +101,8 @@ pub const VERSION_CENTINELA: u16 = 3;
 /// en cero» darian los mismos bytes y son cosas distintas. El ancla de
 /// recuperacion sigue la misma regla: sin bandera, «sin anclar» y «anclada a
 /// treinta y dos ceros» serian el mismo fichero.
-const LONGITUD_CENTINELA: usize = 8 + 2 + (1 + 8) + (1 + 8) + (1 + 32);
+const LONGITUD_CENTINELA: usize = 8 + 2 + (1 + 8) + (1 + 8) + (1 + 32) + (1 + 32);
 
-/// Etiqueta de dominio del ancla de la clave de recuperacion.
-///
-/// RPT-011 §2: se reutiliza el `Absorbedor` de ALM-01 en lugar de definir una
-/// codificacion canonica paralela. La etiqueta impide que este resumen coincida
-/// nunca con el de una hoja del inventario o el de un asiento, aunque los bytes
-/// de entrada fueran los mismos.
-const DOMINIO_ANCLA_RECUPERACION: &[u8] = b"eje-latam/agt-01/ancla-recuperacion/v1";
 
 /// Directorio volatil donde vive el socket, por omision. RPT-067, PA-120.
 ///
@@ -310,7 +322,28 @@ pub struct Centinelas {
     /// semantica de frescura—. Esto es un valor que esta o no esta, sin orden
     /// entre dos valores distintos: dos huellas que difieren no es que una sea
     /// mas nueva, es que **no son la misma clave**.
-    pub huella_recuperacion: Option<Resumen>,
+    pub huella_recuperacion: Option<IdentificadorClave>,
+    /// Huella de la clave **operativa** que este sensor tuvo.
+    ///
+    /// PA-146b fase 2.
+    ///
+    /// # Por que esta llega un dia despues que la otra
+    ///
+    /// Porque PA-150 pregunto «como damos testigo a la clave de recuperacion» en
+    /// vez de «que claves merecen testigo». La operativa es la que firma el
+    /// inventario y la configuracion que el sensor obedece **cada dia**, y hasta
+    /// hoy se cargaba del disco y se creia: sustituirla no encendia nada.
+    ///
+    /// El 1 de septiembre de 2026 se reinstalo la identidad de `eje-prueba` a
+    /// mano —clave nueva, fichero sustituido— y el sensor no dijo una palabra.
+    ///
+    /// # Y aqui hay un quinto estado que la de recuperacion no tiene
+    ///
+    /// Que esta huella cambie no siempre es un ataque: puede ser una **rotacion
+    /// legitima**, y lo que la distingue es un certificado de revocacion
+    /// verificado que nombre a la nueva como sucesora de la anclada. Ver
+    /// [`EstadoOperativa`].
+    pub huella_operativa: Option<IdentificadorClave>,
 }
 
 impl Centinelas {
@@ -319,6 +352,7 @@ impl Centinelas {
         inventario: Centinela::SinEstablecer,
         configuracion: Centinela::SinEstablecer,
         huella_recuperacion: None,
+        huella_operativa: None,
     };
 
     /// Las mismas marcas con la del inventario sustituida.
@@ -328,6 +362,7 @@ impl Centinelas {
             inventario: marca,
             configuracion: self.configuracion,
             huella_recuperacion: self.huella_recuperacion,
+            huella_operativa: self.huella_operativa,
         }
     }
 
@@ -338,6 +373,7 @@ impl Centinelas {
             inventario: self.inventario,
             configuracion: marca,
             huella_recuperacion: self.huella_recuperacion,
+            huella_operativa: self.huella_operativa,
         }
     }
 
@@ -348,11 +384,27 @@ impl Centinelas {
     /// que anclara la del atacante, y el centinela volveria a no decir nada. La
     /// escribe `eje-manifiesto`, con un humano delante.
     #[must_use]
-    pub const fn con_recuperacion(self, huella: Option<Resumen>) -> Self {
+    pub const fn con_recuperacion(self, huella: Option<IdentificadorClave>) -> Self {
         Self {
             inventario: self.inventario,
             configuracion: self.configuracion,
             huella_recuperacion: huella,
+            huella_operativa: self.huella_operativa,
+        }
+    }
+
+    /// Las mismas marcas con el ancla de la clave operativa sustituida.
+    ///
+    /// PA-146b fase 2. Tampoco la llama el agente, y por el mismo motivo que la
+    /// de recuperacion: anclar al primer uso convertiria el ataque en «borro los
+    /// dos ficheros y dejo la mia».
+    #[must_use]
+    pub const fn con_operativa(self, huella: Option<IdentificadorClave>) -> Self {
+        Self {
+            inventario: self.inventario,
+            configuracion: self.configuracion,
+            huella_recuperacion: self.huella_recuperacion,
+            huella_operativa: huella,
         }
     }
 
@@ -373,22 +425,30 @@ impl Centinelas {
         self.inventario.secuencia().is_none()
             && self.configuracion.secuencia().is_none()
             && self.huella_recuperacion.is_none()
+            && self.huella_operativa.is_none()
     }
 }
 
-/// Huella canonica de una clave de recuperacion aprovisionada.
+/// Ancla de una clave aprovisionada: su [`IdentificadorClave`].
 ///
-/// Se calcula sobre la **serializacion canonica** de la clave y no sobre los
-/// bytes del fichero: dos ficheros con el mismo contenido logico tienen que dar
-/// la misma huella, o una reescritura inocua se leeria como sustitucion.
+/// # Por que este identificador y no una huella propia
+///
+/// PA-146b fase 2, corrigiendo a PA-150. La primera version de esto era
+/// `huella_de_recuperacion`, un resumen **nuevo** sobre la serializacion de la
+/// clave bajo su propia etiqueta de dominio. Funcionaba para la clave de
+/// recuperacion y **hacia imposible la rotacion**: los certificados nombran a la
+/// sucesora con `IdentificadorClave`, que es otro resumen del mismo material, y
+/// de una huella no se vuelve a la clave para recalcular la otra.
+///
+/// Con dos hashes distintos del mismo objeto, el ancla y el certificado no
+/// pueden hablarse. Con uno, si.
+///
+/// Y ese uno ya existia desde RPT-016, con esta documentacion: *«se usa en lugar
+/// de la clave completa porque el registro de revocaciones debe poder nombrar
+/// una clave que ya no se conserva»*. Es la definicion de un ancla.
 #[must_use]
-pub fn huella_de_recuperacion(clave: &ClaveInventario) -> Resumen {
-    let mut absorbedor = Absorbedor::nuevo(DOMINIO_ANCLA_RECUPERACION);
-    absorbedor.campo(&serializar_clave(
-        clave.clave(),
-        DominioClave::ClienteRecuperacion,
-    ));
-    absorbedor.finalizar()
+pub fn ancla_de_clave(clave: &ClaveInventario) -> IdentificadorClave {
+    clave.identificador()
 }
 
 /// Que dice el almacen sobre la clave de recuperacion. PA-150.
@@ -429,12 +489,15 @@ pub enum EstadoRecuperacion {
 impl EstadoRecuperacion {
     /// Deriva el estado del ancla y de lo que hay en disco.
     #[must_use]
-    pub fn evaluar(ancla: Option<Resumen>, presente: Option<&ClaveInventario>) -> Self {
+    pub fn evaluar(
+        ancla: Option<IdentificadorClave>,
+        presente: Option<&ClaveInventario>,
+    ) -> Self {
         match (ancla, presente) {
             (None, _) => Self::NoAprovisionada,
             (Some(_), None) => Self::Suprimida,
             (Some(anclada), Some(clave)) => {
-                if huella_de_recuperacion(clave) == anclada {
+                if ancla_de_clave(clave) == anclada {
                     Self::Anclada
                 } else {
                     Self::NoVerifica
@@ -446,6 +509,97 @@ impl EstadoRecuperacion {
     /// Si alguien toco el almacen para llegar a este estado.
     ///
     /// `NoAprovisionada` no lo es: nadie hizo nada, y eso es justo el problema.
+    #[must_use]
+    pub const fn es_manipulacion(self) -> bool {
+        matches!(self, Self::Suprimida | Self::NoVerifica)
+    }
+}
+
+/// Que dice el almacen sobre la clave **operativa**. PA-146b fase 2.
+///
+/// # Cinco estados: los cuatro de la recuperacion, mas la rotacion
+///
+/// La operativa firma el inventario y la configuracion que el sensor obedece
+/// cada dia, y hasta hoy se cargaba del disco y se creia. Sustituirla no
+/// encendia nada — es lo que paso el 1 de septiembre de 2026 reinstalando la
+/// identidad de `eje-prueba`, sin que el sensor dijera una palabra.
+///
+/// | Ancla | Fichero | Certificado | Lectura |
+/// |---|---|---|---|
+/// | ausente | cualquiera | — | [`Self::NoAprovisionada`] |
+/// | presente | ausente | — | [`Self::Suprimida`] |
+/// | presente | otra | nombra a esa otra como sucesora | [`Self::Rotada`] |
+/// | presente | otra | no, o nombra a otra | [`Self::NoVerifica`] |
+/// | presente | la misma | — | [`Self::Anclada`] |
+///
+/// # El quinto es el punto entero
+///
+/// Que la clave cambie **no siempre es un ataque**. Lo que distingue una
+/// rotacion legitima de un secuestro es un certificado de revocacion verificado
+/// —firmado por la clave de recuperacion, que vive fuera de esta maquina— que
+/// nombre a la clave presente como sucesora de la anclada.
+///
+/// Sin ese cruce, las dos cosas se ven igual en el disco: un fichero `.pub`
+/// distinto del que habia. Con el, el mismo mecanismo que acusa el secuestro
+/// autoriza la rotacion, que es lo que PA-146 pedia desde el principio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EstadoOperativa {
+    /// No hay ancla. Nadie declaro cual es la identidad de este sensor.
+    NoAprovisionada,
+    /// Hubo clave anclada y su fichero ya no esta.
+    Suprimida,
+    /// Hay otra clave y **ningun certificado la autoriza**.
+    NoVerifica,
+    /// Hay otra clave y un certificado verificado la nombra sucesora.
+    Rotada,
+    /// La clave presente es la anclada.
+    Anclada,
+}
+
+impl EstadoOperativa {
+    /// Deriva el estado del ancla, de lo que hay en disco y de las revocaciones.
+    ///
+    /// # Por que el registro entra aqui y no se consulta despues
+    ///
+    /// Porque la pregunta «¿esta clave es legitima?» no se puede responder sin
+    /// el. Pasarlo por parametro impide escribir la version que responde sin
+    /// mirarlo — que es la que tenemos hoy, y que dice que si a todo.
+    #[must_use]
+    pub fn evaluar(
+        ancla: Option<IdentificadorClave>,
+        presente: Option<&ClaveInventario>,
+        revocaciones: &RegistroRevocaciones,
+    ) -> Self {
+        let (Some(anclada), Some(clave)) = (ancla, presente) else {
+            return match (ancla, presente) {
+                (None, _) => Self::NoAprovisionada,
+                (Some(_), None) => Self::Suprimida,
+                // Inalcanzable: el patron de arriba ya cubrio los dos casos con
+                // ancla y clave. Se escribe sin comodin para que anadir una
+                // variante deje de compilar aqui.
+                (Some(_), Some(_)) => Self::Anclada,
+            };
+        };
+
+        let presente = ancla_de_clave(clave);
+
+        if presente == anclada {
+            return Self::Anclada;
+        }
+
+        // La clave cambio. Lo unico que distingue rotacion de secuestro es que
+        // la autoridad de recuperacion lo haya dicho por escrito y firmado.
+        match revocaciones.sucesora_de(&anclada) {
+            Sucesion::Declarada(sucesora) if sucesora == presente => Self::Rotada,
+            Sucesion::Declarada(_) | Sucesion::SinRevocar => Self::NoVerifica,
+        }
+    }
+
+    /// Si alguien toco el almacen sin autorizacion para llegar a este estado.
+    ///
+    /// `Rotada` **no** lo es: cambio la clave y hay un certificado que lo
+    /// autoriza. `NoAprovisionada` tampoco: nadie hizo nada, y eso es el
+    /// problema.
     #[must_use]
     pub const fn es_manipulacion(self) -> bool {
         matches!(self, Self::Suprimida | Self::NoVerifica)
@@ -497,15 +651,16 @@ pub fn serializar_centinela(centinelas: Centinelas) -> Vec<u8> {
     escribir_marca(&mut salida, centinelas.inventario);
     escribir_marca(&mut salida, centinelas.configuracion);
     escribir_ancla(&mut salida, centinelas.huella_recuperacion);
+    escribir_ancla(&mut salida, centinelas.huella_operativa);
     salida
 }
 
 /// Serializa el ancla de recuperacion: presencia y valor.
-fn escribir_ancla(salida: &mut Vec<u8>, huella: Option<Resumen>) {
+fn escribir_ancla(salida: &mut Vec<u8>, huella: Option<IdentificadorClave>) {
     match huella {
-        Some(resumen) => {
+        Some(identificador) => {
             salida.push(1);
-            salida.extend_from_slice(resumen.bytes());
+            salida.extend_from_slice(identificador.resumen().bytes());
         }
         // Los treinta y dos bytes van a cero por lo mismo que los ocho de una
         // marca: dos ficheros que dicen lo mismo tienen que ser el mismo fichero.
@@ -518,13 +673,15 @@ fn escribir_ancla(salida: &mut Vec<u8>, huella: Option<Resumen>) {
 /// El `None` exterior significa que los bytes no son un ancla valida; el
 /// interior, que no hay ancla. Colapsarlos leeria un fichero corrupto como un
 /// sensor sin aprovisionar, que es la puerta que este campo cierra.
-fn leer_ancla(bytes: &[u8]) -> Option<Option<Resumen>> {
+fn leer_ancla(bytes: &[u8]) -> Option<Option<IdentificadorClave>> {
     let (presencia, valor) = bytes.split_first()?;
     let valor: [u8; 32] = valor.try_into().ok()?;
 
     match *presencia {
         0 if valor == [0u8; 32] => Some(None),
-        1 => Some(Some(Resumen::desde_bytes(valor))),
+        1 => Some(Some(IdentificadorClave::desde_resumen(Resumen::desde_bytes(
+            valor,
+        )))),
         _ => None,
     }
 }
@@ -546,10 +703,11 @@ pub fn analizar_centinela(bytes: &[u8]) -> Result<Centinelas, ErrorArranque> {
         return Err(ErrorArranque::CentinelaCorrupto);
     }
 
-    let (Some(inventario), Some(configuracion), Some(huella_recuperacion)) = (
+    let (Some(inventario), Some(configuracion), Some(huella_recuperacion), Some(huella_operativa)) = (
         leer_marca(&bytes[10..19]),
         leer_marca(&bytes[19..28]),
         leer_ancla(&bytes[28..61]),
+        leer_ancla(&bytes[61..94]),
     ) else {
         return Err(ErrorArranque::CentinelaCorrupto);
     };
@@ -558,6 +716,7 @@ pub fn analizar_centinela(bytes: &[u8]) -> Result<Centinelas, ErrorArranque> {
         inventario,
         configuracion,
         huella_recuperacion,
+        huella_operativa,
     };
 
     if centinelas.vacio() {
@@ -848,6 +1007,11 @@ pub struct Arranque {
     /// nunca. Ese aviso llevaba desde el 6 de agosto sin ser un mecanismo, y el
     /// 31 de agosto se pago (RPT-092, RPT-094 §1).
     pub recuperacion: EstadoRecuperacion,
+    /// Que dice el almacen sobre la clave **operativa**.
+    ///
+    /// PA-146b fase 2. La que firma el inventario y la configuracion, y la que
+    /// hasta hoy se cargaba del disco sin que nadie comprobara su identidad.
+    pub operativa: EstadoOperativa,
 }
 
 /// Arranca el agente leyendo tambien sus claves del almacen.
@@ -897,6 +1061,14 @@ pub fn arrancar_con_almacen(rutas: &RutasAlmacen) -> Result<Arranque, ErrorArran
                 centinelas.huella_recuperacion,
                 recuperacion.as_ref(),
             ),
+            // Sin clave operativa en disco no hay rotacion posible que valorar:
+            // o nunca se anclo, o estaba y ya no esta. El registro no cambia
+            // ninguno de esos dos, y aqui no se ha cargado.
+            operativa: EstadoOperativa::evaluar(
+                centinelas.huella_operativa,
+                None,
+                &RegistroRevocaciones::nuevo(),
+            ),
         });
     };
 
@@ -912,12 +1084,25 @@ pub fn arrancar_con_almacen(rutas: &RutasAlmacen) -> Result<Arranque, ErrorArran
     // anterior. Es el ataque de PA-27 servido por la puerta que RPT-015 §4 cerro.
     let (estado, centinelas) = arrancar(rutas, &operativa, recuperacion.as_ref())?;
 
+    // PA-146b fase 2. El registro se vuelve a cargar aqui porque `arrancar` lo
+    // consume por dentro y no lo devuelve, y cambiarle la firma movia diez
+    // llamantes. Son dos lecturas del mismo fichero con microsegundos de
+    // diferencia, ambas verificadas contra la clave de recuperacion: si
+    // discreparan, alguien estaria reescribiendolo durante el arranque, y eso es
+    // un problema distinto y mayor que el coste de leerlo dos veces.
+    let revocaciones = cargar_revocaciones(rutas, recuperacion.as_ref())?;
+
     Ok(Arranque {
         estado,
         centinelas,
         recuperacion: EstadoRecuperacion::evaluar(
             centinelas.huella_recuperacion,
             recuperacion.as_ref(),
+        ),
+        operativa: EstadoOperativa::evaluar(
+            centinelas.huella_operativa,
+            Some(&operativa),
+            &revocaciones,
         ),
     })
 }

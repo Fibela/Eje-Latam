@@ -34,7 +34,7 @@ use eje_manifiesto::reposo_semilla::{LONGITUD_SAL, abrir, sellar};
 use eje_manifiesto::{Emisor, ErrorEmision};
 use eje_manifiesto::centinela_v2::analizar_v2;
 use guardian_cc::arranque::{
-    Centinelas, RutasAlmacen, aprovisionar_clave, cargar_clave, huella_de_recuperacion,
+    Centinelas, RutasAlmacen, ancla_de_clave, aprovisionar_clave, cargar_clave,
     serializar_centinela,
 };
 use guardian_cc::clave::analizar as analizar_clave;
@@ -695,17 +695,28 @@ fn migrar_centinela(opciones: &Opciones) -> Result<(), ErrorHerramienta> {
         detalle: error.to_string(),
     })?;
 
-    let huella = recuperacion.as_ref().map(huella_de_recuperacion);
+    // PA-146b fase 2. La operativa se lee del mismo almacen y por el mismo
+    // motivo: anclar la huella de una clave que no esta en este sensor le haria
+    // acusar una sustitucion en cuanto arranque.
+    let operativa = cargar_clave(&rutas.clave_operativa(), DominioClave::Cliente).map_err(
+        |error| ErrorHerramienta::Aprovisionamiento {
+            detalle: error.to_string(),
+        },
+    )?;
+
+    let ancla_recuperacion = recuperacion.as_ref().map(ancla_de_clave);
+    let ancla_operativa = operativa.as_ref().map(ancla_de_clave);
 
     let centinelas = Centinelas::SIN_ESTABLECER
         .con_inventario(marcas.inventario)
         .con_configuracion(marcas.configuracion)
-        .con_recuperacion(huella);
+        .con_recuperacion(ancla_recuperacion)
+        .con_operativa(ancla_operativa);
 
     escribir(&rutas.centinela(), &serializar_centinela(centinelas))?;
 
     println!("Centinela migrado    : {}", rutas.centinela().display());
-    println!("Version              : 2 -> 3");
+    println!("Version              : 2 o 3 -> 4");
     println!(
         "Marca de inventario  : {}",
         describir_marca(marcas.inventario)
@@ -716,22 +727,38 @@ fn migrar_centinela(opciones: &Opciones) -> Result<(), ErrorHerramienta> {
     );
     println!();
 
-    match huella {
-        Some(resumen) => {
-            println!("Ancla de recuperacion: {}", resumen.hexadecimal());
-            println!();
-            println!("A partir de ahora, que esa clave desaparezca o cambie deja de");
-            println!("parecerse a una instalacion recien hecha.");
-        }
+    match ancla_operativa {
+        Some(identificador) => println!(
+            "Ancla operativa      : {}",
+            identificador.resumen().hexadecimal()
+        ),
         None => {
-            println!("  !! SIN ANCLA. No hay clave de recuperacion en este almacen, asi");
-            println!("     que el centinela migrado no recuerda ninguna y este sensor");
-            println!("     sigue sin remedio si su identidad se compromete.");
+            println!("  !! SIN ANCLA OPERATIVA. No hay clave-cliente.pub en este almacen.");
+            println!("     El sensor no podra distinguir su identidad de otra.");
+        }
+    }
+
+    match ancla_recuperacion {
+        Some(identificador) => println!(
+            "Ancla recuperacion   : {}",
+            identificador.resumen().hexadecimal()
+        ),
+        None => {
+            println!("  !! SIN ANCLA DE RECUPERACION. No hay clave de recuperacion en");
+            println!("     este almacen, asi que el centinela migrado no recuerda");
+            println!("     ninguna y este sensor sigue sin remedio si su identidad se");
+            println!("     compromete.");
             println!();
             println!("     Se arregla con 'eje-manifiesto recuperacion', copiando la");
             println!("     clave publica al almacen del sensor, y volviendo a ejecutar");
             println!("     esta orden. Migrar sin ancla es valido y esta a medias.");
         }
+    }
+
+    if ancla_operativa.is_some() && ancla_recuperacion.is_some() {
+        println!();
+        println!("A partir de ahora, que cualquiera de las dos desaparezca o cambie");
+        println!("deja de parecerse a una instalacion recien hecha.");
     }
 
     Ok(())
