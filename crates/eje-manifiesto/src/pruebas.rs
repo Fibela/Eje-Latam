@@ -895,7 +895,8 @@ fn un_centinela_ya_migrado_dice_que_es_de_otra_version() {
     use guardian_cc::arranque::{Centinelas, VERSION_CENTINELA, serializar_centinela};
 
     let error = centinela_v2::analizar_v2(&serializar_centinela(
-        Centinelas::SIN_ESTABLECER.con_inventario(guardian_cc::inventario::Centinela::Establecido(1)),
+        Centinelas::SIN_ESTABLECER
+            .con_inventario(guardian_cc::inventario::Centinela::Establecido(1)),
     ))
     .expect_err("el formato vigente no es un formato migrable");
 

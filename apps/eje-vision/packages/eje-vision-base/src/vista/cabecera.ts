@@ -82,7 +82,7 @@ export function componerCabecera(estado: EstadoPanel<Condiciones>): Cabecera {
 
   if (estado.clase !== "datos") {
     // `vacio` y `noServido` no tienen sentido para las condiciones: el agente
-    // siempre devuelve las dieciséis. Si llega uno de estos, algo cambió en el
+    // siempre devuelve las veintiuna. Si llega uno de estos, algo cambió en el
     // contrato y decirlo es mejor que elegir una rama al azar.
     return {
       urgencia: "critica",
@@ -138,6 +138,34 @@ export function componerCabecera(estado: EstadoPanel<Condiciones>): Cabecera {
     };
   }
 
+  // PA-146b fase 3. La identidad OPERATIVA va antes que la de recuperación, y
+  // no por gravedad abstracta: si alguien sustituyó la clave que firma el
+  // inventario y la configuración, lo que el sensor obedece ahora mismo no es de
+  // quien el operador cree. Eso se lee antes que la falta de un remedio para
+  // mañana.
+  if (condiciones.operativaNoVerifica) {
+    return {
+      urgencia: "critica",
+      titulo: "La identidad de este sensor no es la suya",
+      detalle:
+        "La clave que firma su inventario y su configuración NO es la anclada, y " +
+        "ningún certificado la autoriza. Lo que este sensor obedece lo firma otro. " +
+        "Tratar el equipo como comprometido.",
+      datosDeAntes: false,
+    };
+  }
+
+  if (condiciones.operativaSuprimida) {
+    return {
+      urgencia: "critica",
+      titulo: "Alguien borró la identidad de este sensor",
+      detalle:
+        "El sensor recuerda haber tenido clave operativa y el fichero no está. " +
+        "Sin ella no puede verificar nada de lo que se le entregue.",
+      datosDeAntes: false,
+    };
+  }
+
   // La clave sustituida va antes que la borrada: las dos son manipulación, pero
   // borrar deja al sensor sin remedio y sustituir se lo da a otro. Con las dos
   // encendidas —que no puede pasar, son excluyentes— mandaría la peor.
@@ -159,6 +187,41 @@ export function componerCabecera(estado: EstadoPanel<Condiciones>): Cabecera {
       detalle:
         "El sensor recuerda haberla tenido. Nadie la pierde por accidente, y sin " +
         "ella este equipo no se puede revocar si su identidad se compromete.",
+      datosDeAntes: false,
+    };
+  }
+
+  // PA-156. Crítica sin ser manipulación, como `registroSaturado` de aquí abajo.
+  //
+  // # Por qué va después de las manipulaciones
+  //
+  // Puede coincidir con ellas: que la clave anclada esté revocada es un hecho
+  // independiente de que alguien haya tocado el inventario o las claves de este
+  // equipo. Si las dos cosas pasan a la vez manda la manipulación, porque hay un
+  // ataque en curso **contra esta máquina** y esto es una ceremonia sin
+  // terminar.
+  //
+  // No puede coincidir con `operativaNoVerifica` ni con `operativaSuprimida`:
+  // aquéllas exigen que la clave del disco NO sea la anclada, y ésta exige que
+  // lo sea.
+  //
+  // # Y por qué va antes que el registro saturado
+  //
+  // Es discutible y se deja escrito: el registro lleno pierde evidencia ahora
+  // mismo y esto está acotado —`aceptar_inventario` ya rechaza por encima del
+  // corte—. Va antes porque mantiene contiguo el grupo de la identidad, y porque
+  // si la revocación se emitió por un robo, quien tenga la clave puede firmar
+  // por debajo del corte y ensanchar la ventana de silencio que la sala vigila,
+  // que es como esto deja de estar acotado.
+  if (condiciones.operativaRevocada) {
+    return {
+      urgencia: "critica",
+      titulo: "Este sensor usa una identidad ya revocada",
+      detalle:
+        "Hay un certificado firmado que declara muerta su clave operativa y la " +
+        "rotación no se ha hecho en este equipo. No es un ataque a esta máquina: " +
+        "es una ceremonia sin terminar, y hasta que se termine el sensor sigue " +
+        "obedeciendo a esa clave.",
       datosDeAntes: false,
     };
   }

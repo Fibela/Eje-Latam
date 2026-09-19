@@ -23,6 +23,11 @@ const NOMBRES = {
   recuperacionNoAprovisionada: "SIN CLAVE DE RECUPERACIÓN ANCLADA",
   recuperacionSuprimida: "CLAVE DE RECUPERACIÓN BORRADA",
   recuperacionNoVerifica: "CLAVE DE RECUPERACIÓN SUSTITUIDA",
+  operativaNoAprovisionada: "SIN IDENTIDAD ANCLADA",
+  operativaSuprimida: "IDENTIDAD SUPRIMIDA",
+  operativaNoVerifica: "IDENTIDAD SUSTITUIDA",
+  operativaRotada: "identidad rotada, ancla sin actualizar",
+  operativaRevocada: "IDENTIDAD REVOCADA, rotación sin hacer aquí",
 };
 
 async function refrescar() {

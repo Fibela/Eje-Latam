@@ -250,9 +250,10 @@ function manipulacionesDelContrato(contenido: string): string[] {
 /**
  * Todo apagado, **derivado** de `CAMPOS_CONDICIONES`. PA-149.
  *
- * No se escribe a mano. Sería una lista más de dieciséis nombres dentro del
- * arreglo del defecto de las listas de dieciséis nombres, y quedaría atrás en
- * cuanto el contrato ganara una condición.
+ * No se escribe a mano. Sería una lista más de veintiún nombres dentro del
+ * arreglo del defecto de las listas de veintiún nombres, y quedaría atrás en
+ * cuanto el contrato ganara una condición. Ya lo ganó: se escribió con
+ * dieciséis y las cuatro de la clave operativa entraron sin tocarla.
  */
 const CALMA_CONTRATO = Object.fromEntries(
   CAMPOS_CONDICIONES.map(([nombre]) => [nombre, false]),

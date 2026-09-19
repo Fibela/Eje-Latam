@@ -33,7 +33,7 @@ use eje_almacen::persistencia::{
 };
 use eje_almacen::{Asiento, ClaseEvento, RegistroEvidencia};
 use eje_ipc::mensajes::{ClaseAlerta, Condiciones, PeticionAlertas, SucesoAlerta};
-use guardian_cc::arranque::{EstadoArranque, EstadoRecuperacion};
+use guardian_cc::arranque::{EstadoArranque, EstadoOperativa, EstadoRecuperacion};
 use guardian_cc::disco::{ErrorDisco, escribir_atomico, leer_hasta};
 use guardian_cc::observacion::AlmacenObservacion;
 use guardian_cc::{Veredicto, proveedores::DireccionEnlace};
@@ -598,6 +598,52 @@ pub enum EstadoConfiguracion {
     NoVerifica,
 }
 
+/// Los tres hechos que `condiciones` no puede averiguar por si misma.
+///
+/// # Por que un registro y no tres parametros
+///
+/// PA-155. Eran tres `bool` contiguos dentro de una firma de nueve argumentos,
+/// y en la unica llamada de produccion iban asi:
+///
+/// ```text
+/// self.captura_no_disponible,
+/// self.emisor.is_none(),
+/// self.escucha_no_disponible,
+/// ```
+///
+/// Transponer dos de esos tres compila, pasa las 632 pruebas y pinta la
+/// condicion equivocada: el tablero diria que el sensor no admite consultas
+/// cuando lo que pasa es que no esta vigilando la red. Son dos frases distintas
+/// para dos averias distintas, y el operador actuaria sobre la que no es.
+///
+/// Con nombres en el sitio de la llamada ese error no se puede escribir.
+///
+/// Lo encontro `cargo clippy` con `too_many_arguments`, y no como regla de
+/// estilo: nueve argumentos posicionales eran el sintoma y tres booleanos
+/// contiguos la enfermedad. La salida facil era `#[allow]`, que habria callado
+/// el aviso dejando el agujero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HechosDeFuera {
+    /// RPT-047, PA-81. El sensor no esta observando la red.
+    ///
+    /// Entra como hecho de fuera y no se rellena despues como
+    /// `salida_no_disponible`: aquel se pospone porque es el resultado de
+    /// emitir, y emitir necesita estas condiciones —seria circular—. Este no
+    /// tiene esa excusa. Un campo que se fija despues es un campo que alguien
+    /// olvidara fijar, y el olvido se lee como «la captura va bien».
+    pub captura_no_disponible: bool,
+    /// RPT-054 §5, PA-109. No hay colector configurado y nada sale de aqui.
+    ///
+    /// Rellenarlo despues lo dejaria en `false`, que se lee como «hay
+    /// colector» y es justo la mentira que esta condicion existe para impedir.
+    pub sin_colector: bool,
+    /// RPT-070, PA-125. La escucha local no esta abierta.
+    ///
+    /// En `false` se lee como «la consola puede conectarse», que es exactamente
+    /// lo que esta condicion existe para impedir que se crea sin comprobarlo.
+    pub escucha_no_disponible: bool,
+}
+
 /// Manejador de `obtener-condiciones`.
 ///
 /// # Los cinco estados degradados salen de dos sitios
@@ -619,31 +665,84 @@ pub fn condiciones(
     estado: &EstadoArranque,
     observacion: &AlmacenObservacion,
     registro: &RegistroEvidencia,
-    captura_no_disponible: bool,
-    sin_colector: bool,
-    escucha_no_disponible: bool,
+    fuera: HechosDeFuera,
     configuracion: EstadoConfiguracion,
     recuperacion: EstadoRecuperacion,
+    operativa: EstadoOperativa,
 ) -> Condiciones {
+    // Desestructuracion exhaustiva y no `fuera.campo` en cada sitio: anadir un
+    // cuarto hecho de fuera tiene que romper aqui, no colarse apagado.
+    let HechosDeFuera {
+        captura_no_disponible,
+        sin_colector,
+        escucha_no_disponible,
+    } = fuera;
+
+    // PA-146a (partido en PA-150) y PA-146b fase 3. Los siete booleanos de las
+    // dos claves salen de DOS datos y no entran por separado: son mutuamente
+    // excluyentes, y siete parametros sueltos permitirian encender dos a la vez.
+    // Aqui eso no se puede escribir.
+    //
+    // Entran por parametro y no se consultan aqui: lo que dice el almacen sobre
+    // cada clave lo sabe quien arranco. Rellenarlos despues los dejaria en
+    // `false`, que se lee como «este sensor se puede revocar» — la suposicion
+    // que el 31 de agosto salio cara.
+    //
+    // # PA-153: por que `match` y no `matches!`
+    //
+    // Hasta el 14 de septiembre de 2026 esto eran siete `matches!`. Daban la
+    // exclusion mutua, que era el motivo de PA-146a, pero `matches!` **no exige
+    // exhaustividad**: perturbando con un sexto estado en `EstadoOperativa`
+    // (RPT-101 §3), este fichero compilo sin decir nada y apago las cuatro
+    // condiciones. Un estado que nadie habia decidido como presentar pintaba
+    // tablero en calma.
+    //
+    // El compilador si paraba — en el `match` de diagnostico de `main.rs`. Ese
+    // es el sitio equivocado: alli se escribe una linea en el diario del sensor,
+    // y aqui se decide lo que el operador ve. Arreglar el diario y creer que el
+    // dominio ya esta cubierto es como cerraba el defecto.
+    //
+    // Con `match` sin comodin el dominio no puede crecer sin que alguien decida
+    // **aqui** que se pinta, y la exclusion mutua se conserva igual: cada brazo
+    // devuelve una tupla con como mucho un `true`.
+    let (recuperacion_no_aprovisionada, recuperacion_suprimida, recuperacion_no_verifica) =
+        match recuperacion {
+            EstadoRecuperacion::NoAprovisionada => (true, false, false),
+            EstadoRecuperacion::Suprimida => (false, true, false),
+            EstadoRecuperacion::NoVerifica => (false, false, true),
+            // El estado sano no enciende ninguna.
+            EstadoRecuperacion::Anclada => (false, false, false),
+        };
+
+    // PA-156 anadio el sexto estado, y este `match` es lo que paro el
+    // compilador — en el sitio correcto, que es lo que PA-153 compro. Con los
+    // `matches!` de antes esto habria compilado callado y `operativaRevocada`
+    // habria salido apagada: tablero en calma con una identidad revocada.
+    let (
+        operativa_no_aprovisionada,
+        operativa_suprimida,
+        operativa_no_verifica,
+        operativa_rotada,
+        operativa_revocada,
+    ) = match operativa {
+        EstadoOperativa::NoAprovisionada => (true, false, false, false, false),
+        EstadoOperativa::Suprimida => (false, true, false, false, false),
+        EstadoOperativa::NoVerifica => (false, false, true, false, false),
+        EstadoOperativa::Rotada => (false, false, false, true, false),
+        EstadoOperativa::Revocada => (false, false, false, false, true),
+        EstadoOperativa::Anclada => (false, false, false, false, false),
+    };
+
     Condiciones {
         salida_no_disponible: false,
-        // PA-146a, partido en PA-150. Parametro, por lo mismo que los tres de
-        // abajo: lo que dice el almacen sobre la clave de recuperacion es un
-        // hecho que esta funcion no consulta, y lo sabe quien arranco.
-        // Rellenarlo despues lo dejaria todo en `false`, que se lee como «este
-        // sensor se puede revocar» — la suposicion que el 31 de agosto salio
-        // cara.
-        //
-        // Y como en `configuracion`, los TRES salen de un solo dato en lugar de
-        // entrar por separado: son mutuamente excluyentes, y tres booleanos
-        // sueltos permitirian encender dos a la vez. Aqui eso no se puede
-        // escribir.
-        recuperacion_no_aprovisionada: matches!(
-            recuperacion,
-            EstadoRecuperacion::NoAprovisionada
-        ),
-        recuperacion_suprimida: matches!(recuperacion, EstadoRecuperacion::Suprimida),
-        recuperacion_no_verifica: matches!(recuperacion, EstadoRecuperacion::NoVerifica),
+        recuperacion_no_aprovisionada,
+        recuperacion_suprimida,
+        recuperacion_no_verifica,
+        operativa_no_aprovisionada,
+        operativa_suprimida,
+        operativa_no_verifica,
+        operativa_rotada,
+        operativa_revocada,
         // RPT-070, PA-125. Parametro por lo mismo que los dos de abajo: si la
         // escucha local esta abierta es un hecho de fuera. Rellenarlo despues lo
         // dejaria en `false`, que se lee como «la consola puede conectarse», que

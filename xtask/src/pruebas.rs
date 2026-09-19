@@ -462,10 +462,11 @@ fn ninguna_orden_pide_la_frase_antes_de_leer_sus_entradas() {
 
     for orden in ORDENES {
         let apertura = format!("fn {orden}(");
-        let hallada = aperturas
-            .iter()
-            .copied()
-            .find(|indice| codigo.get(*indice).is_some_and(|l| l.starts_with(&apertura)));
+        let hallada = aperturas.iter().copied().find(|indice| {
+            codigo
+                .get(*indice)
+                .is_some_and(|l| l.starts_with(&apertura))
+        });
 
         assert!(
             hallada.is_some(),
@@ -499,7 +500,9 @@ fn ninguna_orden_pide_la_frase_antes_de_leer_sus_entradas() {
              de leer sus entradas con `entradas_sin_secreto`. Las dos cosas \
              cambian lo que esta barrera afirma (PA-144)."
         );
-        let (Some(lee), Some(pregunta)) = par else { continue };
+        let (Some(lee), Some(pregunta)) = par else {
+            continue;
+        };
 
         assert!(
             lee < pregunta,

@@ -40,10 +40,10 @@ import {
 } from "../../../packages/eje-vision-base/dist/indice.js";
 
 /**
- * Nombres legibles de las dieciséis condiciones, en el orden del contrato.
+ * Nombres legibles de las veintiuna condiciones, en el orden del contrato.
  *
  * El `satisfies` sobre `keyof Condiciones` es nuevo con PA-142 y **sustituye a
- * media barrera**: hasta hoy que estuvieran las dieciséis y ninguna sobrara lo
+ * media barrera**: hasta hoy que estuvieran las veintiuna y ninguna sobrara lo
  * comprobaba una prueba leyendo este fichero como texto. Ahora una clave mal
  * escrita no compila.
  */
@@ -59,6 +59,29 @@ const CONDICIONES = [
   //
   // Las dos últimas van juntas y arriba del todo entre las de recuperación
   // porque son manipulación; la primera es una ceremonia pendiente.
+  // PA-146b fase 3. La identidad operativa va **antes** que la de recuperación:
+  // si alguien sustituyó la clave que firma lo que el sensor obedece, eso se
+  // lee antes que la falta de un remedio para mañana.
+  [
+    "operativaNoVerifica",
+    "IDENTIDAD SUSTITUIDA: la clave que firma el inventario no es la de este sensor",
+  ],
+  [
+    "operativaSuprimida",
+    "IDENTIDAD SUPRIMIDA: la hubo y alguien la quitó; el sensor no puede verificar nada",
+  ],
+  [
+    "operativaRotada",
+    "Identidad rotada con certificado: legítima, y el ancla sigue sin actualizar",
+  ],
+  [
+    "operativaRevocada",
+    "IDENTIDAD REVOCADA: hay certificado que la anula y este sensor sigue usándola",
+  ],
+  [
+    "operativaNoAprovisionada",
+    "Sin identidad anclada: sustituir la clave de este sensor no se notaría",
+  ],
   [
     "recuperacionNoVerifica",
     "Clave de recuperación SUSTITUIDA: hay una y no es la de este sensor",

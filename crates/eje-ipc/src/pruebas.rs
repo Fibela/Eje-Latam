@@ -391,7 +391,7 @@ fn los_registros_coinciden_con_el_manifiesto() {
 /// y nadie las comparaba. El 10 de septiembre de 2026 divergieron y lo encontro
 /// una captura de pantalla (RPT-096 §5).
 ///
-/// Exige las **dieciseis**, tambien las que declaran `false`. Si el contrato
+/// Exige las **veintiuna**, tambien las que declaran `false`. Si el contrato
 /// pudiera omitir la clave, anadir una condicion y olvidarla la dejaria fuera de
 /// la manipulacion en silencio — el defecto que esta columna cierra.
 #[test]
@@ -574,6 +574,11 @@ fn las_constantes_estan_atadas_a_los_structs() {
         recuperacion_no_aprovisionada,
         recuperacion_suprimida,
         recuperacion_no_verifica,
+        operativa_no_aprovisionada,
+        operativa_suprimida,
+        operativa_no_verifica,
+        operativa_rotada,
+        operativa_revocada,
     } = Condiciones {
         inventario_suprimido: false,
         inventario_no_verifica: false,
@@ -591,6 +596,11 @@ fn las_constantes_estan_atadas_a_los_structs() {
         recuperacion_no_aprovisionada: false,
         recuperacion_suprimida: false,
         recuperacion_no_verifica: false,
+        operativa_no_aprovisionada: false,
+        operativa_suprimida: false,
+        operativa_no_verifica: false,
+        operativa_rotada: false,
+        operativa_revocada: false,
     };
     let _ = (
         inventario_suprimido,
@@ -609,8 +619,13 @@ fn las_constantes_estan_atadas_a_los_structs() {
         recuperacion_no_aprovisionada,
         recuperacion_suprimida,
         recuperacion_no_verifica,
+        operativa_no_aprovisionada,
+        operativa_suprimida,
+        operativa_no_verifica,
+        operativa_rotada,
+        operativa_revocada,
     );
-    assert_eq!(CAMPOS_CONDICIONES.len(), 16);
+    assert_eq!(CAMPOS_CONDICIONES.len(), 21);
 }
 
 #[test]
@@ -632,6 +647,11 @@ fn las_condiciones_distinguen_lo_degradado_de_lo_normal() {
         recuperacion_no_aprovisionada: false,
         recuperacion_suprimida: false,
         recuperacion_no_verifica: false,
+        operativa_no_aprovisionada: false,
+        operativa_suprimida: false,
+        operativa_no_verifica: false,
+        operativa_rotada: false,
+        operativa_revocada: false,
     };
     assert!(!normal.hay_degradacion());
     assert!(!normal.hay_manipulacion());
@@ -671,8 +691,13 @@ fn las_condiciones_distinguen_lo_degradado_de_lo_normal() {
         Condiciones {
             evidencia_en_riesgo: true,
             recuperacion_no_aprovisionada: false,
-        recuperacion_suprimida: false,
-        recuperacion_no_verifica: false,
+            recuperacion_suprimida: false,
+            recuperacion_no_verifica: false,
+            operativa_no_aprovisionada: false,
+            operativa_suprimida: false,
+            operativa_no_verifica: false,
+            operativa_rotada: false,
+            operativa_revocada: false,
             ..normal
         },
     ] {
@@ -703,6 +728,11 @@ fn la_manipulacion_no_se_confunde_con_la_accion_administrativa() {
         recuperacion_no_aprovisionada: false,
         recuperacion_suprimida: false,
         recuperacion_no_verifica: false,
+        operativa_no_aprovisionada: false,
+        operativa_suprimida: false,
+        operativa_no_verifica: false,
+        operativa_rotada: false,
+        operativa_revocada: false,
     };
 
     for manipulada in [

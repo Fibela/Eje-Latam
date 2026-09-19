@@ -578,6 +578,48 @@ pub struct Condiciones {
     /// Es el mismo par que el inventario lleva partido desde RPT-017 en
     /// `inventario_suprimido` e `inventario_no_verifica`, y por el mismo motivo.
     pub recuperacion_no_verifica: bool,
+    /// **Nadie anclo la identidad operativa de este sensor.** PA-146b fase 3.
+    ///
+    /// La clave operativa firma el inventario y la configuracion que el sensor
+    /// obedece cada dia, y hasta el centinela v4 se cargaba del disco y se
+    /// creia. Se enciende tambien con el fichero presente y sin anclar: el
+    /// agente no ancla solo.
+    pub operativa_no_aprovisionada: bool,
+    /// **Hubo identidad anclada y su fichero ya no esta.** PA-146b fase 3.
+    pub operativa_suprimida: bool,
+    /// **Hay otra clave operativa y ningun certificado la autoriza.**
+    ///
+    /// PA-146b fase 3. Secuestro de identidad: quien la puso firma inventarios y
+    /// configuraciones que este sensor obedeceria como suyos.
+    pub operativa_no_verifica: bool,
+    /// **La identidad cambio, y un certificado verificado lo autoriza.**
+    ///
+    /// PA-146b fase 3. No es manipulacion: es una rotacion legitima, nombrada
+    /// como sucesora por un certificado firmado con la clave de recuperacion.
+    ///
+    /// # Por que es una condicion y no un silencio
+    ///
+    /// Porque **no es transitoria**. El agente no reescribe su propia ancla —esa
+    /// es la negativa al «anclar al primer uso»—, asi que el sensor se queda en
+    /// este estado hasta que un administrador reancle con
+    /// `eje-manifiesto migrar-centinela`.
+    ///
+    /// Verdadera hasta que alguien interviene, que es la definicion de este
+    /// registro. Callarla dejaria a un parque entero corriendo sobre anclas
+    /// caducadas sin que nadie lo supiera.
+    pub operativa_rotada: bool,
+    /// **La identidad anclada esta revocada y este sensor sigue usandola.**
+    ///
+    /// PA-156. Espejo de [`Self::operativa_rotada`]: alli avanzo el sensor y se
+    /// quedo atras el ancla; aqui avanzo la revocacion y se quedo atras el
+    /// sensor. Hay un certificado firmado por la autoridad de recuperacion que
+    /// declara muerta la clave que este equipo usa, y la rotacion no se ha hecho
+    /// aqui.
+    ///
+    /// No es manipulacion —nadie toco este almacen— pero ocupa cabecera en
+    /// critica, como `registro_saturado`: por debajo del corte el agente sigue
+    /// aceptando lo que esa clave firme.
+    pub operativa_revocada: bool,
 }
 
 impl Condiciones {
@@ -613,7 +655,7 @@ impl Condiciones {
             || self.sin_colector
     }
 
-    /// Las dieciseis condiciones con su identificador, en el orden del contrato.
+    /// Las veintiuna condiciones con su identificador, en el orden del contrato.
     ///
     /// RPT-058, PA-114.
     ///
@@ -632,7 +674,7 @@ impl Condiciones {
     /// El orden es el de [`CAMPOS_CONDICIONES`], y una prueba lo sujeta. No es
     /// estetico: es lo que permite que cualquiera de los dos sea la autoridad.
     #[must_use]
-    pub const fn enumerar(&self) -> [(&'static str, bool); 16] {
+    pub const fn enumerar(&self) -> [(&'static str, bool); 21] {
         let Self {
             inventario_suprimido,
             inventario_no_verifica,
@@ -650,6 +692,11 @@ impl Condiciones {
             recuperacion_no_aprovisionada,
             recuperacion_suprimida,
             recuperacion_no_verifica,
+            operativa_no_aprovisionada,
+            operativa_suprimida,
+            operativa_no_verifica,
+            operativa_rotada,
+            operativa_revocada,
         } = *self;
 
         [
@@ -669,6 +716,11 @@ impl Condiciones {
             ("recuperacionNoAprovisionada", recuperacion_no_aprovisionada),
             ("recuperacionSuprimida", recuperacion_suprimida),
             ("recuperacionNoVerifica", recuperacion_no_verifica),
+            ("operativaNoAprovisionada", operativa_no_aprovisionada),
+            ("operativaSuprimida", operativa_suprimida),
+            ("operativaNoVerifica", operativa_no_verifica),
+            ("operativaRotada", operativa_rotada),
+            ("operativaRevocada", operativa_revocada),
         ]
     }
 
@@ -773,10 +825,10 @@ pub const CAMPOS_RESPUESTA_ALERTAS: [(&str, &str); 3] = [
 /// alguien toco el almacen. No es lo mismo que ser grave: `registroSaturado` es
 /// tan urgente como la manipulacion sin serlo.
 ///
-/// Se declara para las dieciseis, tambien cuando es `false`. Si la ausencia
+/// Se declara para las veintiuna, tambien cuando es `false`. Si la ausencia
 /// significara `false`, anadir una condicion y olvidarse la dejaria fuera **en
 /// silencio**, que es el defecto que esta columna viene a cerrar.
-pub const CAMPOS_CONDICIONES: [(&str, &str, bool); 16] = [
+pub const CAMPOS_CONDICIONES: [(&str, &str, bool); 21] = [
     ("inventarioSuprimido", "booleano", true),
     ("inventarioNoVerifica", "booleano", true),
     ("observacionSaturada", "booleano", false),
@@ -793,4 +845,11 @@ pub const CAMPOS_CONDICIONES: [(&str, &str, bool); 16] = [
     ("recuperacionNoAprovisionada", "booleano", false),
     ("recuperacionSuprimida", "booleano", true),
     ("recuperacionNoVerifica", "booleano", true),
+    ("operativaNoAprovisionada", "booleano", false),
+    ("operativaSuprimida", "booleano", true),
+    ("operativaNoVerifica", "booleano", true),
+    ("operativaRotada", "booleano", false),
+    // PA-156. No es manipulacion —nadie toco el almacen— pero la cascada de
+    // VIS-04 la sube a critica igual, como `registroSaturado`.
+    ("operativaRevocada", "booleano", false),
 ];

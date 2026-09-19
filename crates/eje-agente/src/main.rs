@@ -49,8 +49,8 @@ use eje_captura::{DireccionEnlace, ErrorCaptura, FuentePasiva, abrir};
 use eje_ipc::mensajes::EstadoAgente;
 use guardian_cc::PerfilSegmento;
 use guardian_cc::arranque::{
-    ErrorArranque, EstadoArranque, EstadoRecuperacion, RutasAlmacen, aceptar_configuracion,
-    arrancar_con_almacen, cargar_centinela,
+    ErrorArranque, EstadoArranque, EstadoOperativa, EstadoRecuperacion, RutasAlmacen,
+    aceptar_configuracion, arrancar_con_almacen, cargar_centinela,
 };
 use guardian_cc::clave::analizar as analizar_clave;
 use guardian_cc::inventario::DominioClave;
@@ -852,6 +852,46 @@ fn ejecutar() -> Result<(), ErrorAgente> {
     let arranque = arrancar_con_almacen(&rutas)?;
     let estado = arranque.estado;
     let recuperacion = arranque.recuperacion;
+    let operativa = arranque.operativa;
+
+    // PA-146b fase 3. La identidad va ANTES que la recuperacion en pantalla: si
+    // alguien sustituyo la clave que firma el inventario y la configuracion, lo
+    // que el sensor obedece ahora mismo no es de quien cree, y eso se lee antes
+    // que la falta de un remedio para manana.
+    //
+    // `match` sin comodin, como el de abajo.
+    match operativa {
+        EstadoOperativa::Anclada => {}
+        EstadoOperativa::NoAprovisionada => {
+            println!("  !! IDENTIDAD SIN ANCLAR. Nadie declaro cual es la clave operativa");
+            println!("     de este sensor, asi que sustituirla no se notaria. Se ancla con");
+            println!("     'eje-manifiesto migrar-centinela'.");
+        }
+        EstadoOperativa::Suprimida => {
+            println!("  !! IDENTIDAD SUPRIMIDA. El centinela recuerda una clave operativa y");
+            println!("     el fichero ya no esta. Este sensor no puede verificar nada de lo");
+            println!("     que se le entregue. Es un incidente.");
+        }
+        EstadoOperativa::NoVerifica => {
+            println!("  !! IDENTIDAD SUSTITUIDA. La clave operativa NO es la anclada y");
+            println!("     ningun certificado de revocacion la autoriza. Quien la puso firma");
+            println!("     inventarios y configuraciones que este sensor obedeceria como");
+            println!("     suyos. Trate este equipo como comprometido.");
+        }
+        EstadoOperativa::Rotada => {
+            println!("  ~~ IDENTIDAD ROTADA. La clave operativa cambio y un certificado");
+            println!("     verificado la autoriza: esto NO es un ataque. El ancla sigue");
+            println!("     apuntando a la anterior — reancle con 'eje-manifiesto");
+            println!("     migrar-centinela' para cerrar la rotacion.");
+        }
+        EstadoOperativa::Revocada => {
+            println!("  !! IDENTIDAD REVOCADA. La clave operativa de este sensor ES la");
+            println!("     anclada, y un certificado firmado por la autoridad de recuperacion");
+            println!("     la declara muerta. Se ordeno una rotacion y este equipo no la ha");
+            println!("     hecho: por debajo del corte sigue aceptando lo que esa clave firme.");
+            println!("     Complete la rotacion aqui. NO es un ataque a este almacen.");
+        }
+    }
 
     // PA-146a, ampliado en PA-150. Se dice tambien por pantalla, donde se
     // dicen las demas cosas que el operador tiene que saber al arrancar.
@@ -1021,6 +1061,7 @@ fn ejecutar() -> Result<(), ErrorAgente> {
         registro,
         emisor,
         recuperacion,
+        operativa,
     );
     ciclo.declarar_intervalo_latido(opciones.intervalo_latido);
 
@@ -1885,6 +1926,11 @@ mod pruebas_voz {
             recuperacion_no_aprovisionada: false,
             recuperacion_suprimida: false,
             recuperacion_no_verifica: false,
+            operativa_no_aprovisionada: false,
+            operativa_suprimida: false,
+            operativa_no_verifica: false,
+            operativa_rotada: false,
+            operativa_revocada: false,
         }
     }
 

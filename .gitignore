@@ -58,6 +58,13 @@ parque.toml
 almacen-*/
 *.frg
 
+# Y lo mismo para el material de una migracion en curso: el centinela vivo que se
+# trae de la maquina, el directorio donde se migra, y las copias sueltas. El 16
+# de septiembre de 2026 quedaron `centinela-vm-v3.dat` y `migracion-vm/` en el
+# arbol al terminar de subir eje-prueba a la version 4.
+migracion-*/
+centinela-*.dat
+
 # Bases de datos locales de desarrollo
 *.db
 *.db-journal

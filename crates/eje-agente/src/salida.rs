@@ -544,7 +544,7 @@ impl Transicion {
 /// Es ademas el unico camino posible. Lo que podria contar que la consola no
 /// conecta es la consola, que es lo que no conecta. Sin esta linea, un sensor
 /// vivo e inalcanzable seria invisible tambien para la sala.
-const EMISIBLES: [(&str, bool); 14] = [
+const EMISIBLES: [(&str, bool); 19] = [
     ("inventarioSuprimido", true),
     ("inventarioNoVerifica", true),
     ("observacionSaturada", false),
@@ -613,6 +613,23 @@ const EMISIBLES: [(&str, bool); 14] = [
     // pintando, asi que pasa por sano mientras dure.
     ("recuperacionSuprimida", true),
     ("recuperacionNoVerifica", true),
+    // PA-146b fase 3. Las cuatro de la identidad operativa. Las dos del medio
+    // acusan; las otras dos no.
+    //
+    // `operativaRotada` sale al SIEM con gravedad baja y **no** como
+    // manipulacion: es una rotacion autorizada. Pero sale, porque el ancla del
+    // sensor sigue apuntando a la clave anterior hasta que un administrador la
+    // reancle, y la sala es quien puede contar cuantos sensores de su flota se
+    // quedaron a medias de esa ceremonia.
+    ("operativaNoAprovisionada", false),
+    ("operativaSuprimida", true),
+    ("operativaNoVerifica", true),
+    ("operativaRotada", false),
+    // PA-156. Sale, y **no** como manipulacion: nadie toco este almacen. Pero es
+    // justo lo que la sala necesita contar — cuantos sensores de la flota siguen
+    // usando una clave que ya se revoco—, y esa cuenta no la puede hacer nadie
+    // mirando un tablero de un equipo cada vez.
+    ("operativaRevocada", false),
 ];
 
 /// Valor de una condicion por su identificador.
@@ -622,7 +639,7 @@ const EMISIBLES: [(&str, bool); 14] = [
 /// [`EMISIBLES`] pareciera apagada **para siempre**, y una condicion que nunca
 /// se activa no la echa de menos nadie.
 ///
-/// Devuelve `Some` para **las dieciseis**, incluidas las dos que no se emiten: esto es
+/// Devuelve `Some` para **las veintiuna**, incluidas las dos que no se emiten: esto es
 /// un accesor y no una politica. Quien decide que sale es [`EMISIBLES`], en un
 /// solo sitio y con el motivo escrito.
 fn valor_de(condiciones: &Condiciones, identificador: &str) -> Option<bool> {
@@ -979,7 +996,7 @@ mod pruebas_emisibles {
         Condiciones, DatosLatido, EMISIBLES, INTERVALO_LATIDO_MS, linea_de_latido, valor_de,
     };
 
-    /// Las dieciseis condiciones a cierto, para ejercitar todas las salidas a la vez.
+    /// Las veintiuna condiciones a cierto, para ejercitar todas las salidas a la vez.
     ///
     /// Las tres de recuperacion se encienden juntas **aunque en produccion sean
     /// mutuamente excluyentes**: esto no es un estado alcanzable, es un
@@ -1003,6 +1020,11 @@ mod pruebas_emisibles {
             recuperacion_no_aprovisionada: true,
             recuperacion_suprimida: true,
             recuperacion_no_verifica: true,
+            operativa_no_aprovisionada: true,
+            operativa_suprimida: true,
+            operativa_no_verifica: true,
+            operativa_rotada: true,
+            operativa_revocada: true,
         }
     }
 
@@ -1090,6 +1112,11 @@ mod pruebas_emisibles {
             recuperacion_no_aprovisionada: false,
             recuperacion_suprimida: false,
             recuperacion_no_verifica: false,
+            operativa_no_aprovisionada: false,
+            operativa_suprimida: false,
+            operativa_no_verifica: false,
+            operativa_rotada: false,
+            operativa_revocada: false,
         };
 
         let linea = String::from_utf8_lossy(&linea_de_latido(&DatosLatido {
@@ -1139,6 +1166,11 @@ mod pruebas_emisibles {
             recuperacion_no_aprovisionada: false,
             recuperacion_suprimida: false,
             recuperacion_no_verifica: false,
+            operativa_no_aprovisionada: false,
+            operativa_suprimida: false,
+            operativa_no_verifica: false,
+            operativa_rotada: false,
+            operativa_revocada: false,
         };
 
         let linea = String::from_utf8_lossy(&linea_de_latido(&DatosLatido {
@@ -1227,6 +1259,11 @@ mod pruebas_emisibles {
             recuperacion_no_aprovisionada: false,
             recuperacion_suprimida: false,
             recuperacion_no_verifica: false,
+            operativa_no_aprovisionada: false,
+            operativa_suprimida: false,
+            operativa_no_verifica: false,
+            operativa_rotada: false,
+            operativa_revocada: false,
         };
 
         let linea = String::from_utf8_lossy(&linea_de_latido(&DatosLatido {

@@ -42,10 +42,8 @@ use crate::disco::{ErrorDisco, escribir_atomico, leer};
 use crate::formato::ErrorFormato;
 use crate::inventario::{Centinela, ClaveInventario, DominioClave};
 use crate::proveedores::{DireccionEnlace, ErrorProveedor, ProveedorInventario};
-use crate::revocacion::{
-    ArchivoRevocaciones, IdentificadorClave, RegistroRevocaciones, Sucesion,
-};
-use eje_almacen::resumen::{Absorbedor, Resumen};
+use crate::revocacion::{ArchivoRevocaciones, IdentificadorClave, RegistroRevocaciones, Sucesion};
+use eje_almacen::resumen::Resumen;
 
 /// Magico del fichero de centinela.
 pub const MAGICO_CENTINELA: &[u8; 8] = b"EJE-CEN1";
@@ -102,7 +100,6 @@ pub const VERSION_CENTINELA: u16 = 4;
 /// recuperacion sigue la misma regla: sin bandera, «sin anclar» y «anclada a
 /// treinta y dos ceros» serian el mismo fichero.
 const LONGITUD_CENTINELA: usize = 8 + 2 + (1 + 8) + (1 + 8) + (1 + 32) + (1 + 32);
-
 
 /// Directorio volatil donde vive el socket, por omision. RPT-067, PA-120.
 ///
@@ -489,10 +486,7 @@ pub enum EstadoRecuperacion {
 impl EstadoRecuperacion {
     /// Deriva el estado del ancla y de lo que hay en disco.
     #[must_use]
-    pub fn evaluar(
-        ancla: Option<IdentificadorClave>,
-        presente: Option<&ClaveInventario>,
-    ) -> Self {
+    pub fn evaluar(ancla: Option<IdentificadorClave>, presente: Option<&ClaveInventario>) -> Self {
         match (ancla, presente) {
             (None, _) => Self::NoAprovisionada,
             (Some(_), None) => Self::Suprimida,
@@ -511,7 +505,15 @@ impl EstadoRecuperacion {
     /// `NoAprovisionada` no lo es: nadie hizo nada, y eso es justo el problema.
     #[must_use]
     pub const fn es_manipulacion(self) -> bool {
-        matches!(self, Self::Suprimida | Self::NoVerifica)
+        // PA-153, aplicado tambien aqui. Tenia el mismo `matches!` que el de
+        // `EstadoOperativa`, con el mismo agujero: anadir un estado a
+        // `EstadoRecuperacion` lo habria dejado en `false` sin que nada
+        // protestara. No se encontro perturbando este enum, sino el otro — y por
+        // eso se arregla ahora, antes de que haga falta.
+        match self {
+            Self::Suprimida | Self::NoVerifica => true,
+            Self::NoAprovisionada | Self::Anclada => false,
+        }
     }
 }
 
@@ -552,7 +554,22 @@ pub enum EstadoOperativa {
     NoVerifica,
     /// Hay otra clave y un certificado verificado la nombra sucesora.
     Rotada,
-    /// La clave presente es la anclada.
+    /// La clave presente **es** la anclada, y un certificado la revoca.
+    ///
+    /// PA-156. Es el espejo exacto de [`Self::Rotada`]:
+    ///
+    /// - En `Rotada` avanzo el sensor y se quedo atras el ancla.
+    /// - Aqui avanzo la revocacion y **se quedo atras el sensor**: se ordeno la
+    ///   rotacion, firmada por la autoridad de recuperacion, y este equipo no la
+    ///   ha hecho.
+    ///
+    /// Nadie ha tocado este almacen, asi que no es manipulacion. Pero el sensor
+    /// esta obedeciendo inventarios y configuracion firmados por una clave que
+    /// dos custodios declararon muerta, y por debajo del corte `aceptar_inventario`
+    /// los sigue aceptando. Si la revocacion se emitio porque robaron la clave,
+    /// el ladron firma y este equipo obedece.
+    Revocada,
+    /// La clave presente es la anclada y ningun certificado la revoca.
     Anclada,
 }
 
@@ -583,8 +600,21 @@ impl EstadoOperativa {
 
         let presente = ancla_de_clave(clave);
 
+        // PA-156. Que la clave del disco sea la anclada **no basta** para
+        // declararla sana, y esta funcion lo daba por bueno: devolvia `Anclada`
+        // aqui mismo sin mirar el registro. Un sensor con un certificado de dos
+        // custodios en su propio almacen declarando muerta esa clave se
+        // presentaba como el equipo sano de la sala.
+        //
+        // Lo encontro una prueba montada sobre un almacen real
+        // (`una_clave_anclada_y_revocada_no_puede_leerse_como_sana`), y no una
+        // unitaria sobre esta funcion: el riesgo nunca fue que calculara mal,
+        // sino que nadie le diera las revocaciones. Se las daban.
         if presente == anclada {
-            return Self::Anclada;
+            return match revocaciones.sucesora_de(&anclada) {
+                Sucesion::SinRevocar => Self::Anclada,
+                Sucesion::Declarada(_) => Self::Revocada,
+            };
         }
 
         // La clave cambio. Lo unico que distingue rotacion de secuestro es que
@@ -602,7 +632,17 @@ impl EstadoOperativa {
     /// problema.
     #[must_use]
     pub const fn es_manipulacion(self) -> bool {
-        matches!(self, Self::Suprimida | Self::NoVerifica)
+        // PA-153. `match` sin comodin y no `matches!`: aquel no exige
+        // exhaustividad, asi que un estado nuevo entraba callado por el lado del
+        // `false`, que es el lado que no avisa de nada.
+        match self {
+            Self::Suprimida | Self::NoVerifica => true,
+            // PA-156. `Revocada` tampoco lo es, y es la distincion que importa:
+            // nadie toco este almacen. La orden de rotar existe y este sensor no
+            // la ha cumplido, lo que llama a quien despliega y no a respuesta a
+            // incidentes.
+            Self::NoAprovisionada | Self::Rotada | Self::Revocada | Self::Anclada => false,
+        }
     }
 }
 
@@ -679,9 +719,9 @@ fn leer_ancla(bytes: &[u8]) -> Option<Option<IdentificadorClave>> {
 
     match *presencia {
         0 if valor == [0u8; 32] => Some(None),
-        1 => Some(Some(IdentificadorClave::desde_resumen(Resumen::desde_bytes(
-            valor,
-        )))),
+        1 => Some(Some(IdentificadorClave::desde_resumen(
+            Resumen::desde_bytes(valor),
+        ))),
         _ => None,
     }
 }

@@ -673,6 +673,72 @@ nombre = "recuperacionNoVerifica"
 tipo = "booleano"
 manipulacion = true
 
+# PA-146b fase 3. Las cuatro de la clave OPERATIVA — la que firma el inventario
+# y la configuracion que el sensor obedece cada dia.
+#
+# Son cuatro y no tres porque la operativa tiene un estado que la de recuperacion
+# no tiene: se puede rotar legitimamente. El mismo hecho en el disco —un `.pub`
+# distinto del anclado— es secuestro sin certificado y rotacion con el.
+
+# Nadie anclo la identidad de este sensor. Tambien con el fichero presente: el
+# agente no ancla solo.
+[[campo]]
+registro = "Condiciones"
+nombre = "operativaNoAprovisionada"
+tipo = "booleano"
+manipulacion = false
+
+# Hubo identidad anclada y su fichero ya no esta.
+[[campo]]
+registro = "Condiciones"
+nombre = "operativaSuprimida"
+tipo = "booleano"
+manipulacion = true
+
+# Hay otra clave y NINGUN certificado la autoriza. Secuestro de identidad: quien
+# la puso firma inventarios y configuraciones que este sensor obedeceria.
+[[campo]]
+registro = "Condiciones"
+nombre = "operativaNoVerifica"
+tipo = "booleano"
+manipulacion = true
+
+# Hay otra clave y un certificado verificado la nombra sucesora de la anclada.
+#
+# `manipulacion = false`: no es un ataque, es una rotacion autorizada. Pero **si**
+# es una condicion, y no un estado sano que se calla, porque **no es
+# transitoria**: el agente no reescribe su propia ancla —esa es la negativa al
+# «anclar al primer uso»— asi que el sensor se queda aqui hasta que un
+# administrador reancle con 'eje-manifiesto migrar-centinela'.
+#
+# Verdadera hasta que alguien interviene, que es la definicion de este registro.
+[[campo]]
+registro = "Condiciones"
+nombre = "operativaRotada"
+tipo = "booleano"
+manipulacion = false
+
+# PA-156. La clave del disco ES la anclada, y un certificado firmado la revoca.
+#
+# Espejo exacto de `operativaRotada`: alli avanzo el sensor y se quedo atras el
+# ancla; aqui avanzo la revocacion y se quedo atras el sensor. Se ordeno la
+# rotacion y este equipo no la ha hecho.
+#
+# `manipulacion = false`: nadie toco este almacen. La orden existe y no se ha
+# cumplido, y eso llama a quien despliega, no a respuesta a incidentes. Marcarla
+# como manipulacion mandaria al equipo equivocado.
+#
+# Pero en el tablero ocupa cabecera en CRITICA, como `registroSaturado`: tan
+# grave como la manipulacion sin serlo. El sensor esta obedeciendo inventarios y
+# configuracion firmados por una clave que dos custodios declararon muerta, y por
+# debajo del corte `aceptar_inventario` los sigue aceptando. Si la revocacion se
+# emitio porque robaron la clave, el ladron firma y este equipo obedece.
+[[campo]]
+registro = "Condiciones"
+nombre = "operativaRevocada"
+tipo = "booleano"
+manipulacion = false
+
 # --- Mensajes por canal ----------------------------------------------------
 #
 # Un canal sin peticion declarada no lleva carga util en esa direccion.

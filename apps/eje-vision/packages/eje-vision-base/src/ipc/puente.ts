@@ -295,6 +295,43 @@ export interface Condiciones {
    * creería.
    */
   readonly recuperacionNoVerifica: boolean;
+  /**
+   * Nadie ancló la identidad operativa de este sensor. PA-146b fase 3.
+   *
+   * La clave operativa firma el inventario y la configuración que el sensor
+   * obedece cada día. Sin ancla, sustituirla no se notaría.
+   */
+  readonly operativaNoAprovisionada: boolean;
+  /** Hubo identidad anclada y su fichero ya no está. PA-146b fase 3. */
+  readonly operativaSuprimida: boolean;
+  /**
+   * Hay otra clave operativa y **ningún certificado la autoriza**.
+   *
+   * PA-146b fase 3. Secuestro de identidad: quien la puso firma inventarios y
+   * configuraciones que este sensor obedecería como suyos.
+   */
+  readonly operativaNoVerifica: boolean;
+  /**
+   * La identidad cambió y un certificado verificado lo autoriza.
+   *
+   * PA-146b fase 3. **No es un ataque.** Pero tampoco es transitoria: el agente
+   * no reescribe su propia ancla, así que el sensor se queda aquí hasta que un
+   * administrador reancle. Es una ceremonia a medias, no una avería.
+   */
+  readonly operativaRotada: boolean;
+  /**
+   * La identidad anclada está revocada y este sensor sigue usándola.
+   *
+   * PA-156. Espejo de `operativaRotada`: allí avanzó el sensor y se quedó atrás
+   * el ancla; aquí avanzó la revocación y **se quedó atrás el sensor**. Hay un
+   * certificado firmado por la autoridad de recuperación que declara muerta la
+   * clave que este equipo usa, y la rotación no se ha hecho aquí.
+   *
+   * No es manipulación —nadie tocó este almacén— pero ocupa cabecera en crítica,
+   * como `registroSaturado`: por debajo del corte el agente sigue aceptando lo
+   * que esa clave firme.
+   */
+  readonly operativaRevocada: boolean;
 }
 
 /**
@@ -477,6 +514,11 @@ export const CAMPOS_CONDICIONES = [
   ["recuperacionNoAprovisionada", "booleano"],
   ["recuperacionSuprimida", "booleano"],
   ["recuperacionNoVerifica", "booleano"],
+  ["operativaNoAprovisionada", "booleano"],
+  ["operativaSuprimida", "booleano"],
+  ["operativaNoVerifica", "booleano"],
+  ["operativaRotada", "booleano"],
+  ["operativaRevocada", "booleano"],
 ] as const satisfies readonly (readonly [keyof Condiciones, string])[];
 
 // Comprobación de exhaustividad. Estas llamadas no producen código: si una

@@ -2225,7 +2225,8 @@ mod pruebas {
 
     use revocacion::{
         Anotacion, ArchivoRevocaciones, CertificadoRevocacion, CertificadoVerificado, ErrorArchivo,
-        ErrorRevocacion, IdentificadorClave, RegistroRevocaciones, Sucesion, mensaje_de_certificado,
+        ErrorRevocacion, IdentificadorClave, RegistroRevocaciones, Sucesion,
+        mensaje_de_certificado,
     };
 
     /// Par de recuperacion, distinto del operativo por semilla.
@@ -2754,8 +2755,8 @@ mod pruebas {
 
     use arranque::{
         Centinelas, ErrorArranque, EstadoArranque, EstadoOperativa, EstadoRecuperacion,
-        RutasAlmacen, aceptar_configuracion, aceptar_inventario, analizar_centinela, ancla_de_clave,
-        arrancar, cargar_centinela, serializar_centinela,
+        RutasAlmacen, aceptar_configuracion, aceptar_inventario, analizar_centinela,
+        ancla_de_clave, arrancar, cargar_centinela, serializar_centinela,
     };
 
     /// Almacen aislado en disco, retirado al terminar.
@@ -3531,6 +3532,69 @@ mod pruebas {
         assert_eq!(&valido[..8], MAGICO_CLAVE);
     }
 
+    /// PA-156. Un ancla revocada no puede leerse como la identidad sana.
+    ///
+    /// # Por que al nivel de `arrancar_con_almacen` y no de `evaluar`
+    ///
+    /// `EstadoOperativa::evaluar` es una funcion pura y probarla sola no diria
+    /// nada de este punto: el riesgo **no** es que calcule mal, sino que quien la
+    /// llama no le pase lo que hace falta. Es el defecto dominante del proyecto
+    /// —productor sin consumidor— y por eso el escenario se monta en disco y se
+    /// entra por la puerta que usa el agente de verdad.
+    ///
+    /// # El escenario
+    ///
+    /// Centinela v4 cuya ancla operativa **es** la clave que hay en el disco, y
+    /// un certificado firmado por la autoridad de recuperacion que revoca
+    /// exactamente esa clave y nombra sucesora. Nadie ha tocado este almacen:
+    /// la rotacion se ordeno y este sensor no la ha hecho.
+    ///
+    /// Hoy `evaluar` devuelve `Anclada` en cuanto `presente == anclada`, sin
+    /// mirar las revocaciones, asi que el tablero presenta como sano un sensor
+    /// que obedece a una clave que dos custodios declararon muerta.
+    #[test]
+    fn una_clave_anclada_y_revocada_no_puede_leerse_como_sana() {
+        let almacen = AlmacenDePrueba::nuevo("ancla-revocada");
+        let banco = banco(DominioClave::Cliente);
+        let (firmante_recuperacion, _) = clave_de_recuperacion(DominioClave::ClienteRecuperacion);
+
+        aprovisionar_claves(&almacen, &banco);
+
+        std::fs::write(
+            almacen.rutas.centinela(),
+            serializar_centinela(centinelas_de_prueba()),
+        )
+        .expect("centinela v4 con el ancla operativa puesta");
+
+        let mut archivo = ArchivoRevocaciones::nuevo();
+        archivo.anotar(anotacion_para(&banco, 5, &firmante_recuperacion));
+        std::fs::write(almacen.rutas.revocaciones(), archivo.serializar())
+            .expect("registro de revocaciones");
+
+        let arranque = arrancar_con_almacen(&almacen.rutas).expect("arranque");
+
+        // Anti-vacuidad: si el escenario no se montara, esto pasaria por la
+        // puerta de atras con `NoAprovisionada` y la prueba no diria nada.
+        assert!(
+            matches!(
+                arranque.centinelas.huella_operativa,
+                Some(ancla) if ancla == ancla_de_clave(&banco.clave)
+            ),
+            "el escenario no se monto: el ancla del centinela no es la clave del disco"
+        );
+
+        assert_eq!(
+            arranque.operativa,
+            EstadoOperativa::Revocada,
+            "PA-156: hay un certificado de dos custodios que declara muerta la clave \
+             que este sensor usa, y el arranque la presenta como su identidad sana"
+        );
+
+        // Y no es manipulacion: nadie toco este almacen. Se ordeno una rotacion
+        // y este equipo no la ha hecho, que llama a otro equipo.
+        assert!(!arranque.operativa.es_manipulacion());
+    }
+
     #[test]
     fn el_agente_carga_su_propia_clave_y_verifica_el_inventario() {
         // PA-49 completo. Antes de esto `arrancar` exigia dos claves que nadie
@@ -3542,7 +3606,9 @@ mod pruebas {
         aprovisionar_claves(&almacen, &banco);
         aceptar_inventario(&almacen.rutas, &bytes_en_disco(&banco), 7).expect("aceptar");
 
-        let estado = arrancar_con_almacen(&almacen.rutas).expect("arranque").estado;
+        let estado = arrancar_con_almacen(&almacen.rutas)
+            .expect("arranque")
+            .estado;
 
         assert!(matches!(estado, EstadoArranque::Operativo(_)));
         assert!(!estado.exige_alerta());
@@ -3564,7 +3630,9 @@ mod pruebas {
         // emitir un manifiesto que el agente ignora en silencio.
         let almacen = AlmacenDePrueba::nuevo("sin-clave");
 
-        let estado = arrancar_con_almacen(&almacen.rutas).expect("arranque").estado;
+        let estado = arrancar_con_almacen(&almacen.rutas)
+            .expect("arranque")
+            .estado;
 
         assert!(matches!(estado, EstadoArranque::SinClaveAprovisionada));
         assert!(
@@ -3590,7 +3658,9 @@ mod pruebas {
         aceptar_inventario(&almacen.rutas, &bytes_en_disco(&banco), 7).expect("aceptar");
         std::fs::remove_file(almacen.rutas.clave_operativa()).expect("borrar la clave");
 
-        let estado = arrancar_con_almacen(&almacen.rutas).expect("arranque").estado;
+        let estado = arrancar_con_almacen(&almacen.rutas)
+            .expect("arranque")
+            .estado;
 
         assert!(matches!(
             estado,

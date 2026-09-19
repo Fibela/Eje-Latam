@@ -24,15 +24,15 @@
 
 use std::path::{Path, PathBuf};
 
+use eje_manifiesto::centinela_v2::analizar_v2;
+use eje_manifiesto::eco::Eco;
 use eje_manifiesto::entrada::{ConfiguracionEntrada, Entrada};
 use eje_manifiesto::fragmento::{
     analizar as analizar_fragmento, huella_de, reunir_verificando,
     serializar as serializar_fragmento,
 };
-use eje_manifiesto::eco::Eco;
 use eje_manifiesto::reposo_semilla::{LONGITUD_SAL, abrir, sellar};
 use eje_manifiesto::{Emisor, ErrorEmision};
-use eje_manifiesto::centinela_v2::analizar_v2;
 use guardian_cc::arranque::{
     Centinelas, RutasAlmacen, ancla_de_clave, aprovisionar_clave, cargar_clave,
     serializar_centinela,
@@ -698,11 +698,12 @@ fn migrar_centinela(opciones: &Opciones) -> Result<(), ErrorHerramienta> {
     // PA-146b fase 2. La operativa se lee del mismo almacen y por el mismo
     // motivo: anclar la huella de una clave que no esta en este sensor le haria
     // acusar una sustitucion en cuanto arranque.
-    let operativa = cargar_clave(&rutas.clave_operativa(), DominioClave::Cliente).map_err(
-        |error| ErrorHerramienta::Aprovisionamiento {
-            detalle: error.to_string(),
-        },
-    )?;
+    let operativa =
+        cargar_clave(&rutas.clave_operativa(), DominioClave::Cliente).map_err(|error| {
+            ErrorHerramienta::Aprovisionamiento {
+                detalle: error.to_string(),
+            }
+        })?;
 
     let ancla_recuperacion = recuperacion.as_ref().map(ancla_de_clave);
     let ancla_operativa = operativa.as_ref().map(ancla_de_clave);

@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 
 use eje_almacen::RegistroEvidencia;
 use eje_ipc::mensajes::{Condiciones, PeticionAlertas};
-use guardian_cc::arranque::{EstadoArranque, EstadoRecuperacion};
+use guardian_cc::arranque::{EstadoArranque, EstadoOperativa, EstadoRecuperacion};
 use guardian_cc::clasificacion::{Evidencia, MarcadoDispositivo, clasificar};
 use guardian_cc::observacion::{AlmacenObservacion, Protocolo};
 use guardian_cc::proveedores::{
@@ -36,7 +36,8 @@ use guardian_cc::proveedores::{
 use guardian_cc::{PerfilSegmento, Veredicto, evaluar};
 
 use crate::alertas::{
-    EstadoConfiguracion, anotar_incontenible, condiciones, consultar, persistir, rotar_si_toca,
+    EstadoConfiguracion, HechosDeFuera, anotar_incontenible, condiciones, consultar, persistir,
+    rotar_si_toca,
 };
 use crate::salida::{Despacho, Emisor, INTERVALO_LATIDO_MS, Latido};
 
@@ -189,6 +190,12 @@ pub struct Ciclo<D> {
     /// siendo un mecanismo que hay que acordarse de invocar. Por el constructor,
     /// olvidarlo no compila.
     recuperacion: EstadoRecuperacion,
+    /// Que dice el almacen sobre la clave operativa. PA-146b fase 3.
+    ///
+    /// Entra por el constructor por lo mismo que la de recuperacion: se sabe al
+    /// leer el almacen, antes de la primera vuelta, y no cambia mientras el
+    /// proceso vive.
+    operativa: EstadoOperativa,
 }
 
 impl<D: Despacho> Ciclo<D> {
@@ -200,9 +207,11 @@ impl<D: Despacho> Ciclo<D> {
         registro: RegistroEvidencia,
         emisor: Option<Emisor<D>>,
         recuperacion: EstadoRecuperacion,
+        operativa: EstadoOperativa,
     ) -> Self {
         Self {
             recuperacion,
+            operativa,
             almacen: AlmacenObservacion::nuevo(),
             registro,
             emisor,
@@ -552,11 +561,14 @@ impl<D: Despacho> Ciclo<D> {
             estado,
             &self.almacen,
             &self.registro,
-            self.captura_no_disponible,
-            self.emisor.is_none(),
-            self.escucha_no_disponible,
+            HechosDeFuera {
+                captura_no_disponible: self.captura_no_disponible,
+                sin_colector: self.emisor.is_none(),
+                escucha_no_disponible: self.escucha_no_disponible,
+            },
             self.configuracion,
             self.recuperacion,
+            self.operativa,
         );
 
         // `evidenciaEnRiesgo` **si** es emisible, y hasta aqui salia siempre
@@ -774,6 +786,7 @@ mod pruebas {
                 registro,
                 Some(emisor),
                 EstadoRecuperacion::Anclada,
+                EstadoOperativa::Anclada,
             ),
             buzon,
         )
@@ -807,6 +820,7 @@ mod pruebas {
                 RegistroEvidencia::nuevo(),
                 Some(emisor),
                 EstadoRecuperacion::Anclada,
+                EstadoOperativa::Anclada,
             ),
             buzon,
             roto,
@@ -1584,6 +1598,7 @@ mod pruebas {
             RegistroEvidencia::nuevo(),
             None,
             EstadoRecuperacion::Anclada,
+            EstadoOperativa::Anclada,
         );
 
         let resultado = ciclo.vuelta(&EstadoArranque::PrimerArranque, &[], 1_000, 1_000_000);

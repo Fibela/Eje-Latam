@@ -90,7 +90,11 @@ pub fn analizar_v2(bytes: &[u8]) -> Result<MarcasV2, ErrorCentinelaV2> {
         });
     }
 
-    let esperada = if version == 2 { LONGITUD_V2 } else { LONGITUD_V3 };
+    let esperada = if version == 2 {
+        LONGITUD_V2
+    } else {
+        LONGITUD_V3
+    };
     if bytes.len() != esperada {
         return Err(ErrorCentinelaV2::NoEsV2);
     }

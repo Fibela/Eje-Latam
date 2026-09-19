@@ -38,6 +38,16 @@ const CALMA: Condiciones = {
   recuperacionNoAprovisionada: false,
   recuperacionSuprimida: false,
   recuperacionNoVerifica: false,
+  // PA-146b fase 3. Y con identidad anclada: un sensor cuya clave operativa
+  // nadie declaró no está en calma, está indefenso ante una sustitución que no
+  // se notaría. `operativaRotada` en `false` porque en calma la ceremonia está
+  // cerrada, no a medias.
+  operativaNoAprovisionada: false,
+  operativaSuprimida: false,
+  operativaNoVerifica: false,
+  operativaRotada: false,
+  // PA-156. En calma la clave anclada no está revocada.
+  operativaRevocada: false,
   registroSaturado: false,
   evidenciaEnRiesgo: false,
 };
@@ -121,6 +131,156 @@ describe("RPT-048 §2 — la cabecera decide cómo se lee todo lo demás", () =>
       borrada.titulo,
       sustituida.titulo,
       "sabotaje y secuestro no pueden titular igual",
+    );
+  });
+
+  // PA-154, encontrado perturbando (RPT-101 §4). Las tres de abajo son el
+  // espejo de las tres de arriba para la clave OPERATIVA, y hasta hoy no
+  // existían: la fase 3 añadió los cuatro campos al literal `CALMA` —lo justo
+  // para compilar— y se apoyó en que la barrera del contrato cubría el resto.
+  //
+  // No lo cubría. Esa barrera exige `urgencia === "critica"` y título no vacío;
+  // acepta que dos condiciones distintas titulen exactamente igual. Es
+  // deliberadamente laxa, porque es genérica y no puede saber qué prosa
+  // corresponde a cada condición. Lo que no puede hacer una barrera derivada
+  // hay que escribirlo a mano, y esto es lo que hay que escribir a mano.
+  it("una identidad operativa sustituida ocupa la cabecera", () => {
+    // El caso grave del par: alguien puso otra clave y ningún certificado la
+    // autoriza. Lo que este sensor obedece cada día lo firma otro.
+    const cabecera = cabeceraDe({
+      ...CALMA,
+      sinColector: true,
+      operativaNoVerifica: true,
+    });
+
+    assert.equal(cabecera.urgencia, "critica");
+    assert.match(cabecera.titulo, /identidad/i);
+    assert.doesNotMatch(
+      cabecera.titulo,
+      /colector/i,
+      "una condición de atención no puede tapar una de manipulación",
+    );
+  });
+
+  it("la identidad operativa va antes que la de recuperación", () => {
+    // El orden de la cascada es la prioridad, y aquí no es arbitrario: una
+    // identidad sustituida dice que lo que el sensor obedece AHORA no es de
+    // quien el operador cree; una clave de recuperación sustituida dice que
+    // falta un remedio para mañana. Con las dos encendidas manda la primera.
+    //
+    // Sin esta prueba el orden de las ramas es un accidente del fichero, y el
+    // día que alguien reordene la cascada el diff parecerá cosmético.
+    const ambas = cabeceraDe({
+      ...CALMA,
+      operativaNoVerifica: true,
+      recuperacionNoVerifica: true,
+    });
+    const soloOperativa = cabeceraDe({ ...CALMA, operativaNoVerifica: true });
+
+    assert.equal(ambas.titulo, soloOperativa.titulo);
+    assert.doesNotMatch(
+      ambas.titulo,
+      /recuperación/i,
+      "con la identidad del sensor secuestrada, la cabecera no puede hablar " +
+        "del remedio que falta para mañana",
+    );
+  });
+
+  it("una identidad operativa borrada también, y con otro texto", () => {
+    // Mismo motivo que en el par de recuperación: borrar y sustituir se
+    // separaron en el contrato porque los remedios no se parecen, y si la
+    // cabecera los contara igual esa separación no llegaría a quien la lee.
+    const borrada = cabeceraDe({ ...CALMA, operativaSuprimida: true });
+    const sustituida = cabeceraDe({ ...CALMA, operativaNoVerifica: true });
+
+    assert.equal(borrada.urgencia, "critica");
+    assert.match(borrada.titulo, /borró|borro/i);
+    assert.notEqual(
+      borrada.titulo,
+      sustituida.titulo,
+      "sabotaje y secuestro no pueden titular igual",
+    );
+  });
+
+  it("la rotación legítima y la ceremonia pendiente NO ocupan la cabecera", () => {
+    // Las otras dos del grupo operativo, y ninguna es manipulación.
+    //
+    // `operativaRotada` es el caso interesante: hay una clave distinta de la
+    // anclada y un certificado verificado la nombra sucesora. Es exactamente lo
+    // que se espera ver DESPUÉS de una rotación hecha bien. Ponerla en crítica
+    // enseñaría al operador a ignorar la crítica justo después de cada
+    // ceremonia legítima, que es la fatiga de alertas de PA-45 con el peor
+    // disparador posible.
+    //
+    // Que sea condición y no estado transitorio ya se decidió: el agente no
+    // reescribe su propia ancla, así que el sensor se queda ahí hasta que un
+    // administrador vuelva a anclar. La fila lo dice; la cabecera calla.
+    for (const condicion of ["operativaRotada", "operativaNoAprovisionada"] as const) {
+      const cabecera = cabeceraDe({ ...CALMA, [condicion]: true });
+
+      assert.equal(
+        cabecera.urgencia,
+        "normal",
+        `'${condicion}' no es manipulación y no puede ocupar la cabecera`,
+      );
+      assert.equal(cabecera.titulo, "", `'${condicion}' no puede titular`);
+    }
+  });
+
+  // PA-156. Escritas a mano y no delegadas a la barrera del contrato, que es la
+  // lección de PA-154 aplicada el mismo día que se aprendió: aquella barrera
+  // sólo recorre las condiciones que el contrato marca como manipulación, y ésta
+  // declara `manipulacion = false`. **Para esta condición la barrera genérica no
+  // comprueba absolutamente nada.**
+  it("una identidad revocada ocupa la cabecera aunque no sea manipulación", () => {
+    // El precedente es `registroSaturado`: crítica sin que nadie haya tocado el
+    // almacén. Aquí el sensor obedece a una clave que dos custodios declararon
+    // muerta, y por debajo del corte el agente sigue aceptando lo que firme.
+    const cabecera = cabeceraDe({ ...CALMA, operativaRevocada: true });
+
+    assert.equal(cabecera.urgencia, "critica");
+    assert.match(cabecera.titulo, /revocada/i);
+
+    // Se comprueba contra las frases que USAN las ramas de manipulación, y no
+    // contra las palabras sueltas «ataque» o «comprometido».
+    //
+    // La primera versión de esta prueba hacía lo segundo y se puso roja con la
+    // cascada correcta: el detalle dice «**No** es un ataque a esta máquina», y
+    // una expresión regular no distingue una afirmación de su negación. Buscar
+    // la palabra prohibía explicar por qué no aplica, que es justo lo que este
+    // detalle tiene que hacer.
+    for (const frase of [
+      /responder como incidente/i,
+      /tratar el equipo como comprometido/i,
+    ]) {
+      assert.doesNotMatch(
+        cabecera.detalle,
+        frase,
+        "mandar a respuesta a incidentes por una ceremonia sin terminar es " +
+          "llamar al equipo equivocado",
+      );
+    }
+
+    // Y lo que sí tiene que decir: dónde está el remedio.
+    assert.match(cabecera.detalle, /rotación/i);
+  });
+
+  it("una manipulación en curso manda sobre la identidad revocada", () => {
+    // Los dos hechos son independientes y pueden coincidir. Si alguien está
+    // dentro del almacén de este equipo, eso se lee antes que una rotación
+    // pendiente: hay un ataque en curso y lo otro es una ceremonia a medias.
+    const ambas = cabeceraDe({
+      ...CALMA,
+      operativaRevocada: true,
+      inventarioNoVerifica: true,
+    });
+
+    assert.equal(ambas.urgencia, "critica");
+    assert.match(ambas.titulo, /evidencia/i);
+    assert.doesNotMatch(
+      ambas.titulo,
+      /revocada/i,
+      "con alguien dentro del almacén, la cabecera no puede hablar de la ceremonia",
     );
   });
 
@@ -231,7 +391,7 @@ describe("RPT-048 §2 — la cabecera decide cómo se lee todo lo demás", () =>
 
   it("correr sin configuración firmada ocupa cabecera, no una fila", () => {
     // El riesgo de esta condición no es técnico: es que el estado degradado se
-    // vuelva el normal. Dejarla abajo entre dieciséis filas es exactamente cómo se
+    // vuelva el normal. Dejarla abajo entre veintiuna filas es exactamente cómo se
     // aprende a ignorarla (RPT-074 §8).
     const cabecera = cabeceraDe({ ...CALMA, configuracionSinFirmar: true });
 
@@ -277,7 +437,7 @@ describe("RPT-048 §2 — la cabecera decide cómo se lee todo lo demás", () =>
   });
 
   it("una respuesta inesperada se declara en lugar de elegir una rama", () => {
-    // El agente siempre devuelve las dieciséis condiciones. Si llega otra cosa, el
+    // El agente siempre devuelve las veintiuna condiciones. Si llega otra cosa, el
     // contrato cambió, y decirlo es mejor que suponer.
     const cabecera = componerCabecera({ clase: "vacio" });
 

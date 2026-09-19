@@ -146,12 +146,12 @@ mod pruebas {
     // -----------------------------------------------------------------------
 
     use crate::alertas::{
-        EstadoConfiguracion, SUCESOS_POR_CONSULTA, anotar_incontenible, condiciones, consultar,
-        nombrar, suceso_desde,
+        EstadoConfiguracion, HechosDeFuera, SUCESOS_POR_CONSULTA, anotar_incontenible, condiciones,
+        consultar, nombrar, suceso_desde,
     };
     use eje_almacen::{ClaseEvento, RegistroEvidencia};
     use eje_ipc::mensajes::{ClaseAlerta, PeticionAlertas};
-    use guardian_cc::arranque::{EstadoArranque, EstadoRecuperacion};
+    use guardian_cc::arranque::{EstadoArranque, EstadoOperativa, EstadoRecuperacion};
     use guardian_cc::observacion::AlmacenObservacion;
     use guardian_cc::{ClaseExcluida, Veredicto};
 
@@ -328,11 +328,14 @@ mod pruebas {
                 &estado,
                 &observacion,
                 &RegistroEvidencia::nuevo(),
-                false,
-                false,
-                false,
+                HechosDeFuera {
+                    captura_no_disponible: false,
+                    sin_colector: false,
+                    escucha_no_disponible: false,
+                },
                 EstadoConfiguracion::Firmada,
                 EstadoRecuperacion::Anclada,
+                EstadoOperativa::Anclada,
             );
 
             assert!(vigentes.accion_administrativa, "{estado:?} debe avisar");
@@ -360,11 +363,14 @@ mod pruebas {
                 &estado,
                 &observacion,
                 &RegistroEvidencia::nuevo(),
-                false,
-                false,
-                false,
+                HechosDeFuera {
+                    captura_no_disponible: false,
+                    sin_colector: false,
+                    escucha_no_disponible: false,
+                },
                 EstadoConfiguracion::Firmada,
                 EstadoRecuperacion::Anclada,
+                EstadoOperativa::Anclada,
             );
 
             assert!(vigentes.hay_manipulacion());
@@ -383,11 +389,14 @@ mod pruebas {
             &EstadoArranque::PrimerArranque,
             &AlmacenObservacion::nuevo(),
             &RegistroEvidencia::nuevo(),
-            false,
-            false,
-            false,
+            HechosDeFuera {
+                captura_no_disponible: false,
+                sin_colector: false,
+                escucha_no_disponible: false,
+            },
             EstadoConfiguracion::Firmada,
             EstadoRecuperacion::Anclada,
+            EstadoOperativa::Anclada,
         );
 
         assert!(!vigentes.hay_degradacion());
@@ -824,6 +833,11 @@ mod pruebas {
             recuperacion_no_aprovisionada: false,
             recuperacion_suprimida: false,
             recuperacion_no_verifica: false,
+            operativa_no_aprovisionada: false,
+            operativa_suprimida: false,
+            operativa_no_verifica: false,
+            operativa_rotada: false,
+            operativa_revocada: false,
         }
     }
 
@@ -1275,7 +1289,7 @@ mod pruebas {
     /// RPT-084, PA-136. Desde que se atiende a mitad de vuelta, una consulta
     /// puede llegar antes de que exista una sola condición evaluada.
     ///
-    /// La salida cómoda sería devolver las dieciséis en `false`. Diría **«este sensor
+    /// La salida cómoda sería devolver las veintiuna en `false`. Diría **«este sensor
     /// está sano»** sobre un sensor del que todavía no se sabe nada, que es
     /// exactamente la mentira que RPT-006 §4 prohíbe y que ya costó la décima
     /// condición (PA-118). Se rechaza, y el motivo dice por qué.
@@ -1518,11 +1532,14 @@ mod pruebas {
             &EstadoArranque::PrimerArranque,
             &observacion,
             &RegistroEvidencia::nuevo(),
-            false,
-            false,
-            false,
+            HechosDeFuera {
+                captura_no_disponible: false,
+                sin_colector: false,
+                escucha_no_disponible: false,
+            },
             EstadoConfiguracion::Firmada,
             EstadoRecuperacion::Anclada,
+            EstadoOperativa::Anclada,
         );
 
         assert!(vigentes.captura_con_perdida);
