@@ -361,34 +361,106 @@ impl Escucha {
 
     /// Atiende las conexiones pendientes sin bloquear.
     ///
-    /// Devuelve cuantas atendio. Con un solo hilo, esto va **al final del
-    /// ciclo** (RPT-034 §4): una consulta responde con lo que ya se persistio,
-    /// nunca con lo que aun vive solo en memoria.
+    /// Con un solo hilo, esto va **al final del ciclo** (RPT-034 §4): una
+    /// consulta responde con lo que ya se persistio, nunca con lo que aun vive
+    /// solo en memoria.
     #[cfg(unix)]
-    pub fn atender(&self, atiende: &mut dyn Atiende) -> usize {
-        let mut atendidas = 0;
+    pub fn atender(&self, atiende: &mut dyn Atiende) -> Atencion {
+        let mut atencion = Atencion::VACIA;
 
-        while atendidas < CONEXIONES_POR_CICLO {
+        while atencion.aceptadas < CONEXIONES_POR_CICLO {
             let Ok((flujo, _)) = self.oyente.accept() else {
                 // `WouldBlock` incluido: no hay nadie esperando y se sigue.
                 break;
             };
 
-            // Un fallo de una conexion no puede tumbar el ciclo. Se ignora y se
-            // pasa a la siguiente: el cliente que quedo sin respuesta reintenta,
-            // y la observacion no se detiene por eso.
-            let _ = servir(flujo, atiende);
-            atendidas += 1;
+            atencion.aceptadas += 1;
+
+            // Un fallo de una conexion no puede tumbar el ciclo, y por eso no se
+            // propaga. Pero **se cuenta**: ver el porque en `Atencion`.
+            if let Err(error) = servir(flujo, atiende) {
+                atencion.caidas += 1;
+                if atencion.motivo.is_none() {
+                    atencion.motivo = Some(error.to_string());
+                }
+            }
         }
 
-        atendidas
+        atencion
     }
 
     /// Fuera de Unix no hay nada que atender.
     #[cfg(not(unix))]
-    pub fn atender(&self, atiende: &mut dyn Atiende) -> usize {
+    pub fn atender(&self, atiende: &mut dyn Atiende) -> Atencion {
         let _ = atiende;
-        0
+        Atencion::VACIA
+    }
+}
+
+/// Cuentas de una vuelta de atencion.
+///
+/// # Por que esto no era un `usize`
+///
+/// PA-158. `atender` devolvia solo cuantas habia atendido, y el fallo de cada
+/// conexion se descartaba con `let _ =`. El razonamiento de descartarlo era —y
+/// sigue siendo— correcto: una conexion caida no puede detener la vigilancia.
+/// Lo que estaba mal es que **no quedaba rastro en ninguna parte**.
+///
+/// La consecuencia se vio en campo el 19 de septiembre de 2026: VIS-04 informo
+/// de `[sin-respuesta]` en `obtener-inventario` tras cinco segundos, y el diario
+/// del sensor no tenia una sola linea de esa hora. No se pudo distinguir entre
+/// «la peticion no llego», «llego y el plazo de 250 ms vencio antes de que el
+/// cliente escribiera» y «se respondio y la consola perdio la respuesta». Dos
+/// ejecuciones posteriores no reprodujeron el fallo, asi que el fantasma se
+/// quedo sin diagnosticar.
+///
+/// Y es un defecto por si solo, no solo una molestia para depurar: **un sensor
+/// que descarta conexiones sin contarlas no se puede operar**. En una planta,
+/// «la consola no responde» seria indistinguible de «el agente esta caido», y
+/// las dos cosas llaman a personas distintas.
+///
+/// Se cuenta y se guarda **un** motivo de ejemplo, no todos: quien llama imprime
+/// como mucho una linea por vuelta, asi que un cliente que reconecte en bucle no
+/// puede inundar el diario y expulsar lo que importa.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Atencion {
+    /// Conexiones aceptadas en esta vuelta, hayan terminado bien o mal.
+    pub aceptadas: usize,
+    /// De esas, cuantas no llegaron a responderse.
+    pub caidas: usize,
+    /// Motivo de la primera caida, para que el diario diga algo concreto.
+    pub motivo: Option<String>,
+}
+
+impl Atencion {
+    /// Ninguna conexion, ninguna caida.
+    pub const VACIA: Self = Self {
+        aceptadas: 0,
+        caidas: 0,
+        motivo: None,
+    };
+
+    /// Si esta vuelta dejo a alguien sin respuesta.
+    ///
+    /// Se pregunta en lugar de comparar `caidas > 0` en cada sitio: quien llama
+    /// no tiene por que saber que la cuenta es un entero.
+    #[must_use]
+    pub const fn hubo_caidas(&self) -> bool {
+        self.caidas > 0
+    }
+
+    /// Suma otra vuelta de atencion a esta.
+    ///
+    /// `atender` se llama una vez por trama, asi que quien lleva la cuenta de la
+    /// vuelta entera necesita juntarlas. **El motivo que se conserva es el
+    /// primero**, no el ultimo: la primera caida de una racha suele ser la causa
+    /// y las siguientes su consecuencia.
+    pub fn acumular(&mut self, otra: Self) {
+        self.aceptadas += otra.aceptadas;
+        self.caidas += otra.caidas;
+        if self.motivo.is_none() {
+            self.motivo = otra.motivo;
+        }
     }
 }
 
@@ -469,6 +541,133 @@ mod pruebas_de_acceso {
             .permissions()
             .mode()
             & 0o777
+    }
+
+    /// Un cliente que conecta y no escribe nunca.
+    ///
+    /// Es exactamente el caso que se sospecha en campo: Electron abre cuatro
+    /// conexiones mientras crea su ventana, y una puede tardar mas del plazo en
+    /// poner los bytes en el socket.
+    struct AtiendeMudo;
+
+    impl super::Atiende for AtiendeMudo {
+        fn responder(&mut self, _canal: eje_ipc::Canal, _carga: &[u8]) -> Result<Vec<u8>, String> {
+            panic!("no debe llegarse a responder: el cliente nunca escribio nada")
+        }
+    }
+
+    /// PA-158. Una conexion que se cae **se cuenta**, no se descarta en silencio.
+    ///
+    /// # Por que esta prueba existe
+    ///
+    /// `atender` hacia `let _ = servir(flujo, atiende)`. El razonamiento de no
+    /// propagar el error era correcto —una conexion caida no puede detener la
+    /// vigilancia— pero no quedaba rastro en ninguna parte, y el 19 de septiembre
+    /// de 2026 VIS-04 informo de `[sin-respuesta]` con el diario del sensor
+    /// vacio a esa hora. No se pudo distinguir entre «no llego», «llego tarde» y
+    /// «se respondio y se perdio la respuesta».
+    ///
+    /// Lo que se exige aqui es lo minimo que hace ese fallo diagnosticable: que
+    /// la vuelta diga **cuantas** se cayeron y **por que** la primera.
+    #[test]
+    fn una_conexion_que_no_escribe_se_cuenta_como_caida() {
+        use std::os::unix::net::UnixStream;
+
+        let dir = directorio("caida");
+        let ruta = dir.join("agente.sock");
+        let escucha = Escucha::abrir(&ruta, Acceso::SoloPropietario).expect("abre");
+
+        // Conecta y calla. No se cierra: cerrar daria fin de fichero, que es otro
+        // fallo distinto del que se quiere provocar.
+        let mudo = UnixStream::connect(&ruta).expect("conecta");
+
+        let atencion = escucha.atender(&mut AtiendeMudo);
+
+        assert_eq!(
+            atencion.aceptadas, 1,
+            "la conexion se acepto: el agente la vio"
+        );
+        assert_eq!(
+            atencion.caidas, 1,
+            "y se cerro sin responder, asi que tiene que contarse"
+        );
+        assert!(
+            atencion.motivo.is_some(),
+            "una caida sin motivo no sirve para diagnosticar nada: es el mismo \
+             silencio con un numero delante"
+        );
+
+        drop(mudo);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Responde siempre lo mismo, sin mirar el canal.
+    struct AtiendeSiempre;
+
+    impl super::Atiende for AtiendeSiempre {
+        fn responder(&mut self, _canal: eje_ipc::Canal, _carga: &[u8]) -> Result<Vec<u8>, String> {
+            Ok(b"{}".to_vec())
+        }
+    }
+
+    /// Y la cara que de verdad cierra la vacuidad: **un cliente que se porta bien
+    /// NO se cuenta como caida**.
+    ///
+    /// # Por que esta prueba tuvo que anadirse despues
+    ///
+    /// Las dos de al lado no bastaban, y eso se vio revisandolas juntas y no
+    /// ejecutandolas: un `atender` roto que contara **toda** conexion aceptada
+    /// como caida las pasaba las dos — la del cliente mudo espera una caida y la
+    /// de «sin nadie» no acepta ninguna conexion, asi que ninguna de las dos
+    /// mira el caso bueno.
+    ///
+    /// Contar caidas donde no las hay es peor que no contarlas: un diario que
+    /// avisa siempre se aprende a ignorar, y entonces el aviso de verdad pasa
+    /// desapercibido (PA-45).
+    #[test]
+    fn una_conexion_bien_atendida_no_cuenta_como_caida() {
+        use std::io::Write as _;
+        use std::os::unix::net::UnixStream;
+
+        let dir = directorio("bien-atendida");
+        let ruta = dir.join("agente.sock");
+        let escucha = Escucha::abrir(&ruta, Acceso::SoloPropietario).expect("abre");
+
+        let mut cliente = UnixStream::connect(&ruta).expect("conecta");
+        let peticion = eje_ipc::componer_peticion(eje_ipc::Canal::ObtenerCondiciones, b"")
+            .expect("peticion valida");
+        cliente
+            .write_all(&eje_ipc::enmarcar(&peticion).expect("marco"))
+            .expect("escribe");
+        cliente.flush().expect("vacia");
+
+        let atencion = escucha.atender(&mut AtiendeSiempre);
+
+        assert_eq!(atencion.aceptadas, 1);
+        assert_eq!(
+            atencion.caidas, 0,
+            "esta conexion se respondio entera: contarla como caida haria que el \
+             diario avisara siempre, y un aviso que sale siempre no es un aviso"
+        );
+        assert!(atencion.motivo.is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Y sin nadie conectado tampoco se inventa una caida.
+    #[test]
+    fn sin_conexiones_no_hay_caidas() {
+        let dir = directorio("sin-nadie");
+        let ruta = dir.join("agente.sock");
+        let escucha = Escucha::abrir(&ruta, Acceso::SoloPropietario).expect("abre");
+
+        let atencion = escucha.atender(&mut AtiendeMudo);
+
+        assert_eq!(atencion.aceptadas, 0);
+        assert!(!atencion.hubo_caidas());
+        assert!(atencion.motivo.is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

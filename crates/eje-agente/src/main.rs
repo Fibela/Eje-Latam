@@ -1112,6 +1112,12 @@ fn ejecutar() -> Result<(), ErrorAgente> {
         let mut ilegibles = 0u64;
         let mut perdida: Option<String> = None;
         let mut tramos = Tramos::default();
+        // PA-158. Las caidas de conexion se ACUMULAN a lo largo de la vuelta y se
+        // dicen una sola vez al cerrarla. `atender_pendientes` se llama una vez
+        // por trama —hasta doscientas por vuelta—, asi que una linea por caida
+        // inundaria el diario y expulsaria lo que importa, que es el mismo
+        // defecto con otro disfraz.
+        let mut caidas = eje_agente::servicio::Atencion::VACIA;
         let inicio = Instant::now();
 
         while (observaciones.len() as u64) < opciones.tramas {
@@ -1126,15 +1132,19 @@ fn ejecutar() -> Result<(), ErrorAgente> {
             // dos tramas en lugar de a la vuelta entera.
             tramos.atender += {
                 let marca = Instant::now();
-                let atendidas = atender_pendientes(
+                let atencion = atender_pendientes(
                     escucha.as_ref(),
                     &ciclo,
                     anteriores.as_ref(),
                     inventario_anterior.as_deref(),
                     &estado_agente,
                 );
-                if atendidas > 0 && voz == Voz::Detallada {
-                    println!("Consultas atendidas a mitad de vuelta: {atendidas}");
+                caidas.acumular(atencion.clone());
+                if atencion.aceptadas > 0 && voz == Voz::Detallada {
+                    println!(
+                        "Consultas atendidas a mitad de vuelta: {}",
+                        atencion.aceptadas
+                    );
                 }
                 marca.elapsed()
             };
@@ -1336,18 +1346,35 @@ fn ejecutar() -> Result<(), ErrorAgente> {
         // Al final del ciclo, sobre lo ya persistido (RPT-034 §4). Una consulta
         // nunca responde con lo que aun vive solo en memoria.
         let marca = Instant::now();
-        let atendidas = atender_pendientes(
+        let atencion = atender_pendientes(
             escucha.as_ref(),
             &ciclo,
             Some(&resultado.condiciones),
             Some(&resultado.inventario),
             &estado_agente,
         );
+        caidas.acumular(atencion.clone());
         // Se calla en modo demonio: una consola que pregunta cada dos segundos
         // escribiria una linea cada dos segundos, y eso es el mismo defecto con
         // otro disfraz.
-        if atendidas > 0 && voz == Voz::Detallada {
-            println!("Consultas atendidas al cerrar: {atendidas}");
+        if atencion.aceptadas > 0 && voz == Voz::Detallada {
+            println!("Consultas atendidas al cerrar: {}", atencion.aceptadas);
+        }
+
+        // PA-158. Esto **no** se calla en modo demonio, y es la diferencia que
+        // importa: las consultas que salen bien son constantes y silenciarlas es
+        // correcto; una conexion que se cae sin respuesta es rara, y es
+        // exactamente lo que alguien va a buscar en el diario cuando la consola
+        // diga que el sensor no contesta.
+        //
+        // El 19 de septiembre de 2026 eso paso y no habia nada que buscar.
+        if caidas.hubo_caidas() {
+            let motivo = caidas.motivo.as_deref().unwrap_or("sin motivo registrado");
+            println!(
+                "!! {} conexion(es) aceptadas y cerradas SIN RESPUESTA en esta vuelta. \
+                 Primera causa: {motivo}. Quien pregunto se quedo esperando.",
+                caidas.caidas
+            );
         }
         // Se ACUMULA: el tramo ya lleva lo gastado dentro del bucle de captura.
         tramos.atender += marca.elapsed();
@@ -1475,9 +1502,9 @@ fn atender_pendientes<D: eje_agente::salida::Despacho>(
     condiciones: Option<&eje_ipc::mensajes::Condiciones>,
     inventario: Option<&[eje_ipc::mensajes::NodoInventario]>,
     estado_agente: &EstadoAgente,
-) -> usize {
+) -> eje_agente::servicio::Atencion {
     let Some(escucha) = escucha else {
-        return 0;
+        return eje_agente::servicio::Atencion::VACIA;
     };
 
     escucha.atender(&mut Manejadores {

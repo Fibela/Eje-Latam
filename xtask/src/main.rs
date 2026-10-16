@@ -12,6 +12,7 @@
 mod cobertura;
 mod conformidad;
 mod empaquetar;
+mod evidencia;
 mod exclusion;
 mod guardian;
 mod instalador;
@@ -68,6 +69,12 @@ const ORDENES: &[Orden] = &[
         argumentos: "",
         resumen: "Recuento de puntos abiertos leido de RPT-002 §12",
         ejecutar: orden_tablero,
+    },
+    Orden {
+        nombre: "evidencia",
+        argumentos: "",
+        resumen: "Ninguna captura de docs/evidencia repite otra (PA-159)",
+        ejecutar: orden_evidencia,
     },
     Orden {
         nombre: "cobertura",
@@ -251,6 +258,58 @@ fn orden_manual(_argumentos: &[String]) -> ExitCode {
 ///
 /// El tablero se resumio a mano cuatro veces y las cuatro reintrodujo puntos ya
 /// cerrados. Un recuento derivado no puede equivocarse en eso.
+/// PA-159. Ninguna captura de `docs/evidencia/` repite el contenido de otra.
+///
+/// Se pone roja cuando dos ficheros son identicos byte a byte, que es lo unico
+/// que no puede explicarse con dos observaciones distintas: dos pantallas
+/// fotografiadas en momentos distintos difieren siempre en algo —el reloj, el
+/// contador de vueltas, un pixel del cursor—, asi que dos ficheros iguales son
+/// una observacion y una copia.
+///
+/// El 19 de septiembre de 2026 entro en ese directorio una captura del dia 8 con
+/// el nombre y la fecha del 19. No la caza ninguna prueba del producto: el
+/// fichero existe y ensena un tablero plausible. Lo unico que la delata es que ya
+/// estaba ahi con otro nombre.
+fn orden_evidencia(_argumentos: &[String]) -> ExitCode {
+    let raiz = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap_or(Path::new("."));
+
+    let hallados = match evidencia::repetidos(raiz) {
+        Ok(hallados) => hallados,
+        Err(error) => {
+            eprintln!("{ROJO}{error}{FIN}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if hallados.is_empty() {
+        println!("{GRIS}Evidencia de {}{FIN}", evidencia::DIRECTORIO);
+        println!("{VERDE}Ninguna captura repite el contenido de otra.{FIN}");
+        return ExitCode::SUCCESS;
+    }
+
+    eprintln!(
+        "{ROJO}Hay evidencia repetida en {}{FIN}",
+        evidencia::DIRECTORIO
+    );
+    for repetido in &hallados {
+        eprintln!("  {} aparece como:", repetido.huella);
+        for nombre in &repetido.nombres {
+            eprintln!("    {nombre}");
+        }
+    }
+    eprintln!();
+    eprintln!(
+        "Una captura que se repite es una captura que no se tomo. Dos pantallas de\n\
+         momentos distintos difieren siempre en algo; estas son la misma. Retire la\n\
+         copia y tome la captura de verdad, o corrija el nombre si el duplicado es\n\
+         el que sobra."
+    );
+
+    ExitCode::FAILURE
+}
+
 fn ejecutar_tablero() -> ExitCode {
     let raiz = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

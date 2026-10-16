@@ -136,6 +136,7 @@ cargo xtask ayuda              # la lista, desde el propio binario
 ```bash
 cargo xtask verificar [ruta]           # guardián de inconclusos. Por defecto: crates
 cargo xtask tablero                    # recuento de puntos abiertos, LEÍDO de RPT-002 §12
+cargo xtask evidencia                  # ninguna captura de docs/evidencia repite otra
 cargo xtask cobertura                  # ¿ejecuta alguien todas las pruebas escritas?
 cargo xtask manual                     # ¿dice este manual lo mismo que el binario?
 cargo xtask conformidad                # suites PQC + atestado CONFORMIDAD.lock
@@ -160,6 +161,22 @@ El resumen a mano se hizo cuatro veces y las cuatro reintrodujo puntos ya
 cerrados. Desde PA-108 lleva además una barrera: **todo `PA-nn` citado en
 cualquier `.md` de `docs/` tiene que tener fila en el tablero**, o el comando sale
 en rojo. Cazó a PA-14b en su primera ejecución.
+
+**`evidencia`** comprueba que ningún fichero de `docs/evidencia/` repita el
+contenido de otro. **Una captura que se repite es una captura que no se tomó:**
+dos pantallas fotografiadas en momentos distintos difieren siempre en algo —el
+reloj, el contador de vueltas, un píxel del cursor—, así que dos ficheros
+idénticos al byte son una observación y una copia.
+
+No mira nombres, ni fechas, ni tamaños: todo eso lo satisface una copia. Compara
+el contenido. Existe porque el 19 de septiembre de 2026 entró en ese directorio
+una captura del día 8 con el nombre y la fecha del 19, y no la cazó nada: el
+fichero existe, se abre, y enseña un tablero perfectamente plausible. Lo único
+que la delataba es que ya estaba ahí con otro nombre.
+
+`docs/evidencia/` es la respuesta a la pregunta del auditor. Una captura
+repetida no es un fichero de más — es una afirmación falsa dentro del único
+sitio del repositorio que existe para sostener afirmaciones.
 
 **`cobertura`** compara las pruebas que hay en el árbol con las que `cargo test`
 registra. Existe porque dos pruebas quedaron anidadas dentro de otra función y la
