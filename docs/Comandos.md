@@ -400,12 +400,34 @@ eje-manifiesto emitir       --semilla <fichero> --entrada <toml> --salida <inv> 
 eje-manifiesto configurar   --semilla <fichero> --entrada <toml> --salida <cfg> [--anterior <cfg>]
 eje-manifiesto recuperacion --fragmentos <prefijo> --almacen <directorio>
 eje-manifiesto revocar      --fragmento-uno <frg> --fragmento-dos <frg> --almacen <dir> --sucesora <pub> --corte <n>
+eje-manifiesto anclar           --almacen <directorio>
 eje-manifiesto migrar-centinela --almacen <directorio>
 ```
 
-**`migrar-centinela`** lleva el centinela de un almacén de la versión 2 a la 3
-(PA-150). Conserva las dos marcas de agua y les añade el **ancla**: la huella
-de la `clave-recuperacion.pub` que haya en ese mismo almacén.
+**`anclar`** escribe el centinela **inicial** de un almacén recién aprovisionado
+(PA-161). Lee las dos claves públicas de ese almacén, calcula sus anclas y
+escribe un centinela de versión 4 con las dos marcas de agua **sin establecer**
+— no a cero, que afirmaría haber aceptado la secuencia cero, y eso no es lo
+mismo que no haber aceptado nada.
+
+Es el último paso de la ceremonia, después de `generar`, `recuperacion`,
+`emitir` y `configurar`. **Sin él, un sensor nuevo arranca sin identidad
+anclada**: sustituir su clave no encendería nada, que es justo lo que PA-150
+cerró.
+
+**Se niega si ya hay centinela**, y no es rigidez: reescribirlo pondría las dos
+marcas en «sin establecer», y a partir de ahí cualquier inventario o
+configuración **antiguos y correctamente firmados** volverían a aceptarse. Sería
+el ataque de reversión servido por la herramienta que debería impedirlo. Un
+almacén que ya tiene centinela se ancla con `migrar-centinela`.
+
+**`migrar-centinela`** es el otro caso: un almacén que **ya vivió**. Lleva su
+centinela de la versión 2 o 3 a la 4, **conservando las dos marcas de agua**, y
+les añade las anclas de las claves que haya en ese mismo almacén.
+
+Son dos órdenes y no una a propósito. Aquélla conserva las marcas, ésta las deja
+vacías; juntarlas daría un comando que a veces preserva y a veces no, decidiendo
+por lo que encuentre en disco.
 
 Se ejecuta sobre una **copia** del almacén del sensor, en la máquina del
 administrador, y el resultado se devuelve al sensor. No la ejecuta el agente a

@@ -63,6 +63,7 @@ enum ErrorHerramienta {
          eje-manifiesto recuperacion --fragmentos <prefijo> --almacen <directorio>\n  \
          eje-manifiesto revocar      --fragmento-uno <frg> --fragmento-dos <frg> \
          --almacen <directorio> --sucesora <pub> --corte <n>\n  \
+         eje-manifiesto anclar          --almacen <directorio>\n  \
          eje-manifiesto migrar-centinela --almacen <directorio>"
     )]
     Uso,
@@ -765,6 +766,134 @@ fn migrar_centinela(opciones: &Opciones) -> Result<(), ErrorHerramienta> {
     Ok(())
 }
 
+/// Escribe el centinela inicial de un almacen recien aprovisionado. PA-161.
+///
+/// # El hueco que cierra
+///
+/// Las anclas de identidad **solo las escribe esta herramienta** —el agente no
+/// ancla nunca, porque anclar al primer uso convertiria el ataque en «borro los
+/// dos ficheros y dejo la mia» (PA-150)— y hasta hoy el unico comando que las
+/// escribia era [`migrar_centinela`], que **exige un centinela v2 o v3
+/// existente**.
+///
+/// En un almacen recien generado no hay ninguno. Y si se deja que lo cree el
+/// agente al aceptar su primer inventario, saldra **v4**, que `analizar_v2`
+/// tambien rechaza.
+///
+/// Resultado: **un sensor aprovisionado desde cero no tenia camino a tener
+/// identidad anclada**. Se quedaba con las dos anclas en `None` para siempre,
+/// es decir con `operativaNoAprovisionada` y `recuperacionNoAprovisionada`
+/// encendidas de forma permanente.
+///
+/// No se habia visto porque nunca se habia aprovisionado un sensor desde cero
+/// despues de la version 4: `eje-prueba` llego a tener anclas **migrando** desde
+/// la 3, que era el unico camino que existia. Lo encontro la primera ceremonia
+/// completa sobre una maquina nueva, el 18 de octubre de 2026.
+///
+/// # Por que un comando aparte y no ampliar `migrar-centinela`
+///
+/// Porque hacen cosas distintas y conviene que sus nombres no mientan. Aquel
+/// **conserva** las marcas de agua de un sensor que ya vivio; este las deja sin
+/// establecer porque no ha vivido nada. Meter los dos casos en una orden dejaria
+/// un comando que a veces preserva y a veces no, decidiendolo por lo que
+/// encuentre en disco.
+///
+/// # Por que se niega si ya hay centinela
+///
+/// Porque reescribirlo pondria las dos marcas de agua en «sin establecer», y eso
+/// es exactamente el ataque de reversion que el centinela existe para detectar:
+/// despues, cualquier inventario o configuracion antiguos y correctamente
+/// firmados volverian a aceptarse. Un sensor que ya tiene centinela se ancla con
+/// `migrar-centinela`, que conserva las marcas, o no se ancla.
+///
+/// # Errores
+///
+/// [`ErrorHerramienta::Uso`] sin `--almacen`. [`ErrorHerramienta::Fichero`] si
+/// ya hay centinela, o si falta alguna de las dos claves publicas.
+fn anclar(opciones: &Opciones) -> Result<(), ErrorHerramienta> {
+    let Some(almacen) = &opciones.almacen else {
+        return Err(ErrorHerramienta::Uso);
+    };
+
+    let rutas = RutasAlmacen::nuevo(almacen.clone());
+
+    // Antes que nada, y antes de leer ninguna clave: si hay centinela, esta
+    // orden no es la que toca.
+    if rutas.centinela().exists() {
+        return Err(ErrorHerramienta::Aprovisionamiento {
+            detalle: format!(
+                "{} ya existe. Reescribirlo pondria las dos marcas de agua en «sin \
+                 establecer», que es el ataque de reversion que ese fichero existe para \
+                 detectar. Un almacen que ya tiene centinela se ancla con 'migrar-centinela'",
+                rutas.centinela().display()
+            ),
+        });
+    }
+
+    // Las dos claves son obligatorias aqui, al contrario que en la migracion.
+    // Anclar solo una deja el sensor en el estado a medias que este comando
+    // existe para evitar, y en un almacen nuevo las dos se acaban de generar:
+    // que falte alguna significa que la ceremonia se dejo un paso.
+    let operativa = cargar_clave(&rutas.clave_operativa(), DominioClave::Cliente)
+        .map_err(|error| ErrorHerramienta::Aprovisionamiento {
+            detalle: error.to_string(),
+        })?
+        .ok_or_else(|| ErrorHerramienta::Aprovisionamiento {
+            detalle: format!(
+                "no hay {} en este almacen. Se crea con 'eje-manifiesto generar'",
+                rutas.clave_operativa().display()
+            ),
+        })?;
+
+    let recuperacion = cargar_clave(
+        &rutas.clave_recuperacion(),
+        DominioClave::ClienteRecuperacion,
+    )
+    .map_err(|error| ErrorHerramienta::Aprovisionamiento {
+        detalle: error.to_string(),
+    })?
+    .ok_or_else(|| ErrorHerramienta::Aprovisionamiento {
+        detalle: format!(
+            "no hay {} en este almacen. Se crea con 'eje-manifiesto recuperacion'. \
+             Anclar sin ella dejaria el sensor sin remedio si su identidad se compromete",
+            rutas.clave_recuperacion().display()
+        ),
+    })?;
+
+    let ancla_operativa = ancla_de_clave(&operativa);
+    let ancla_recuperacion = ancla_de_clave(&recuperacion);
+
+    // Las dos marcas quedan SIN ESTABLECER, y es lo correcto: este sensor no ha
+    // aceptado todavia ningun inventario ni ninguna configuracion. Ponerlas a
+    // cero afirmaria que acepto la secuencia cero, que no es lo mismo que no
+    // haber aceptado nada (RPT-006 §4).
+    let centinelas = Centinelas::SIN_ESTABLECER
+        .con_recuperacion(Some(ancla_recuperacion))
+        .con_operativa(Some(ancla_operativa));
+
+    escribir(&rutas.centinela(), &serializar_centinela(centinelas))?;
+
+    println!("Centinela creado     : {}", rutas.centinela().display());
+    println!("Version              : 4");
+    println!("Marca de inventario  : sin establecer");
+    println!("Marca de configuracion: sin establecer");
+    println!();
+    println!(
+        "Ancla operativa      : {}",
+        ancla_operativa.resumen().hexadecimal()
+    );
+    println!(
+        "Ancla recuperacion   : {}",
+        ancla_recuperacion.resumen().hexadecimal()
+    );
+    println!();
+    println!("Este sensor ya recuerda cual es su identidad. A partir de ahora, que");
+    println!("cualquiera de las dos claves desaparezca o cambie deja de parecerse a");
+    println!("una instalacion recien hecha.");
+
+    Ok(())
+}
+
 /// Describe una marca de agua para la salida por pantalla.
 fn describir_marca(marca: Centinela) -> String {
     marca
@@ -786,8 +915,190 @@ fn main() -> Result<(), ErrorHerramienta> {
         "configurar" => configurar(&opciones),
         "recuperacion" => recuperacion(&opciones),
         "revocar" => revocar(&opciones),
+        "anclar" => anclar(&opciones),
         "migrar-centinela" => migrar_centinela(&opciones),
         _ => Err(ErrorHerramienta::Uso),
+    }
+}
+
+/// Las tres negativas de `anclar`. PA-161.
+///
+/// El camino bueno —escribir el centinela v4 con las dos anclas— se observo
+/// sobre un almacen real el 18 de octubre de 2026: 94 bytes, version 4, marcas
+/// sin establecer, y las dos anclas **distintas** del SHA-256 de sus ficheros,
+/// que es lo que confirma que se resume la clave y no el fichero (RPT-099).
+///
+/// Lo que se prueba aqui son las tres formas de negarse, porque son las que
+/// protegen y las que nadie ejecuta a proposito.
+#[cfg(test)]
+mod pruebas_anclar {
+    #![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
+
+    use guardian_cc::arranque::aprovisionar_clave;
+    use guardian_cc::inventario::DominioClave;
+    use motor_pqc::secreto::Secreto;
+    use motor_pqc::semilla::{LONGITUD_SEMILLA, SemillaFirma, derivar_verificacion};
+
+    use super::{Opciones, anclar};
+
+    /// Aprovisiona las dos claves publicas del almacen, como hace la ceremonia.
+    ///
+    /// Sin esto la prueba de la guarda era **mas debil de lo que parecia**: con
+    /// el almacen vacio, `anclar` se negaba por la clave que falta y no por el
+    /// centinela, asi que comprobaba el texto del error y no el efecto. La
+    /// perturbacion lo delato — al retirar la guarda, la prueba seguia cayendo,
+    /// pero por otro motivo, y la asercion que mira si el fichero se toco ni
+    /// llegaba a ejecutarse.
+    ///
+    /// Con las dos claves presentes, **la unica razon posible de negarse es el
+    /// centinela**, que es lo que se quiere medir.
+    fn con_las_dos_claves(ruta: &std::path::Path) {
+        for (byte, nombre, dominio) in [
+            (1u8, "clave-cliente.pub", DominioClave::Cliente),
+            (
+                2u8,
+                "clave-recuperacion.pub",
+                DominioClave::ClienteRecuperacion,
+            ),
+        ] {
+            let semilla: SemillaFirma = Secreto::nuevo([byte; LONGITUD_SEMILLA]);
+            aprovisionar_clave(&ruta.join(nombre), &derivar_verificacion(semilla), dominio)
+                .expect("aprovisiona");
+        }
+    }
+
+    /// Directorio propio por prueba, sin dependencias nuevas.
+    fn almacen(nombre: &str) -> std::path::PathBuf {
+        let ruta = std::env::temp_dir().join(format!(
+            "eje-pa161-{}-{nombre}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&ruta);
+        std::fs::create_dir_all(&ruta).expect("temporal");
+        ruta
+    }
+
+    fn opciones(ruta: &std::path::Path) -> Opciones {
+        Opciones {
+            almacen: Some(ruta.to_path_buf()),
+            ..Opciones::default()
+        }
+    }
+
+    /// La guarda que importa: un centinela existente no se reescribe.
+    ///
+    /// Reescribirlo pondria las dos marcas de agua en «sin establecer», y a
+    /// partir de ahi cualquier inventario o configuracion **antiguos y
+    /// correctamente firmados** volverian a aceptarse. Es el ataque de reversion
+    /// servido por la herramienta que deberia impedirlo.
+    #[test]
+    fn un_centinela_existente_no_se_reescribe() {
+        let ruta = almacen("ya-hay-centinela");
+
+        // Las dos claves, para que no haya otra excusa para negarse.
+        con_las_dos_claves(&ruta);
+        std::fs::write(ruta.join("centinela.dat"), b"lo que sea").expect("escribe");
+
+        let error = anclar(&opciones(&ruta)).expect_err("tiene que negarse");
+        let texto = error.to_string();
+
+        // **Lo primero es el efecto, no el mensaje.** Al reves —como estaba— la
+        // prueba podia caer por un motivo ajeno y no llegar nunca a mirar si el
+        // fichero se habia tocado, que es lo unico que protege de verdad.
+        assert_eq!(
+            std::fs::read(ruta.join("centinela.dat")).expect("sigue"),
+            b"lo que sea",
+            "el centinela se reescribio: las marcas de agua acaban de ponerse a \
+             cero y cualquier inventario antiguo y bien firmado vuelve a valer"
+        );
+
+        assert!(
+            texto.contains("ya existe"),
+            "la negativa tiene que decir que el fichero esta: {texto}"
+        );
+        assert!(
+            texto.contains("migrar-centinela"),
+            "y a donde ir en su lugar, o el operador se queda sin salida: {texto}"
+        );
+
+        let _ = std::fs::remove_dir_all(&ruta);
+    }
+
+    /// Y con las dos claves y sin centinela, **si** ancla.
+    ///
+    /// Anti-vacuidad de la de arriba: sin esto, un `anclar` que se negara
+    /// siempre pasaria aquella prueba y nadie podria aprovisionar nada.
+    #[test]
+    fn con_las_dos_claves_y_sin_centinela_ancla() {
+        let ruta = almacen("ancla-bien");
+        con_las_dos_claves(&ruta);
+
+        anclar(&opciones(&ruta)).expect("tiene que anclar");
+
+        let bytes = std::fs::read(ruta.join("centinela.dat")).expect("lo escribio");
+        assert_eq!(bytes.len(), 94, "centinela de version 4");
+        assert_eq!(&bytes[..8], b"EJE-CEN1");
+        assert_eq!(
+            u16::from_be_bytes([bytes[8], bytes[9]]),
+            4,
+            "la version va en los dos bytes siguientes al magico"
+        );
+
+        let _ = std::fs::remove_dir_all(&ruta);
+    }
+
+    /// Sin clave operativa no hay identidad que anclar.
+    #[test]
+    fn sin_clave_operativa_no_ancla() {
+        let ruta = almacen("sin-operativa");
+
+        let texto = anclar(&opciones(&ruta))
+            .expect_err("tiene que negarse")
+            .to_string();
+
+        assert!(texto.contains("clave-cliente.pub"), "{texto}");
+        assert!(
+            texto.contains("generar"),
+            "la negativa dice que comando lo arregla: {texto}"
+        );
+        assert!(
+            !ruta.join("centinela.dat").exists(),
+            "no se escribe nada a medias"
+        );
+
+        let _ = std::fs::remove_dir_all(&ruta);
+    }
+
+    /// Y anclar solo la operativa dejaria el sensor sin remedio.
+    ///
+    /// Es el estado a medias que este comando existe para evitar: una identidad
+    /// anclada sin clave de recuperacion no se puede revocar si se compromete.
+    /// En un almacen recien generado las dos se acaban de crear, asi que que
+    /// falte una significa que la ceremonia se dejo un paso.
+    #[test]
+    fn sin_clave_de_recuperacion_tampoco_ancla() {
+        let ruta = almacen("sin-recuperacion");
+        // Basta con que el fichero exista para pasar del primer control; el
+        // contenido lo rechazara el analizador, y eso tambien es negarse.
+        std::fs::write(ruta.join("clave-cliente.pub"), b"no es una clave").expect("escribe");
+
+        assert!(
+            anclar(&opciones(&ruta)).is_err(),
+            "con una sola clave, o mal formada, no se ancla"
+        );
+        assert!(
+            !ruta.join("centinela.dat").exists(),
+            "no se escribe nada a medias"
+        );
+
+        let _ = std::fs::remove_dir_all(&ruta);
+    }
+
+    /// Y sin `--almacen` no hay nada que hacer.
+    #[test]
+    fn sin_almacen_es_error_de_uso() {
+        assert!(anclar(&Opciones::default()).is_err());
     }
 }
 

@@ -47,6 +47,15 @@ credenciales.toml
 configuracion-sensor.toml
 parque.toml
 
+# `sensor.toml` es lo mismo que `configuracion-sensor.toml` con otro nombre: la
+# entrada de `eje-manifiesto configurar`. Se escribio asi el 18 de octubre de
+# 2026 al aprovisionar la golden del laboratorio, divergiendo de la convencion, y
+# el fichero entro al indice en el `git add -A` siguiente.
+#
+# Lleva el hostname de una maquina, su interfaz y su colector. Versionarlo es lo
+# que las tres lineas de arriba existen para impedir.
+sensor.toml
+
 # Almacenes de trabajo del administrador: copias del estado de UN sensor —claves
 # publicas, centinela— que se traen, se tocan y se devuelven. No son secretos,
 # pero versionarlos invita a instalar el estado de una maquina en otra, y eso se
