@@ -33,11 +33,28 @@
 //! frase de paso solo se teclea en la maquina del administrador, asi que este
 //! modulo se queda donde se teclea.
 
+//! # Plataformas (PA-166)
+//!
+//! `termios` es POSIX. Hasta el 20 de octubre de 2026 este modulo lo usaba sin
+//! guarda y `libc` entraba como dependencia incondicional, asi que
+//! **`eje-manifiesto` no compilaba en Windows** —diez errores— y con el el
+//! guardian de calidad entero: `cargo clippy --workspace` y `cargo test
+//! --workspace` eran inejecutables en la maquina donde se escribe el codigo.
+//! Nadie lo vio porque la ceremonia se corre en WSL, que es Linux, y porque CI
+//! no corria (PA-165).
+//!
+//! Ahora compila en todas partes y **en las que no sabe apagar el eco se niega a
+//! leer la frase**, que es la unica salida que no empeora nada: un camino de
+//! Windows que la leyera con el eco encendido reintroduciria PA-53 en otra
+//! plataforma, y en silencio.
+
 #![allow(unsafe_code)]
 
+#[cfg(unix)]
 use std::mem::MaybeUninit;
 
 /// Descriptor de la entrada estandar.
+#[cfg(unix)]
 const ENTRADA: i32 = 0;
 
 /// Que ocurrio al intentar apagar el eco.
@@ -67,6 +84,19 @@ pub enum Eco {
     /// reciba esto tiene que avisar, que es lo que la herramienta hacia antes
     /// de este modulo y sigue teniendo que hacer cuando no puede hacer mas.
     NoSePudoApagar,
+
+    /// Esta plataforma no tiene implementacion de apagado de eco.
+    ///
+    /// PA-166. Cuarto estado y no una rama de [`Self::NoSePudoApagar`], por la
+    /// misma razon que los otros tres no se colapsan: son hechos distintos y
+    /// piden respuestas distintas. «Se intento y fallo en esta terminal» se
+    /// responde investigando la terminal; «este sistema operativo no sabe
+    /// hacerlo» se responde yendose a otro —en este proyecto, a WSL—. Decir lo
+    /// primero cuando es lo segundo manda al administrador a buscar una averia
+    /// que no existe.
+    ///
+    /// Quien lo reciba **no debe leer la frase de paso**. Ver `pedir_frase`.
+    SinSoporte,
 }
 
 /// Devuelve la terminal a como estaba, pase lo que pase.
@@ -79,9 +109,29 @@ pub enum Eco {
 /// restauracion la garantiza el compilador y no la memoria de quien escribe.
 pub struct Guardia {
     /// Configuracion tal como estaba antes de tocarla.
+    ///
+    /// PA-166. El campo es la implementacion, no el contrato: fuera de POSIX no
+    /// hay `termios` que guardar. La estructura sigue existiendo en todas las
+    /// plataformas porque [`Eco::Apagado`] la nombra, pero alli **no se
+    /// construye nunca** — `apagar_en` devuelve [`Eco::SinSoporte`] antes.
+    #[cfg(unix)]
     anterior: libc::termios,
 }
 
+/// # Por que la implementacion NO esta acotada a POSIX y el cuerpo si
+///
+/// PA-166. Al acotar `impl Drop` entero con `cfg(unix)`, `Eco` dejaba de
+/// implementar `Drop` en Windows y clippy denuncio el `drop(eco)` de
+/// `pedir_frase` con `drop_non_drop`. **Tenia razon, y no era un lint:** esa
+/// linea devuelve la terminal ANTES de imprimir lo siguiente, y convertirla en
+/// una operacion vacia en una plataforma dejaba al llamador creyendo que hace
+/// algo donde no hacia nada.
+///
+/// Silenciarlo con un `allow` habria escondido la asimetria. La forma correcta
+/// es la contraria: el **contrato** de `Guardia` —al soltarse, la terminal
+/// vuelve a como estaba— es cierto en todas las plataformas; lo que varia es
+/// cuanto trabajo cuesta cumplirlo, y fuera de POSIX es ninguno. Un `Drop`
+/// vacio no es una mentira: es la restauracion de algo que nunca se toco.
 impl Drop for Guardia {
     fn drop(&mut self) {
         // El resultado se ignora **a proposito**: `Drop` no puede devolver un
@@ -90,6 +140,7 @@ impl Drop for Guardia {
         //
         // SAFETY: `anterior` la escribio `tcgetattr` del propio sistema y no se
         // ha modificado desde entonces.
+        #[cfg(unix)]
         let _ = unsafe { libc::tcsetattr(ENTRADA, libc::TCSAFLUSH, &self.anterior) };
     }
 }
@@ -99,9 +150,21 @@ impl Drop for Guardia {
 /// El eco vuelve cuando se suelta el [`Guardia`] que devuelve
 /// [`Eco::Apagado`]: quien llama no tiene que acordarse de restaurarlo, y por
 /// tanto no puede olvidarlo.
+#[cfg(unix)]
 #[must_use]
 pub fn apagar() -> Eco {
     apagar_en(ENTRADA)
+}
+
+/// Apaga el eco de la entrada estandar. **Fuera de POSIX no hay con que.**
+///
+/// PA-166. No toma descriptor porque en estas plataformas no significa nada, y
+/// no hay `apagar_en` por lo mismo: una funcion que acepta un descriptor y lo
+/// ignora invita a creer que lo mira.
+#[cfg(not(unix))]
+#[must_use]
+pub fn apagar() -> Eco {
+    Eco::SinSoporte
 }
 
 /// Igual, sobre un descriptor cualquiera.
@@ -112,6 +175,7 @@ pub fn apagar() -> Eco {
 /// por la que `leer_frase` toma un `BufRead` en lugar de leer `stdin` (RPT-082,
 /// PA-134): **un mecanismo que solo se puede observar en la maquina de alguien
 /// no se observa.**
+#[cfg(unix)]
 #[must_use]
 pub fn apagar_en(descriptor: i32) -> Eco {
     // SAFETY: `isatty` solo consulta el descriptor; no escribe en el ni en

@@ -3,11 +3,20 @@ name: CI
 # Verificaciones obligatorias de RPT-003 §9.4.
 # Ninguna es opcional ni posponible.
 
+# PA-165. `principal` en minuscula es la rama donde vive el desarrollo. Durante
+# 77 dias aqui solo figuraba `Principal`, que es un commit raiz HUERFANO del 4 de
+# agosto —LICENSE, README y RPT-002, sin antepasado comun con el trabajo— y por
+# eso este fichero no se ejecuto ni una vez sobre los 67 commits siguientes.
+# Las dos barreras que habrian cazado PA-166 el mismo dia que entro estan abajo.
+#
+# Se nombran LAS DOS a proposito: si manana se consolidan las ramas en un sentido
+# o en el otro, CI sigue corriendo. Una barrera que depende de la mayuscula de un
+# nombre no es una barrera.
 on:
   push:
-    branches: [Principal]
+    branches: [principal, Principal]
   pull_request:
-    branches: [Principal]
+    branches: [principal, Principal]
 
 env:
   CARGO_TERM_COLOR: always

@@ -291,6 +291,60 @@ const fn describir(estado: &EstadoArranque) -> &'static str {
     }
 }
 
+/// Dato forense que acompana al estado de arranque, cuando lo hay.
+///
+/// # Por que existe
+///
+/// PA-163. Tres variantes de [`EstadoArranque`] llevan carga y `describir` las
+/// descartaba todas con `{ .. }`: el motivo de `NoVerifica`, la secuencia que el
+/// centinela recuerda en `Supresion`, y la version que traia el fichero en
+/// `FormatoObsoleto`. El campo `detalle` esta documentado en `guardian-cc` como
+/// «Motivo, para el registro forense» y **no llegaba a ningun registro**.
+///
+/// Lo que costaba: `NoVerifica` se alcanza desde nueve variantes de
+/// `ErrorInventario` —firma de raiz invalida, dominio de clave incorrecto,
+/// reversion detectada, clave revocada, frescura no establecida, inclusion que
+/// no verifica, prueba ajena al marcado, dispositivo duplicado, formato— y el
+/// operador leia una sola frase para las nueve. Son incidentes con respuestas
+/// distintas: una reversion se responde mirando quien tuvo acceso al almacen, un
+/// dominio equivocado reemitiendo con la clave correcta. Y durante el
+/// diagnostico de PA-162 la variante concreta hubo que deducirla leyendo el
+/// codigo, porque la maquina que la habia calculado no la decia.
+///
+/// # Por que aparte de `describir` y no concatenado
+///
+/// Aquella sigue siendo `const` y total, y la frase para la persona y el dato
+/// para el forense no son la misma cosa ni caducan juntas. Mezclarlas invitaria
+/// ademas a que alguna decision se tomara comparando la cadena entera.
+///
+/// # Sobre lo que puede salir en el texto
+///
+/// RPT-077 obliga a mirar que no se filtren rutas del almacen. No las hay: el
+/// motivo viene del `Display` de `ErrorCarga`, y `analizar` trabaja sobre bytes,
+/// no sobre rutas. Lo mas concreto que aparece es una secuencia, un dominio de
+/// clave o una direccion de enlace, y las tres ya estan en el inventario.
+///
+/// # `match` sin comodin
+///
+/// PA-153, y este es el sitio que derivo `inventarioNoVerifica` durante toda la
+/// investigacion de PA-162. Sin exhaustividad, una variante nueva se quedaria en
+/// silencio sin detalle, que es el defecto que esta funcion cierra reaparecido
+/// un ano despues.
+fn detallar(estado: &EstadoArranque) -> Option<String> {
+    match estado {
+        EstadoArranque::NoVerifica { detalle } => Some(detalle.clone()),
+        EstadoArranque::Supresion { secuencia_conocida } => Some(format!(
+            "el centinela recuerda la secuencia {secuencia_conocida}"
+        )),
+        EstadoArranque::FormatoObsoleto { encontrada } => {
+            Some(format!("el fichero traia la version {encontrada}"))
+        }
+        EstadoArranque::Operativo(_)
+        | EstadoArranque::PrimerArranque
+        | EstadoArranque::SinClaveAprovisionada => None,
+    }
+}
+
 /// Una opcion de la linea de ordenes.
 ///
 /// # Por que es una tabla y no una cadena de uso escrita a mano
@@ -974,6 +1028,12 @@ fn ejecutar() -> Result<(), ErrorAgente> {
             .unwrap_or("NINGUNA; las alertas no salen del equipo y nadie fuera notara si se apaga")
     );
     println!("Estado de arranque : {}", describir(&estado));
+    // PA-163. Linea aparte y solo cuando hay algo que decir: una linea
+    // «detalle: ninguno» en cada arranque sano es ruido, y el ruido en un banner
+    // es como se deja de leer el banner.
+    if let Some(detalle) = detallar(&estado) {
+        println!("  detalle          : {detalle}");
+    }
     println!("Registro de alertas: {aviso_registro}");
 
     if estado.exige_alerta() {
@@ -1925,6 +1985,100 @@ fn instante_utc() -> i64 {
         .map_or(0, |transcurrido| {
             i64::try_from(transcurrido.as_millis()).unwrap_or(i64::MAX)
         })
+}
+
+#[cfg(test)]
+mod pruebas_detalle {
+    #![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
+
+    use guardian_cc::arranque::EstadoArranque;
+    use guardian_cc::inventario::ErrorInventario;
+
+    use super::detallar;
+
+    /// Construye el estado como lo construye `arrancar`: con el `Display` del
+    /// error real, no con una cadena escrita a mano.
+    ///
+    /// Si se inventara el texto, la prueba seguiria verde el dia que
+    /// `ErrorInventario` cambiara sus mensajes, y lo que se afirma aqui es
+    /// justamente que lo que ve el operador es lo que dijo el verificador.
+    fn no_verifica(causa: &ErrorInventario) -> EstadoArranque {
+        EstadoArranque::NoVerifica {
+            detalle: causa.to_string(),
+        }
+    }
+
+    #[test]
+    fn el_motivo_del_verificador_llega_al_banner() {
+        let estado = no_verifica(&ErrorInventario::FrescuraNoEstablecida);
+        let detalle = detallar(&estado).expect("NoVerifica tiene detalle");
+
+        assert_eq!(detalle, ErrorInventario::FrescuraNoEstablecida.to_string());
+        assert!(
+            detalle.contains("frescura"),
+            "el operador tiene que poder distinguir esta causa de las otras ocho: {detalle}"
+        );
+    }
+
+    /// La prueba que caza un arreglo falso.
+    ///
+    /// Una version que imprimiera una constante —o que volviera a descartar la
+    /// carga— pasaria todas las de arriba y caeria aqui. Es el equivalente a la
+    /// anti-vacuidad de PA-45: una funcion que diga siempre lo mismo no informa
+    /// de nada, y nueve causas bajo una frase es exactamente el estado del que
+    /// viene PA-163.
+    #[test]
+    fn dos_causas_distintas_no_dan_el_mismo_detalle() {
+        let frescura =
+            detallar(&no_verifica(&ErrorInventario::FrescuraNoEstablecida)).expect("tiene detalle");
+        let reversion = detallar(&no_verifica(&ErrorInventario::ReversionDetectada {
+            aceptada: 7,
+            presentada: 3,
+        }))
+        .expect("tiene detalle");
+        let firma =
+            detallar(&no_verifica(&ErrorInventario::FirmaDeRaizInvalida)).expect("tiene detalle");
+
+        assert_ne!(frescura, reversion);
+        assert_ne!(reversion, firma);
+        assert_ne!(frescura, firma);
+
+        // Y la reversion arrastra sus dos numeros, que son la respuesta a «desde
+        // donde se intento revertir».
+        assert!(
+            reversion.contains('7') && reversion.contains('3'),
+            "{reversion}"
+        );
+    }
+
+    #[test]
+    fn la_supresion_dice_que_secuencia_recuerda_el_centinela() {
+        let detalle = detallar(&EstadoArranque::Supresion {
+            secuencia_conocida: 42,
+        })
+        .expect("Supresion tiene detalle");
+
+        assert!(detalle.contains("42"), "{detalle}");
+    }
+
+    #[test]
+    fn el_formato_obsoleto_dice_que_version_traia() {
+        let detalle =
+            detallar(&EstadoArranque::FormatoObsoleto { encontrada: 3 }).expect("tiene detalle");
+
+        assert!(detalle.contains('3'), "{detalle}");
+    }
+
+    /// Los estados sin carga no inventan una linea.
+    ///
+    /// Un `Some("ninguno")` en cada arranque sano seria ruido en el banner, y un
+    /// banner ruidoso se deja de leer — que es como se pierde el aviso del dia
+    /// que importa (PA-45).
+    #[test]
+    fn los_estados_sin_carga_no_producen_linea() {
+        assert!(detallar(&EstadoArranque::PrimerArranque).is_none());
+        assert!(detallar(&EstadoArranque::SinClaveAprovisionada).is_none());
+    }
 }
 
 #[cfg(test)]

@@ -979,6 +979,9 @@ fn el_lector_de_v2_rechaza_la_segunda_codificacion_de_ausente() {
 /// pruebas hereda una tty cuando se corre a mano y no la hereda en integracion
 /// continua, asi que mirar `stdin` daria una prueba que cambia de resultado
 /// segun quien la ejecute. Una prueba asi no comprueba nada, informa del sitio.
+/// PA-166. Solo POSIX: `apagar_en`, `/dev/null` y `AsRawFd` no existen fuera.
+/// Lo que se comprueba aqui es la implementacion de termios, no el contrato.
+#[cfg(unix)]
 #[test]
 fn una_entrada_que_no_es_terminal_no_se_lee_como_eco_apagado() {
     use std::os::fd::AsRawFd;
@@ -998,6 +1001,8 @@ fn una_entrada_que_no_es_terminal_no_se_lee_como_eco_apagado() {
 /// `isatty` sobre un descriptor invalido devuelve 0, asi que el resultado
 /// correcto es `NoEsTerminal`. Lo que **no** puede pasar es `Apagado`: eso
 /// afirmaria haber tocado una terminal que no existe.
+/// PA-166. Solo POSIX, por lo mismo: no hay descriptores que invalidar.
+#[cfg(unix)]
 #[test]
 fn un_descriptor_invalido_no_afirma_haber_apagado_nada() {
     assert!(
@@ -1006,22 +1011,35 @@ fn un_descriptor_invalido_no_afirma_haber_apagado_nada() {
     );
 }
 
-/// Los estados son **tres**, y esta prueba deja de compilar si se anaden.
+/// Los estados son **cuatro**, y esta prueba deja de compilar si se anaden.
 ///
-/// No comprueba comportamiento: comprueba que nadie meta un cuarto caso sin
-/// decidir que imprime `pedir_frase` para el. El `match` sin comodin es la
-/// correa (RPT-090 §3); esto solo la ancla desde el lado de las pruebas para
-/// que el fallo salga aqui y no en la pantalla de un administrador.
+/// No comprueba comportamiento: comprueba que nadie meta un caso nuevo sin
+/// decidir que hace `pedir_frase` con el. El `match` sin comodin es la correa
+/// (RPT-090 §3); esto solo la ancla desde el lado de las pruebas para que el
+/// fallo salga aqui y no en la pantalla de un administrador.
+///
+/// # Dijo tres hasta el 20 de octubre de 2026, y disparo
+///
+/// PA-166 anadio [`eco::Eco::SinSoporte`] y esta prueba **dejo de compilar, que
+/// es para lo que se escribio**. Se actualiza a cuatro en lugar de relajarse a
+/// un comodin: una prueba que acepta cualquier numero de estados no ancla nada.
+///
+/// Es la segunda barrera del proyecto validada por uso y no por una
+/// perturbacion fabricada —la primera fue PA-153 al anadir
+/// `EstadoOperativa::Revocada` (RPT-102)—, y la primera que alguien escribio con
+/// la intencion explicita de que rompiera asi.
 #[test]
-fn el_eco_tiene_exactamente_tres_estados() {
+fn el_eco_tiene_exactamente_cuatro_estados() {
     fn nombrar(estado: &eco::Eco) -> &'static str {
         match estado {
             eco::Eco::Apagado(_) => "apagado",
             eco::Eco::NoEsTerminal => "no es terminal",
             eco::Eco::NoSePudoApagar => "no se pudo apagar",
+            eco::Eco::SinSoporte => "sin soporte",
         }
     }
 
     assert_eq!(nombrar(&eco::Eco::NoEsTerminal), "no es terminal");
     assert_eq!(nombrar(&eco::Eco::NoSePudoApagar), "no se pudo apagar");
+    assert_eq!(nombrar(&eco::Eco::SinSoporte), "sin soporte");
 }

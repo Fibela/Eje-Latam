@@ -113,6 +113,17 @@ enum ErrorHerramienta {
     ConfiguracionAnterior(#[from] guardian_cc::configuracion::ErrorConfiguracion),
 
     /// El aprovisionamiento de la clave publica fallo.
+    /// PA-166. Esta plataforma no sabe apagar el eco de la terminal.
+    ///
+    /// No es un fallo del sistema ni del usuario: es una limitacion declarada de
+    /// la herramienta. Se devuelve **en lugar de** leer la frase, nunca despues.
+    #[error(
+        "esta plataforma no sabe apagar el eco de la terminal, asi que la frase \
+         de paso se veria al teclearla y no se pide (PA-166). La ceremonia se \
+         corre en un sistema POSIX; en Windows, desde WSL"
+    )]
+    FraseNoProtegible,
+
     #[error("no se pudo escribir la clave de verificacion: {detalle}")]
     Aprovisionamiento {
         /// Motivo.
@@ -194,6 +205,18 @@ fn pedir_frase(motivo: &str) -> Result<Vec<u8>, ErrorHerramienta> {
             eprintln!("AVISO: no se pudo apagar el eco de esta terminal, asi que");
             eprintln!("SE VERA al teclearla; no la use delante de nadie (PA-53).");
         }
+        // PA-166. Aqui NO se avisa y se sigue: se para.
+        //
+        // La diferencia con `NoSePudoApagar` es quien tiene la culpa y quien
+        // puede arreglarlo. Alli la terminal fallo, el administrador esta
+        // delante y puede decidir asumirlo para salir del paso. Aqui es el
+        // sistema operativo el que no sabe hacerlo, y lo sabra igual de mal la
+        // proxima vez: dejarle teclear seria convertir una limitacion conocida
+        // de la herramienta en una frase comprometida, que es exactamente lo
+        // que paso el 31 de agosto de 2026 y abrio PA-53.
+        //
+        // Se niega ANTES de leer y no despues, porque despues ya se vio.
+        Eco::SinSoporte => return Err(ErrorHerramienta::FraseNoProtegible),
     }
     // RPT-082, PA-134. «Y Enter al terminar» es la mitad del arreglo que se ve.
     // El aviso decia como se VE la frase y no como se TERMINA, y con

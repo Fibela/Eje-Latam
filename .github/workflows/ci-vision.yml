@@ -2,12 +2,14 @@ name: CI Eje-Vision
 
 # Verificaciones de la interfaz. RPT-004 §7.
 
+# PA-165, igual que en `ci.yml`: el desarrollo vive en `principal` minuscula y
+# aqui solo figuraba `Principal`, asi que esta verificacion tampoco se ejecuto.
 on:
   push:
-    branches: [Principal]
+    branches: [principal, Principal]
     paths: ["apps/eje-vision/**", ".github/workflows/ci-vision.yml"]
   pull_request:
-    branches: [Principal]
+    branches: [principal, Principal]
     paths: ["apps/eje-vision/**", ".github/workflows/ci-vision.yml"]
 
 permissions:
