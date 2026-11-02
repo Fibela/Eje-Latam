@@ -549,10 +549,35 @@ algo::bench: benchmark
         assert_eq!(recuento.condicionadas, 0);
     }
 
+    /// Las pruebas condicionadas del arbol son **cuatro**, y en dos sitios.
+    ///
+    /// Ancla el caso concreto. Si alguien las unifica o anade otra, esto lo dice
+    /// en lugar de que la cifra baile sola — y el **sitio** es la mitad de la
+    /// afirmacion: una prueba tras un `cfg` es una prueba que no corre en todas
+    /// partes, asi que cada una necesita un motivo registrado.
+    ///
+    /// # Decia dos, y disparo
+    ///
+    /// PA-166, 20-oct-2026. Hasta entonces las dos unicas vivian en
+    /// `eje-captura` —la captura de paquetes es `cfg(target_os = "linux")`—. El
+    /// arreglo de PA-166 acoto `eco.rs` a POSIX y con el sus dos pruebas de
+    /// descriptores (`apagar_en`, `/dev/null`, `AsRawFd`), que fuera de POSIX no
+    /// tienen ni funcion que llamar.
+    ///
+    /// **Esta barrera fue el unico rojo de `cargo test --workspace` el dia que
+    /// CI volvio a correr tras 77 dias** (RPT-107), y lo fue haciendo
+    /// exactamente su trabajo: avisar de que el numero de pruebas que no corren
+    /// en todas partes acababa de subir. Se actualiza la cifra a proposito, no se
+    /// relaja la comprobacion del sitio a «donde sea»: eso convertiria la
+    /// barrera en un contador y dejaria de decir nada.
     #[test]
-    fn el_arbol_real_tiene_dos_pruebas_condicionadas_y_estan_donde_deben() {
-        // Ancla el caso concreto que destapo el fallo. Si alguien las unifica o
-        // anade otra, esto lo dice en lugar de que la cifra baile sola.
+    fn el_arbol_real_tiene_cuatro_pruebas_condicionadas_y_estan_donde_deben() {
+        /// Los dos crates con motivo para condicionar una prueba, y por que.
+        ///
+        /// `eje-captura`: la captura de tramas es un mecanismo de Linux.
+        /// `eje-manifiesto`: `termios` es POSIX (PA-166).
+        const PERMITIDAS: [&str; 2] = ["eje-captura", "eje-manifiesto"];
+
         let raiz = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("xtask cuelga de la raiz del workspace");
@@ -565,12 +590,13 @@ algo::bench: benchmark
 
         let total: usize = condicionadas.iter().map(|(_, c)| c.condicionadas).sum();
 
-        assert_eq!(total, 2, "{condicionadas:?}");
+        assert_eq!(total, 4, "{condicionadas:?}");
         assert!(
-            condicionadas
-                .iter()
-                .all(|(ruta, _)| ruta.to_string_lossy().contains("eje-captura")),
-            "{condicionadas:?}"
+            condicionadas.iter().all(|(ruta, _)| {
+                let ruta = ruta.to_string_lossy();
+                PERMITIDAS.iter().any(|permitida| ruta.contains(permitida))
+            }),
+            "una prueba condicionada en un crate sin motivo registrado: {condicionadas:?}"
         );
     }
 }

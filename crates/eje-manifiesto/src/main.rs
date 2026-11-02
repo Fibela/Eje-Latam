@@ -33,10 +33,12 @@ use eje_manifiesto::fragmento::{
 };
 use eje_manifiesto::reposo_semilla::{LONGITUD_SAL, abrir, sellar};
 use eje_manifiesto::{Emisor, ErrorEmision};
+use guardian_cc::almacen::InventarioLocal;
 use guardian_cc::arranque::{
-    Centinelas, RutasAlmacen, ancla_de_clave, aprovisionar_clave, cargar_clave,
-    serializar_centinela,
+    Centinelas, RutasAlmacen, aceptar_inventario, ancla_de_clave, aprovisionar_clave,
+    cargar_centinela, cargar_clave, cargar_revocaciones, serializar_centinela,
 };
+use guardian_cc::formato::analizar;
 use guardian_cc::clave::analizar as analizar_clave;
 use guardian_cc::configuracion;
 use guardian_cc::inventario::{Centinela, DominioClave};
@@ -63,8 +65,9 @@ enum ErrorHerramienta {
          eje-manifiesto recuperacion --fragmentos <prefijo> --almacen <directorio>\n  \
          eje-manifiesto revocar      --fragmento-uno <frg> --fragmento-dos <frg> \
          --almacen <directorio> --sucesora <pub> --corte <n>\n  \
-         eje-manifiesto anclar          --almacen <directorio>\n  \
-         eje-manifiesto migrar-centinela --almacen <directorio>"
+         eje-manifiesto anclar             --almacen <directorio>\n  \
+         eje-manifiesto aceptar-inventario --almacen <directorio>\n  \
+         eje-manifiesto migrar-centinela   --almacen <directorio>"
     )]
     Uso,
 
@@ -833,6 +836,192 @@ fn migrar_centinela(opciones: &Opciones) -> Result<(), ErrorHerramienta> {
 ///
 /// [`ErrorHerramienta::Uso`] sin `--almacen`. [`ErrorHerramienta::Fichero`] si
 /// ya hay centinela, o si falta alguna de las dos claves publicas.
+/// Acepta el **primer** inventario de un almacen recien aprovisionado.
+///
+/// # PA-162
+///
+/// `aceptar_inventario` es la unica funcion que avanza la marca de agua de
+/// inventario, y **no tenia llamador en produccion**: solo las pruebas de
+/// `guardian-cc`. `Canal::ObtenerInventario` es de lectura. Con la marca en «sin
+/// establecer», `RaizVerificada::verificar` sale por `FrescuraNoEstablecida`
+/// antes de comparar firma o secuencia, asi que ningun sensor real podia
+/// alcanzar `EstadoArranque::Operativo` por ningun camino. Lo encontro el
+/// laboratorio de RUA en su primera calma.
+///
+/// # Por que lo hace la ceremonia y no el agente
+///
+/// RPT-105 §3. Para fechar un inventario hace falta una marca; para tener una
+/// marca hace falta haber aceptado un inventario. El primero no tiene contra que
+/// compararse, asi que la pregunta no es como saltarse la comprobacion sino
+/// **quien tiene autoridad para decir «este es el primero»** — porque quien la
+/// tenga puede introducir cualquier inventario firmado sin que nada lo feche.
+///
+/// Si fuera el agente, aceptando lo que encuentre al arrancar, borrar el
+/// centinela y plantar un inventario viejo y bien firmado seria un ataque de
+/// reversion que funciona, y `FrescuraNoEstablecida` dejaria de significar
+/// «alguien borro el centinela» para significar «empecemos con lo que haya». Es
+/// la forma de PA-150, que ya se cerro para las anclas de identidad.
+///
+/// El administrador que acaba de generar las claves, emitir el inventario y
+/// anclar la identidad **ya es** esa autoridad, y esta delante. No se anade
+/// ninguna autoridad nueva al sistema: se usa la que existe, en el unico momento
+/// en que existe.
+///
+/// Un canal IPC de escritura se descarto por ahora: `autorizar` no autentica al
+/// llamante, asi que seria entregar esta autoridad a cualquier proceso del grupo
+/// del socket. Es PA-164, abierto aparte a proposito.
+///
+/// # El sondeo, y por que no es un atajo
+///
+/// Para escribir la marca hace falta la secuencia **verificada**, y obtenerla
+/// exige `InventarioLocal::cargar`, que exige una marca. Se rompe el circulo
+/// sondeando con la secuencia que el propio fichero declara: la comprobacion de
+/// reversion compara entonces `declarada < declarada`, que es falsa, y **todo lo
+/// demas se verifica con el mismo codigo que usa el agente** — firma de raiz,
+/// dominio de clave, revocacion, inclusion, duplicados, formato.
+///
+/// Es autoconsistente y no una esperanza: la secuencia declarada viaja **dentro
+/// de `anclada`, que la firma cubre**, asi que mentirla rompe la firma y `cargar`
+/// falla. Y lo que se escribe en disco sale del objeto **verificado**, no del
+/// analizado.
+///
+/// Las dos unicas comprobaciones que quedan sin efecto son `ReversionDetectada`
+/// —vacua por definicion para el primer inventario— y `FrescuraNoEstablecida`,
+/// que es justamente la que no debe aplicar aqui. No se escribe un segundo
+/// camino de verificacion en `guardian-cc`: el `Cargo.toml` de este crate ya
+/// advierte que un lector propio permitiria que emisor y sensor discreparan
+/// sobre que es un fichero valido.
+fn aceptar_inventario_inicial(opciones: &Opciones) -> Result<(), ErrorHerramienta> {
+    let Some(almacen) = &opciones.almacen else {
+        return Err(ErrorHerramienta::Uso);
+    };
+
+    let rutas = RutasAlmacen::nuevo(almacen.clone());
+
+    // Exige centinela, y se comprueba que el FICHERO ESTE — no vale preguntarle
+    // a `cargar_centinela`, que devuelve `SIN_ESTABLECER` cuando no existe
+    // (arranque.rs:949). Con esa confusion, un almacen sin anclar pasaba la
+    // guarda, el inventario verificaba, y `aceptar_inventario` escribia un
+    // centinela con la marca puesta y **sin anclas**: el estado permanente de
+    // `operativaNoAprovisionada` + `recuperacionNoAprovisionada` que PA-161
+    // cerro, recreado por la herramienta.
+    //
+    // Lo encontro la prueba `sin_centinela_no_acepta` al escribirla, no al
+    // correrla: `cargar_centinela` colapsa «no hay fichero» con «hay fichero y
+    // no dice nada», y aqui esas dos cosas son distintas. El orden de la
+    // ceremonia es `anclar` y DESPUES esto.
+    if !rutas.centinela().exists() {
+        return Err(ErrorHerramienta::Aprovisionamiento {
+            detalle: format!(
+                "no hay {}. Un almacen sin centinela no tiene identidad anclada, y \
+                 fecharle un inventario lo dejaria con las dos anclas vacias para \
+                 siempre. Se ancla primero con 'eje-manifiesto anclar'",
+                rutas.centinela().display()
+            ),
+        });
+    }
+
+    let centinelas = cargar_centinela(&rutas).map_err(|error| {
+        ErrorHerramienta::Aprovisionamiento {
+            detalle: format!("{}: {error}", rutas.centinela().display()),
+        }
+    })?;
+
+    // **La guarda de reversion.** Volver a aceptar sobre un sensor que ya vivio
+    // bajaria su marca a la del inventario que haya en disco, y eso es el ataque
+    // que el centinela existe para detectar, servido por la herramienta.
+    if let Some(aceptada) = centinelas.inventario.secuencia() {
+        return Err(ErrorHerramienta::Aprovisionamiento {
+            detalle: format!(
+                "este almacen ya acepto la secuencia {aceptada}. Volver a aceptar \
+                 aqui la bajaria a la del fichero presente, que es el ataque de \
+                 reversion. Un sensor que ya vivio acepta inventarios nuevos por su \
+                 propio camino, no rehaciendo su aprovisionamiento"
+            ),
+        });
+    }
+
+    let operativa = cargar_clave(&rutas.clave_operativa(), DominioClave::Cliente)
+        .map_err(|error| ErrorHerramienta::Aprovisionamiento {
+            detalle: error.to_string(),
+        })?
+        .ok_or_else(|| ErrorHerramienta::Aprovisionamiento {
+            detalle: format!(
+                "no hay {} en este almacen; sin ella no hay con que verificar el \
+                 inventario que se va a aceptar",
+                rutas.clave_operativa().display()
+            ),
+        })?;
+
+    // La de recuperacion no es obligatoria para verificar el inventario, pero sin
+    // ella no se pueden leer certificados de revocacion, y entonces una clave
+    // operativa revocada pasaria por buena. Se pide por eso, no por simetria.
+    let recuperacion = cargar_clave(
+        &rutas.clave_recuperacion(),
+        DominioClave::ClienteRecuperacion,
+    )
+    .map_err(|error| ErrorHerramienta::Aprovisionamiento {
+        detalle: error.to_string(),
+    })?;
+
+    let revocaciones =
+        cargar_revocaciones(&rutas, recuperacion.as_ref()).map_err(|error| {
+            ErrorHerramienta::Aprovisionamiento {
+                detalle: error.to_string(),
+            }
+        })?;
+
+    let bytes = leer(&rutas.inventario())?;
+
+    // Secuencia declarada, SIN verificar, solo para romper el circulo. Viaja
+    // dentro de `anclada`, que la firma cubre: si esta mentida, `cargar` falla.
+    let declarada = analizar(&bytes)
+        .map_err(|error| ErrorHerramienta::Aprovisionamiento {
+            detalle: format!("{} no se puede analizar: {error}", rutas.inventario().display()),
+        })?
+        .anclada
+        .secuencia;
+
+    // Verificacion completa por la ruta del agente. Si el inventario no verifica,
+    // se sale AQUI y no se ha tocado el centinela: un sensor sembrado con un
+    // inventario que su propio agente va a rechazar es peor que uno sin sembrar,
+    // porque el administrador se enteraria al arrancar y no al aceptar.
+    let inventario = InventarioLocal::cargar(
+        &bytes,
+        &operativa,
+        Centinela::Establecido(declarada),
+        &revocaciones,
+    )
+    .map_err(|error| ErrorHerramienta::Aprovisionamiento {
+        detalle: format!(
+            "{} no verifica contra la clave anclada: {error}",
+            rutas.inventario().display()
+        ),
+    })?;
+
+    let secuencia = inventario.secuencia();
+
+    // `aceptar_inventario` escribe el centinela PRIMERO y el inventario despues,
+    // y funde con lo que haya en disco para no borrar la marca de configuracion
+    // (RPT-078). Por eso se delega en ella en lugar de componer el fichero aqui.
+    aceptar_inventario(&rutas, &bytes, secuencia).map_err(|error| {
+        ErrorHerramienta::Aprovisionamiento {
+            detalle: error.to_string(),
+        }
+    })?;
+
+    println!("Inventario aceptado  : {}", rutas.inventario().display());
+    println!("Secuencia            : {secuencia}");
+    println!("Marcados             : {}", inventario.entradas());
+    println!("Centinela            : {}", rutas.centinela().display());
+    println!();
+    println!("La marca de inventario queda establecida en {secuencia}. A partir de");
+    println!("ahora, presentar una secuencia anterior se detecta como reversion.");
+    println!();
+
+    Ok(())
+}
+
 fn anclar(opciones: &Opciones) -> Result<(), ErrorHerramienta> {
     let Some(almacen) = &opciones.almacen else {
         return Err(ErrorHerramienta::Uso);
@@ -939,6 +1128,7 @@ fn main() -> Result<(), ErrorHerramienta> {
         "recuperacion" => recuperacion(&opciones),
         "revocar" => revocar(&opciones),
         "anclar" => anclar(&opciones),
+        "aceptar-inventario" => aceptar_inventario_inicial(&opciones),
         "migrar-centinela" => migrar_centinela(&opciones),
         _ => Err(ErrorHerramienta::Uso),
     }
@@ -953,6 +1143,350 @@ fn main() -> Result<(), ErrorHerramienta> {
 ///
 /// Lo que se prueba aqui son las tres formas de negarse, porque son las que
 /// protegen y las que nadie ejecuta a proposito.
+/// Las siete de RPT-105 §7, sobre `aceptar-inventario` (PA-162).
+///
+/// # Lo que esta orden tiene que impedir
+///
+/// La marca de agua de inventario es lo que permite detectar una reversion. Una
+/// herramienta que la establezca mal, o que la vuelva a establecer sobre un
+/// sensor que ya vivio, **sirve el ataque que el centinela existe para
+/// detectar**. Por eso la guarda que mas importa aqui no es la del camino felíz
+/// sino la de la negativa, y por eso cada prueba comprueba **el efecto en disco**
+/// y no el texto del error: RPT-104 §2.1 cuenta como una prueba de guarda paso en
+/// verde estando mal justamente por mirar el mensaje.
+#[cfg(test)]
+mod pruebas_aceptar_inventario {
+    #![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
+
+    use eje_manifiesto::Emisor;
+    use guardian_cc::ClaseExcluida;
+    use guardian_cc::almacen::InventarioLocal;
+    use guardian_cc::arranque::{
+        RutasAlmacen, ancla_de_clave, aprovisionar_clave, cargar_centinela, cargar_clave,
+        serializar_centinela,
+    };
+    use guardian_cc::inventario::{
+        Centinela, DominioClave, ErrorInventario, MarcadoBruto,
+    };
+    use guardian_cc::revocacion::RegistroRevocaciones;
+    use guardian_cc::vlan::{DeclaracionVlan, NaturalezaSegmento};
+    use motor_pqc::secreto::Secreto;
+    use motor_pqc::semilla::{LONGITUD_SEMILLA, SemillaFirma, derivar_verificacion};
+
+    use super::{Centinelas, Opciones, aceptar_inventario_inicial};
+
+    /// Instante fijo: un reloj real haria caducar los marcados a mitad de prueba.
+    const AHORA: u64 = 1_785_888_000;
+
+    /// La semilla de la clave OPERATIVA del almacen.
+    ///
+    /// Es la misma que `aprovisiona` escribe en `clave-cliente.pub`, para que el
+    /// inventario emitido con ella verifique de verdad. Si las dos se separaran,
+    /// el camino feliz fallaria por firma y no se estaria probando nada.
+    const OPERATIVA: u8 = 1;
+
+    fn semilla(byte: u8) -> SemillaFirma {
+        Secreto::nuevo([byte; LONGITUD_SEMILLA])
+    }
+
+    fn almacen(nombre: &str) -> std::path::PathBuf {
+        let ruta = std::env::temp_dir().join(format!(
+            "eje-pa162-{}-{nombre}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&ruta);
+        std::fs::create_dir_all(&ruta).expect("temporal");
+        ruta
+    }
+
+    fn opciones(ruta: &std::path::Path) -> Opciones {
+        Opciones {
+            almacen: Some(ruta.to_path_buf()),
+            ..Opciones::default()
+        }
+    }
+
+    /// Las dos claves publicas, como las deja `generar` + `recuperacion`.
+    fn aprovisiona_las_claves(ruta: &std::path::Path) {
+        for (byte, nombre, dominio) in [
+            (OPERATIVA, "clave-cliente.pub", DominioClave::Cliente),
+            (
+                2u8,
+                "clave-recuperacion.pub",
+                DominioClave::ClienteRecuperacion,
+            ),
+        ] {
+            aprovisionar_clave(
+                &ruta.join(nombre),
+                &derivar_verificacion(semilla(byte)),
+                dominio,
+            )
+            .expect("aprovisiona");
+        }
+    }
+
+    /// Un centinela v4 como el que deja `anclar`: las dos anclas de las claves
+    /// de ESTE almacen, y la marca de inventario que se le pida.
+    ///
+    /// # Por que lee las claves del disco
+    ///
+    /// El primer intento escribia `Centinelas::SIN_ESTABLECER` a secas, y las
+    /// cuatro pruebas que lo usaban cayeron con `CentinelaCorrupto`.
+    /// `analizar_centinela` rechaza un centinela `vacio()` —sin ninguna marca y
+    /// sin ninguna ancla— y tiene razon: 94 bytes que no afirman nada, con el
+    /// magico correcto, serian una forma de falsificar «recien instalado».
+    ///
+    /// Luego `SIN_ESTABLECER` **a secas no es un estado escribible**, y `anclar`
+    /// nunca lo escribe: lo que hace valido al fichero son las anclas. El andamio
+    /// habia inventado un estado que la ceremonia no produce, y arreglarlo hace
+    /// la prueba **mas fiel**, no menos — ahora reproduce el camino de `anclar`
+    /// leyendo las mismas claves del mismo sitio.
+    ///
+    /// Exige que `aprovisiona_las_claves` haya corrido antes, por el mismo orden
+    /// que la ceremonia real.
+    fn centinela_anclado(ruta: &std::path::Path, inventario: Centinela) {
+        let rutas = RutasAlmacen::nuevo(ruta.to_path_buf());
+
+        let operativa = cargar_clave(&rutas.clave_operativa(), DominioClave::Cliente)
+            .expect("la clave operativa se lee")
+            .expect("la clave operativa esta");
+        let recuperacion = cargar_clave(
+            &rutas.clave_recuperacion(),
+            DominioClave::ClienteRecuperacion,
+        )
+        .expect("la de recuperacion se lee")
+        .expect("la de recuperacion esta");
+
+        let centinelas = Centinelas::SIN_ESTABLECER
+            .con_recuperacion(Some(ancla_de_clave(&recuperacion)))
+            .con_operativa(Some(ancla_de_clave(&operativa)))
+            .con_inventario(inventario);
+
+        std::fs::write(ruta.join("centinela.dat"), serializar_centinela(centinelas))
+            .expect("escribe centinela");
+    }
+
+    /// Un inventario de verdad, firmado por `firmante`, con la secuencia dada.
+    fn inventario_firmado(firmante: u8, secuencia: u64) -> Vec<u8> {
+        let emisor = Emisor::desde_semilla(semilla(firmante));
+        emisor
+            .emitir(
+                vec![MarcadoBruto {
+                    mac: [0x00, 0x1B, 0x21, 0x00, 0x00, 0x01],
+                    clase: Some(ClaseExcluida::SoporteVital),
+                    emitido_en: AHORA,
+                    vigencia_dias: 365,
+                }],
+                vec![DeclaracionVlan {
+                    vlan: 10,
+                    naturaleza: NaturalezaSegmento::SinDispositivosCriticos,
+                    emitido_en: AHORA,
+                    vigencia_dias: 365,
+                }],
+                secuencia,
+            )
+            .expect("emite")
+    }
+
+    fn marca_de_inventario(ruta: &std::path::Path) -> Option<u64> {
+        cargar_centinela(&RutasAlmacen::nuevo(ruta.to_path_buf()))
+            .expect("centinela legible")
+            .inventario
+            .secuencia()
+    }
+
+    /// 1. Sin `--almacen` no hay nada que hacer.
+    #[test]
+    fn sin_almacen_es_error_de_uso() {
+        let error = aceptar_inventario_inicial(&Opciones::default())
+            .expect_err("sin almacen no se puede");
+
+        assert!(
+            matches!(&error, super::ErrorHerramienta::Uso),
+            "tiene que ser un error de uso, no de aprovisionamiento: {error}"
+        );
+    }
+
+    /// 2. Sin centinela se niega: el orden de la ceremonia es `anclar` primero.
+    ///
+    /// Un sensor que fecha inventarios sin identidad anclada no sirve de nada, y
+    /// aceptar aqui crearia el centinela **sin anclas**, que es el estado
+    /// permanente que PA-161 cerro.
+    #[test]
+    fn sin_centinela_no_acepta() {
+        let ruta = almacen("sin-centinela");
+        aprovisiona_las_claves(&ruta);
+        std::fs::write(ruta.join("inventario.inv"), inventario_firmado(OPERATIVA, 1))
+            .expect("escribe");
+
+        aceptar_inventario_inicial(&opciones(&ruta)).expect_err("tiene que negarse");
+
+        assert!(
+            !ruta.join("centinela.dat").exists(),
+            "se nego pero creo el centinela: un almacen sin anclas y con marca"
+        );
+
+        let _ = std::fs::remove_dir_all(&ruta);
+    }
+
+    /// 3. **La guarda de reversion.** Con la marca ya establecida, se niega — y no
+    ///    toca el centinela.
+    ///
+    /// Volver a aceptar sobre un sensor que ya vivio bajaria su marca a la del
+    /// fichero presente. Las dos aserciones hacen falta y son distintas: una caza
+    /// «no se nego», la otra «se nego pero escribio igual».
+    #[test]
+    fn con_la_marca_ya_establecida_se_niega_y_no_la_baja() {
+        let ruta = almacen("marca-ya-puesta");
+        aprovisiona_las_claves(&ruta);
+
+        // Este sensor ya vivio: anclado, y con la secuencia 7 aceptada.
+        centinela_anclado(&ruta, Centinela::Establecido(7));
+        let antes = std::fs::read(ruta.join("centinela.dat")).expect("lee");
+
+        // Y se le presenta un inventario legitimo, pero anterior.
+        std::fs::write(ruta.join("inventario.inv"), inventario_firmado(OPERATIVA, 3))
+            .expect("escribe");
+
+        aceptar_inventario_inicial(&opciones(&ruta)).expect_err("tiene que negarse");
+
+        assert_eq!(
+            std::fs::read(ruta.join("centinela.dat")).expect("sigue"),
+            antes,
+            "se nego pero reescribio el centinela"
+        );
+        assert_eq!(
+            marca_de_inventario(&ruta),
+            Some(7),
+            "la marca bajo: es el ataque de reversion servido por la herramienta"
+        );
+
+        let _ = std::fs::remove_dir_all(&ruta);
+    }
+
+    /// 4. Sin clave operativa no hay con que verificar, luego no se acepta.
+    ///
+    /// Se aprovisionan las dos y **se borra** la operativa, en lugar de no
+    /// escribirla: asi el centinela queda anclado y valido, y la unica diferencia
+    /// con el camino feliz es la clave que falta. Es tambien el estado real de un
+    /// sensor que se anclo y luego perdio su clave, que es cuando esto importa.
+    #[test]
+    fn sin_clave_operativa_no_acepta() {
+        let ruta = almacen("sin-operativa");
+        aprovisiona_las_claves(&ruta);
+        centinela_anclado(&ruta, Centinela::SinEstablecer);
+        std::fs::remove_file(ruta.join("clave-cliente.pub")).expect("borra la operativa");
+        std::fs::write(ruta.join("inventario.inv"), inventario_firmado(OPERATIVA, 1))
+            .expect("escribe");
+
+        aceptar_inventario_inicial(&opciones(&ruta)).expect_err("tiene que negarse");
+
+        assert_eq!(
+            marca_de_inventario(&ruta),
+            None,
+            "sin clave con la que verificar, la marca no puede quedar establecida"
+        );
+
+        let _ = std::fs::remove_dir_all(&ruta);
+    }
+
+    /// 5. Un inventario firmado por otra clave **no** establece la marca.
+    ///
+    /// Sembrar un inventario que el agente va a rechazar produce un sensor
+    /// sembrado y roto, y el administrador se enteraria al arrancar en vez de al
+    /// aceptar. Se comprueba la marca, no el mensaje.
+    #[test]
+    fn un_inventario_que_no_verifica_no_establece_la_marca() {
+        let ruta = almacen("firma-ajena");
+        aprovisiona_las_claves(&ruta);
+        centinela_anclado(&ruta, Centinela::SinEstablecer);
+
+        // Firmado con la semilla 9, que no es la operativa de este almacen.
+        std::fs::write(ruta.join("inventario.inv"), inventario_firmado(9, 1))
+            .expect("escribe");
+
+        aceptar_inventario_inicial(&opciones(&ruta)).expect_err("tiene que negarse");
+
+        assert_eq!(
+            marca_de_inventario(&ruta),
+            None,
+            "quedo fechado un inventario que su propio agente rechazaria"
+        );
+
+        let _ = std::fs::remove_dir_all(&ruta);
+    }
+
+    /// 6. El camino feliz: acepta, y la marca queda en la secuencia del fichero.
+    ///
+    /// **Es la prueba que PA-162 hacia imposible.** Antes del cableado no existia
+    /// ningun camino por el que esta marca llegara a establecerse.
+    #[test]
+    fn con_todo_en_su_sitio_acepta_y_establece_la_marca() {
+        let ruta = almacen("camino-feliz");
+        aprovisiona_las_claves(&ruta);
+        centinela_anclado(&ruta, Centinela::SinEstablecer);
+        std::fs::write(ruta.join("inventario.inv"), inventario_firmado(OPERATIVA, 4))
+            .expect("escribe");
+
+        aceptar_inventario_inicial(&opciones(&ruta)).expect("tiene que aceptar");
+
+        assert_eq!(
+            marca_de_inventario(&ruta),
+            Some(4),
+            "acepto pero no dejo la marca en la secuencia del inventario"
+        );
+
+        let _ = std::fs::remove_dir_all(&ruta);
+    }
+
+    /// 7. **Tras aceptar, la reversion se detecta — que es el objetivo de §1.**
+    ///
+    /// Hoy esta comprobacion es inalcanzable: sin marca, `verificar` sale antes
+    /// por `FrescuraNoEstablecida` y nunca compara secuencias. Esta prueba mide
+    /// que despues de `aceptar-inventario` **si** compara, por la ruta del agente.
+    #[test]
+    fn tras_aceptar_una_secuencia_anterior_se_detecta_como_reversion() {
+        let ruta = almacen("reversion-detectable");
+        aprovisiona_las_claves(&ruta);
+        centinela_anclado(&ruta, Centinela::SinEstablecer);
+        std::fs::write(ruta.join("inventario.inv"), inventario_firmado(OPERATIVA, 5))
+            .expect("escribe");
+
+        aceptar_inventario_inicial(&opciones(&ruta)).expect("acepta la 5");
+
+        // Ahora se presenta la 4, legitima y bien firmada, como haria quien
+        // repone un inventario viejo.
+        let anterior = inventario_firmado(OPERATIVA, 4);
+        let marca = cargar_centinela(&RutasAlmacen::nuevo(ruta.clone()))
+            .expect("centinela")
+            .inventario;
+
+        let error = InventarioLocal::cargar(
+            &anterior,
+            &Emisor::desde_semilla(semilla(OPERATIVA)).como_clave_de_cliente(),
+            marca,
+            &RegistroRevocaciones::default(),
+        )
+        .expect_err("una secuencia anterior no puede cargar");
+
+        assert!(
+            matches!(
+                &error,
+                guardian_cc::almacen::ErrorCarga::Verificacion(
+                    ErrorInventario::ReversionDetectada {
+                        aceptada: 5,
+                        presentada: 4
+                    }
+                )
+            ),
+            "la reversion tiene que nombrar las dos secuencias, no salir por frescura: {error}"
+        );
+
+        let _ = std::fs::remove_dir_all(&ruta);
+    }
+}
+
 #[cfg(test)]
 mod pruebas_anclar {
     #![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
@@ -962,7 +1496,7 @@ mod pruebas_anclar {
     use motor_pqc::secreto::Secreto;
     use motor_pqc::semilla::{LONGITUD_SEMILLA, SemillaFirma, derivar_verificacion};
 
-    use super::{Opciones, anclar};
+    use super::{ErrorHerramienta, Opciones, anclar};
 
     /// Aprovisiona las dos claves publicas del almacen, como hace la ceremonia.
     ///
@@ -1046,6 +1580,39 @@ mod pruebas_anclar {
         );
 
         let _ = std::fs::remove_dir_all(&ruta);
+    }
+
+    /// La linea de uso nombra `aceptar-inventario`.
+    ///
+    /// # PA-167, y esta prueba es parte del problema
+    ///
+    /// `cargo xtask manual` compara `docs/Comandos.md` con las ordenes de
+    /// **xtask**, no con las de esta herramienta. Asi que cuando se cableo
+    /// `aceptar-inventario` en el despacho, la barrera siguio diciendo «12
+    /// ordenes, todas documentadas» **en verde**, y la orden quedo existiendo sin
+    /// aparecer en la linea de uso: la forma exacta de PA-122, cuando
+    /// `--directorio-socket` se anadio al analizador y no al uso y estuvo un dia
+    /// siendo una opcion que nadie podia descubrir.
+    ///
+    /// Lo cazo una **prediccion fallida**: se predijo que el manual pasaria de 12
+    /// a 13 ordenes. Al salir 12 y en verde, la pregunta «por que no subio» llevo
+    /// al hueco. Si se hubiera predicho 12, el verde habria confirmado un modelo
+    /// falso y la orden se habria entregado indescubrible.
+    ///
+    /// Esta prueba es una mas por orden, escrita a mano, como las que ya hay para
+    /// `migrar-centinela`. **Es la decimocuarta lista a mano de la serie y no
+    /// arregla nada estructural:** la orden decimocuarta volvera a poder entrar
+    /// sin prueba. El arreglo de verdad es una tabla `ORDENES` en esta
+    /// herramienta, con el despacho derivado de ella, como la tiene xtask — y eso
+    /// es PA-167.
+    #[test]
+    fn la_linea_de_uso_nombra_aceptar_inventario() {
+        let texto = ErrorHerramienta::Uso.to_string();
+
+        assert!(
+            texto.contains("aceptar-inventario"),
+            "una orden que no sale en el uso es una orden que nadie descubre: {texto}"
+        );
     }
 
     /// Y con las dos claves y sin centinela, **si** ancla.

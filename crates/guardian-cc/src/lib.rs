@@ -4152,28 +4152,63 @@ mod pruebas {
         assert_eq!(marcado.clase(), Some(ClaseExcluida::SoporteVital));
     }
 
+    /// El centinela se escribe **antes** que el inventario.
+    ///
+    /// Si el proceso muere entre ambas escrituras queda centinela en N e
+    /// inventario anterior en disco; al rearrancar, el nuevo se vuelve a
+    /// presentar con `secuencia == aceptada`, que RPT-012 §4.4 admite porque
+    /// eligio `<` y no `<=`. Al reves se actuaria sobre un inventario cuya
+    /// secuencia no quedo registrada, **reabriendo la ventana de reversion**.
+    ///
+    /// # PA-168 — esta prueba no comprobaba nada
+    ///
+    /// Hasta el 24 de octubre de 2026 su cuerpo escribia el centinela **a mano**
+    /// con `escribir_atomico`, comprobaba que se podia releer, y comprobaba que
+    /// `inventario.inv` —que nadie habia creado— no existia. **No llamaba a
+    /// `aceptar_inventario`.** Habria pasado en verde con esa funcion escrita del
+    /// reves, reescrita de cualquier forma, o borrada: afirmaba que
+    /// `escribir_atomico` funciona y que un fichero que no se creo no esta.
+    ///
+    /// Es PA-154 en su forma mas pura —una prueba que verifica QUE algo se dice y
+    /// no QUE se diga lo correcto— con el nombre de la propiedad que no medía, en
+    /// la funcion que PA-162 acababa de cablear a produccion.
+    ///
+    /// # Como se mide el orden de verdad
+    ///
+    /// Haciendo imposible la **segunda** escritura: `escribir_atomico` renombra
+    /// sobre la ruta de destino, y renombrar sobre un directorio falla en Linux y
+    /// en Windows. Entonces el orden se vuelve observable en disco:
+    ///
+    /// - Orden correcto → el centinela ya esta en N cuando la segunda falla.
+    /// - Orden invertido → la primera escritura falla y **el centinela no se
+    ///   toca**, con lo que `cargar_centinela` devuelve `SinEstablecer` y esta
+    ///   prueba cae.
+    ///
+    /// Que es lo que debe pasar: la perturbacion de invertir el orden tiene que
+    /// poner algo rojo, y hasta hoy no ponia nada.
     #[test]
     fn el_centinela_se_escribe_antes_que_el_inventario() {
-        // Si el proceso muriera entre ambas escrituras, el centinela ya estaria
-        // en N. Se comprueba el orden observando el estado tras la primera.
         let almacen = AlmacenDePrueba::nuevo("orden-de-escritura");
+        let banco = banco(DominioClave::Cliente);
 
-        disco::escribir_atomico(
-            &almacen.rutas.centinela(),
-            &serializar_centinela(
-                Centinelas::SIN_ESTABLECER.con_inventario(Centinela::Establecido(9)),
-            ),
-        )
-        .expect("escritura del centinela");
+        std::fs::create_dir(almacen.rutas.inventario())
+            .expect("un directorio en la ruta del inventario");
+
+        let resultado = aceptar_inventario(&almacen.rutas, &bytes_en_disco(&banco), 9);
+
+        assert!(
+            resultado.is_err(),
+            "con la ruta del inventario ocupada por un directorio, aceptar no puede \
+             declararse completo"
+        );
 
         assert_eq!(
             cargar_centinela(&almacen.rutas).expect("releer").inventario,
             Centinela::Establecido(9),
-            "el centinela debe quedar en disco aunque el inventario no haya llegado"
-        );
-        assert!(
-            !almacen.rutas.inventario().exists(),
-            "el inventario aun no se escribio"
+            "el centinela tenia que estar ya en disco cuando la escritura del \
+             inventario fallo; si sale «sin establecer», el orden esta invertido y \
+             hay una ventana en la que se actua sobre un inventario cuya secuencia \
+             no consta"
         );
     }
 

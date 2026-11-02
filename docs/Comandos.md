@@ -400,9 +400,59 @@ eje-manifiesto emitir       --semilla <fichero> --entrada <toml> --salida <inv> 
 eje-manifiesto configurar   --semilla <fichero> --entrada <toml> --salida <cfg> [--anterior <cfg>]
 eje-manifiesto recuperacion --fragmentos <prefijo> --almacen <directorio>
 eje-manifiesto revocar      --fragmento-uno <frg> --fragmento-dos <frg> --almacen <dir> --sucesora <pub> --corte <n>
-eje-manifiesto anclar           --almacen <directorio>
-eje-manifiesto migrar-centinela --almacen <directorio>
+eje-manifiesto anclar              --almacen <directorio>
+eje-manifiesto aceptar-inventario  --almacen <directorio>
+eje-manifiesto migrar-centinela    --almacen <directorio>
 ```
+
+**`aceptar-inventario`** establece la marca de agua del **primer** inventario de
+un almacén recién aprovisionado (PA-162). Es el sexto y último paso de la
+ceremonia, después de `anclar`.
+
+Sin él, un sensor aprovisionado desde cero **no puede aceptar un inventario
+jamás**. La única función que avanza esa marca no tenía llamador en producción, y
+con la marca en «sin establecer» la verificación sale por «no hay centinela de
+frescura» **antes** de comparar firma o secuencia. Los dos caminos estaban
+cerrados: con `inventario.inv` colocado a mano, eso para siempre; sin colocarlo,
+primer arranque para siempre, porque el inventario no tenía por dónde llegar.
+Ningún sensor real alcanzaba `Operativo`. Lo encontró el laboratorio de RUA en su
+primera calma.
+
+**Lo hace la ceremonia y no el agente**, y ésta es la parte que importa. Para
+fechar un inventario hace falta una marca, y para tener una marca hace falta
+haber aceptado un inventario; el primero no tiene contra qué compararse. Así que
+la pregunta no es cómo saltarse la comprobación sino **quién tiene autoridad para
+decir «éste es el primero»** — porque quien la tenga puede introducir cualquier
+inventario firmado sin que nada lo feche.
+
+Si fuera el agente, aceptando lo que encuentre al arrancar, entonces borrar el
+centinela y plantar un inventario viejo y bien firmado sería un ataque de
+reversión que funciona. El administrador que acaba de generar las claves, emitir
+el inventario y anclar la identidad **ya es** esa autoridad y está delante: no se
+añade ninguna autoridad nueva al sistema, se usa la que existe en el único
+momento en que existe. Es la misma decisión que PA-150 tomó para las anclas.
+
+**Se niega si la marca ya está establecida.** Volver a aceptar sobre un sensor
+que ya vivió la bajaría a la del fichero presente, que es exactamente el ataque
+de reversión. Y **se niega si no hay centinela**: un sensor que fecha inventarios
+sin identidad anclada no sirve de nada, y el orden de la ceremonia es `anclar`
+primero.
+
+Verifica el inventario **por la ruta del agente** antes de tocar nada — firma de
+raíz, dominio de clave, revocación, inclusión, duplicados— así que un inventario
+que el sensor rechazaría no llega a aceptarse. Si no verifica, se sale sin haber
+escrito el centinela: un sensor con la marca puesta y un inventario que su propio
+agente rechaza es peor que uno sin marca, porque el administrador se enteraría al
+arrancar en vez de al aceptar.
+
+Pide también la clave de recuperación, y no por simetría con `anclar`: sin ella
+no se pueden leer certificados de revocación, y entonces una clave operativa
+revocada pasaría por buena.
+
+Actualizar el inventario de un sensor que ya vive **todavía no tiene camino
+propio** y exige volver a la ceremonia (PA-164): el IPC no autentica al llamante,
+así que un canal de escritura entregaría esta misma autoridad a cualquier proceso
+del grupo del socket.
 
 **`anclar`** escribe el centinela **inicial** de un almacén recién aprovisionado
 (PA-161). Lee las dos claves públicas de ese almacén, calcula sus anclas y

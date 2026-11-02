@@ -303,3 +303,48 @@ y buena**, y lleva siete semanas esperando a que alguien mire.
   y arrancar su construcción.
 - Retirar o consolidar la rama `Principal`, con el empujón forzado que eso exige,
   como decisión deliberada y no de pasada.
+
+---
+
+## 8. Enmienda del 24-oct — la predicción de §7 falló, y una afirmación se retira
+
+### 8.1 Lo que salió
+
+`run #1` corrió y salió **roja**: siete de nueve trabajos en verde —y son nueve, no
+cinco como decía §7; se leyó el principio de `ci.yml` y se extrapoló— con
+`Pruebas (ubuntu-latest)` en 101 y `Pruebas (windows-latest)` en 1.
+
+Leída la suite completa con `--no-fail-fast`, **el rojo tenía una sola causa y era de dos
+días antes**: el arreglo de PA-166 (§4.1) acotó dos pruebas a POSIX, y
+`xtask/cobertura.rs` afirma cuántas pruebas condicionadas tiene el árbol y en qué crates
+viven. Disparó haciendo su trabajo. Cifra actualizada a cuatro a propósito, con el sitio
+nuevo y su motivo registrados; la comprobación del sitio **no** se relajó a «donde sea»,
+que la habría convertido en un contador.
+
+Es la tercera barrera de este reporte validada por uso y no por una perturbación
+fabricada, tras la de los estados del eco y PA-153.
+
+### 8.2 La afirmación que se retira
+
+Al ver el rojo se dijo —en los mensajes al equipo, y de ahí al reporte de estado de RUA,
+que lo recogió como hecho medido— que **«al menos una parte de lo medido antes de RUA está
+directamente en rojo»**. **Es falso y se retira.**
+
+El árbol entero pasa: `guardian-cc` 182, `motor-pqc` 21 más ACVP 4, Wycheproof 2,
+diferencial 7 y vectores 3, `eje-ipc` 30, `eje-vigia` 35, `eje-almacen` 35, `eje-captura`
+15, `eje-red` 4, `eje-manifiesto` 46+11, `eje-agente` 105+31+3, `xtask` 109.
+
+Lo que **sí** es cierto, y se mantiene: CI no corrió durante 77 días y nadie lo sabía.
+De eso no se sigue que lo medido estuviera mal. **Colapsar «no se sabía» con «está mal» es
+el mismo error triestado que §1 celebra haber arreglado en el agente** —nueve causas bajo
+una frase— cometido en la prosa de este reporte y difundido a un equipo que lo escribió
+en su propio documento.
+
+El error se deja escrito y no se borra, por lo mismo que PA-151 conserva su fila: quien
+lea el §7 del reporte de RUA y busque de dónde salió aquella frase tiene que encontrar por
+qué no está, y no un silencio.
+
+### 8.3 Por qué PA-165 sigue abierto
+
+§3.2 escribió el criterio: ver la primera ejecución real **en verde**. La que se observó
+salió roja. Se cierra con la siguiente, y no reinterpretando qué significaba «observar».
