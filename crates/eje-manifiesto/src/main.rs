@@ -38,9 +38,9 @@ use guardian_cc::arranque::{
     Centinelas, RutasAlmacen, aceptar_inventario, ancla_de_clave, aprovisionar_clave,
     cargar_centinela, cargar_clave, cargar_revocaciones, serializar_centinela,
 };
-use guardian_cc::formato::analizar;
 use guardian_cc::clave::analizar as analizar_clave;
 use guardian_cc::configuracion;
+use guardian_cc::formato::analizar;
 use guardian_cc::inventario::{Centinela, DominioClave};
 use guardian_cc::revocacion::{
     Anotacion, ArchivoRevocaciones, CertificadoRevocacion, mensaje_de_certificado,
@@ -921,11 +921,10 @@ fn aceptar_inventario_inicial(opciones: &Opciones) -> Result<(), ErrorHerramient
         });
     }
 
-    let centinelas = cargar_centinela(&rutas).map_err(|error| {
-        ErrorHerramienta::Aprovisionamiento {
+    let centinelas =
+        cargar_centinela(&rutas).map_err(|error| ErrorHerramienta::Aprovisionamiento {
             detalle: format!("{}: {error}", rutas.centinela().display()),
-        }
-    })?;
+        })?;
 
     // **La guarda de reversion.** Volver a aceptar sobre un sensor que ya vivio
     // bajaria su marca a la del inventario que haya en disco, y eso es el ataque
@@ -964,12 +963,11 @@ fn aceptar_inventario_inicial(opciones: &Opciones) -> Result<(), ErrorHerramient
         detalle: error.to_string(),
     })?;
 
-    let revocaciones =
-        cargar_revocaciones(&rutas, recuperacion.as_ref()).map_err(|error| {
-            ErrorHerramienta::Aprovisionamiento {
-                detalle: error.to_string(),
-            }
-        })?;
+    let revocaciones = cargar_revocaciones(&rutas, recuperacion.as_ref()).map_err(|error| {
+        ErrorHerramienta::Aprovisionamiento {
+            detalle: error.to_string(),
+        }
+    })?;
 
     let bytes = leer(&rutas.inventario())?;
 
@@ -977,7 +975,10 @@ fn aceptar_inventario_inicial(opciones: &Opciones) -> Result<(), ErrorHerramient
     // dentro de `anclada`, que la firma cubre: si esta mentida, `cargar` falla.
     let declarada = analizar(&bytes)
         .map_err(|error| ErrorHerramienta::Aprovisionamiento {
-            detalle: format!("{} no se puede analizar: {error}", rutas.inventario().display()),
+            detalle: format!(
+                "{} no se puede analizar: {error}",
+                rutas.inventario().display()
+            ),
         })?
         .anclada
         .secuencia;
@@ -1165,9 +1166,7 @@ mod pruebas_aceptar_inventario {
         RutasAlmacen, ancla_de_clave, aprovisionar_clave, cargar_centinela, cargar_clave,
         serializar_centinela,
     };
-    use guardian_cc::inventario::{
-        Centinela, DominioClave, ErrorInventario, MarcadoBruto,
-    };
+    use guardian_cc::inventario::{Centinela, DominioClave, ErrorInventario, MarcadoBruto};
     use guardian_cc::revocacion::RegistroRevocaciones;
     use guardian_cc::vlan::{DeclaracionVlan, NaturalezaSegmento};
     use motor_pqc::secreto::Secreto;
@@ -1299,8 +1298,8 @@ mod pruebas_aceptar_inventario {
     /// 1. Sin `--almacen` no hay nada que hacer.
     #[test]
     fn sin_almacen_es_error_de_uso() {
-        let error = aceptar_inventario_inicial(&Opciones::default())
-            .expect_err("sin almacen no se puede");
+        let error =
+            aceptar_inventario_inicial(&Opciones::default()).expect_err("sin almacen no se puede");
 
         assert!(
             matches!(&error, super::ErrorHerramienta::Uso),
@@ -1317,8 +1316,11 @@ mod pruebas_aceptar_inventario {
     fn sin_centinela_no_acepta() {
         let ruta = almacen("sin-centinela");
         aprovisiona_las_claves(&ruta);
-        std::fs::write(ruta.join("inventario.inv"), inventario_firmado(OPERATIVA, 1))
-            .expect("escribe");
+        std::fs::write(
+            ruta.join("inventario.inv"),
+            inventario_firmado(OPERATIVA, 1),
+        )
+        .expect("escribe");
 
         aceptar_inventario_inicial(&opciones(&ruta)).expect_err("tiene que negarse");
 
@@ -1346,8 +1348,11 @@ mod pruebas_aceptar_inventario {
         let antes = std::fs::read(ruta.join("centinela.dat")).expect("lee");
 
         // Y se le presenta un inventario legitimo, pero anterior.
-        std::fs::write(ruta.join("inventario.inv"), inventario_firmado(OPERATIVA, 3))
-            .expect("escribe");
+        std::fs::write(
+            ruta.join("inventario.inv"),
+            inventario_firmado(OPERATIVA, 3),
+        )
+        .expect("escribe");
 
         aceptar_inventario_inicial(&opciones(&ruta)).expect_err("tiene que negarse");
 
@@ -1377,8 +1382,11 @@ mod pruebas_aceptar_inventario {
         aprovisiona_las_claves(&ruta);
         centinela_anclado(&ruta, Centinela::SinEstablecer);
         std::fs::remove_file(ruta.join("clave-cliente.pub")).expect("borra la operativa");
-        std::fs::write(ruta.join("inventario.inv"), inventario_firmado(OPERATIVA, 1))
-            .expect("escribe");
+        std::fs::write(
+            ruta.join("inventario.inv"),
+            inventario_firmado(OPERATIVA, 1),
+        )
+        .expect("escribe");
 
         aceptar_inventario_inicial(&opciones(&ruta)).expect_err("tiene que negarse");
 
@@ -1403,8 +1411,7 @@ mod pruebas_aceptar_inventario {
         centinela_anclado(&ruta, Centinela::SinEstablecer);
 
         // Firmado con la semilla 9, que no es la operativa de este almacen.
-        std::fs::write(ruta.join("inventario.inv"), inventario_firmado(9, 1))
-            .expect("escribe");
+        std::fs::write(ruta.join("inventario.inv"), inventario_firmado(9, 1)).expect("escribe");
 
         aceptar_inventario_inicial(&opciones(&ruta)).expect_err("tiene que negarse");
 
@@ -1426,8 +1433,11 @@ mod pruebas_aceptar_inventario {
         let ruta = almacen("camino-feliz");
         aprovisiona_las_claves(&ruta);
         centinela_anclado(&ruta, Centinela::SinEstablecer);
-        std::fs::write(ruta.join("inventario.inv"), inventario_firmado(OPERATIVA, 4))
-            .expect("escribe");
+        std::fs::write(
+            ruta.join("inventario.inv"),
+            inventario_firmado(OPERATIVA, 4),
+        )
+        .expect("escribe");
 
         aceptar_inventario_inicial(&opciones(&ruta)).expect("tiene que aceptar");
 
@@ -1450,8 +1460,11 @@ mod pruebas_aceptar_inventario {
         let ruta = almacen("reversion-detectable");
         aprovisiona_las_claves(&ruta);
         centinela_anclado(&ruta, Centinela::SinEstablecer);
-        std::fs::write(ruta.join("inventario.inv"), inventario_firmado(OPERATIVA, 5))
-            .expect("escribe");
+        std::fs::write(
+            ruta.join("inventario.inv"),
+            inventario_firmado(OPERATIVA, 5),
+        )
+        .expect("escribe");
 
         aceptar_inventario_inicial(&opciones(&ruta)).expect("acepta la 5");
 
