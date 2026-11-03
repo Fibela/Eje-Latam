@@ -178,3 +178,88 @@ Se registra porque es el tercer episodio del mismo error en esta línea de traba
 cometió el asistente, no el equipo. **La regla que lo evita no es «desconfía del
 verde ajeno», es: ningún estado entra en un razonamiento sin que alguien haya leído
 la corrida que lo afirma.**
+
+---
+
+## 11. Addendum tras CI #4 — lo medido después de publicar
+
+### 11.1 CI #4 (`150c878`): ocho de nueve, mismo trabajo rojo
+
+Verde: `Formato`, `Análisis estático`, `Pruebas` (ubuntu y windows), `Implementaciones
+inconclusas`, `Índices derivados`, `Secretos expuestos`, `SBOM`.
+Rojo: **`Licencias y vulnerabilidades`**, 58 s. Idéntica forma que #3.
+
+**El arreglo de §4 no es atribuible.** `bans` pudo quedar corregido y fallar
+`licenses` o `advisories` encima, o `bans` puede seguir fallando por otra causa.
+Sin el registro no se distingue, y no se razona por encima de una medición que falta.
+
+Acotado en local, sin `cargo`:
+
+- **No hay ninguna versión con comodín** → `wildcards = "deny"` está satisfecho.
+- **Ningún crate de licencia no permitida de los habituales** está en el árbol.
+- `shlex` está en 1.3.0 y 2.0.1; **1.3.0 ya es la versión corregida** de su aviso.
+
+Queda como candidato principal una **retirada entre los crates muy nuevos**
+—`core-models 0.0.7`, `shake 0.1.0`, `sponge-cursor 0.1.0`, la familia
+`libcrux-* 0.0.x`, `ml-dsa 0.1.1`— bajo `yanked = "deny"`. **Es hipótesis, no
+medición.**
+
+### 11.2 Corrección a §4: la acción no puede leer `rust-toolchain.toml`
+
+Medido sobre `action.yml` de `dtolnay/rust-toolchain`: el campo `toolchain` es
+`required: true` y el primer paso **aborta explícitamente** si llega vacío
+(`"'toolchain' is a required input"`, exit 1). La acción **no** lee
+`rust-toolchain.toml`.
+
+Eso descarta la solución aparentemente obvia —dejar el fichero como fuente única y
+que la acción lo obedezca—: habría puesto CI en rojo en los seis trabajos.
+
+**Consecuencia nueva, más concreta que «el fichero miente».** La acción ejecuta
+`rustup toolchain install stable` y `rustup default stable`, y publica como salida
+`cachekey` el hash de **rustc stable**. `Swatinem/rust-cache@v2` indexa con eso.
+Después, `cargo` en el directorio encuentra `rust-toolchain.toml`, y rustup
+**autoinstala 1.85** para obedecerlo. Resultado:
+
+1. Se descarga un toolchain de más en cada trabajo.
+2. **La clave de caché describe un toolchain que no es el que compila.**
+
+Así que el defecto no es sólo documental: cuesta descargas y degrada la caché.
+
+**Forma del arreglo, verificada:**
+
+```yaml
+- uses: dtolnay/rust-toolchain@master
+  with:
+    toolchain: "1.85"
+```
+
+`dtolnay/rust-toolchain@1.85.0` **no existe** como etiqueta (comprobado contra el
+API de refs), de modo que `@master` es la única vía — y es una referencia
+flotante, la misma clase de problema que el `@v2` de `cargo-deny-action`. Conviene
+fijarla a un SHA.
+
+### 11.3 Por qué no se aplicó
+
+**CI está en rojo por una causa que no se ha leído.** Tocar los seis trabajos que
+hoy están verdes crearía un segundo rojo sin explicar y haría imposible atribuir
+cualquiera de los dos. Es el modo de fallo que §10 describe, cometido a sabiendas.
+
+El arreglo entra **después** de que el registro de `cargo-deny` esté leído y la
+compuerta tenga una causa con nombre. Y la pregunta de fondo —1.85, `stable` o el
+1.97.0 de §6— es una decisión del equipo, no una consecuencia técnica de esto.
+
+### 11.4 Corrección a §7.2: son tres nombres de rama, no dos
+
+§7.2 decía que la rama por defecto es `Origen` y la viva `principal`. Incompleto.
+`ci.yml` §6–14 documenta un tercero:
+
+- **`principal`** (minúscula) — donde vive el desarrollo.
+- **`Principal`** (mayúscula) — **commit raíz HUÉRFANO** del 4 de agosto (LICENSE,
+  README y RPT-002, sin antepasado común con el trabajo). Durante **77 días** el
+  workflow sólo nombraba este, y por eso **no se ejecutó ni una vez sobre los 67
+  commits siguientes**. Es la causa original de PA-165.
+- **`Origen`** — la rama por defecto en GitHub, que RPT-002 §2.1 retiró.
+
+El workflow nombra hoy los dos primeros a propósito, con el argumento correcto:
+*«una barrera que depende de la mayúscula de un nombre no es una barrera»*.
+Consolidar los nombres sigue pendiente, y ahora son tres.
