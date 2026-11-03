@@ -72,11 +72,42 @@ wildcards = "deny"
 highlight = "all"
 
 # Crates prohibidos en la ruta de produccion.
+#
+# Lo que se prohibe son GENERADORES no criptograficos, no el crate de rasgos.
+#
+# La regla anterior era `{ crate = "rand_core", wrappers = ["rand"] }`, y estaba
+# mal especificada: `rand_core` no genera nada, define los rasgos `RngCore` y
+# `CryptoRng`. Depender de el es la forma en que el ecosistema RustCrypto acepta
+# un CSPRNG de manera generica, y es lo que hacen `ml-kem`, `signature`,
+# `x25519-dalek`, `chacha20` y nuestros propios `motor-pqc` y `guardian-cc`.
+# Quince crates del grafo dependen de `rand_core` y solo `rand` estaba
+# permitido: trece violaciones, ningun peligro real atrapado. La compuerta
+# llevaba fallando desde que se anadio la regla, oculta tras otros rojos.
+#
+# Ninguno de los crates de abajo esta hoy en el arbol (verificado contra
+# Cargo.lock). La lista es una barrera hacia adelante, no un arreglo.
 deny = [
-    # Generadores de aleatoriedad no criptograficos: prohibidos en un producto
-    # de seguridad, donde el uso accidental en material de clave es catastrofico.
-    { crate = "rand_core", wrappers = ["rand"], reason = "usar solo a traves de rand con backend criptografico" },
+    { crate = "fastrand", reason = "generador no criptografico; catastrofico en material de clave" },
+    { crate = "oorandom", reason = "generador no criptografico; catastrofico en material de clave" },
+    { crate = "rand_pcg", reason = "generador no criptografico; catastrofico en material de clave" },
+    { crate = "rand_xorshift", reason = "generador no criptografico; catastrofico en material de clave" },
+    { crate = "rand_hc", reason = "generador no criptografico; catastrofico en material de clave" },
+    { crate = "rand_isaac", reason = "generador no criptografico; catastrofico en material de clave" },
+    { crate = "nanorand", reason = "generador no criptografico; catastrofico en material de clave" },
 ]
+
+# PENDIENTE — no cubierto por esta regla:
+#
+# 1. `SmallRng` vive dentro de `rand`, que es una dependencia legitima. Ninguna
+#    regla de cargo-deny lo atrapa. Queda para revision de codigo o lint.
+# 2. La proliferacion de versiones de `rand_core` —hoy tres en el arbol: 0.6.4,
+#    0.9.5 y 0.10.1— es el peligro que RPT-011 §4, RPT-025 §2 y RPT-086 §3
+#    documentan como coste real, y sigue siendo solo `warn` (linea 70).
+#    Endurecerlo exige unificar el arbol primero, y esa decision pertenece a
+#    PA-18 (fuente de aleatoriedad: DRBG conforme al NIST), aun abierto.
+#
+# Esta regla no cierra PA-18 ni la cuestion de versiones. Solo deja de bloquear
+# trece usos correctos.
 
 # `openssl-sys` obliga a enlazar OpenSSL del sistema y complica la reproducibilidad
 # del build y el SBOM. Se prefiere rustls.
