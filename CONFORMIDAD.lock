@@ -7,7 +7,7 @@
 # Ata QUE se probo, no QUE se probo (RPT-005 §9.4). Componer esta huella
 # sin ejecutar nada es posible; cerrarlo es el alcance de PA-14.
 
-canal  1.85
+canal  1.88
 fuentes  ba952b06681b9caa919fe278548601be4542d14abd1f950fdc0573627070ef49
 
 paquete  aes-gcm  0.10.3
@@ -25,4 +25,4 @@ paquete  thiserror  2.0.19
 paquete  x25519-dalek  2.0.1
 paquete  zeroize  1.9.0
 
-huella  9287eb09291d669990be20c9dd3c22e8afd899f4a62bce07e6a637486ec94b77
+huella  c42782231ca69f64f8a98f6f84e62cec2493c7abf1b268710df46e829545731d
