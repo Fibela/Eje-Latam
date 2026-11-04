@@ -23,7 +23,12 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+# 1.88 lo fija una medicion, no una preferencia: toda version corregida de
+# `ctutils` (>=0.4.4, RUSTSEC-2026-0385) exige rustc 1.87, y `cargo-deny`
+# 0.20.2 --la que corre CI via @v2-- exige 1.88. 1.88 es el numero mas bajo
+# que permite a la vez remediar la vulnerabilidad y correr la compuerta en
+# local con la misma version que CI. Ver RPT-110 §11.
+rust-version = "1.88"
 license = "Apache-2.0"
 repository = "https://github.com/Fibela/Eje-Latam"
 authors = ["PremosCorp"]

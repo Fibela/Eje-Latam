@@ -1,5 +1,9 @@
 [toolchain]
-channel = "1.85"
+# Debe coincidir con `rust-version` de [workspace.package] en Cargo.toml.
+# Son dos sitios porque cada uno sirve a una herramienta distinta --el
+# resolutor de cargo y rustup-- y `dtolnay/rust-toolchain` no lee este
+# fichero: su campo `toolchain` es obligatorio. Ver RPT-110 §11.
+channel = "1.88"
 components = ["rustfmt", "clippy", "llvm-tools-preview"]
 targets = [
     "x86_64-unknown-linux-gnu",

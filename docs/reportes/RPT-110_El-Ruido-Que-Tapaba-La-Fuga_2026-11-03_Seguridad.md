@@ -209,3 +209,74 @@ Los tres comparten forma: **una medición que no mide lo que uno cree, aceptada
 porque su resultado encajaba con la hipótesis de turno.** Es el mismo defecto que
 §5 describe en el `deny.toml`, cometido sobre el diagnóstico en lugar de sobre la
 configuración.
+
+---
+
+## 11. Addendum — el pin del toolchain impedía remediar la vulnerabilidad
+
+`cargo update -p ctutils` **no hizo nada**, y lo dijo:
+
+```
+Locking 0 packages to latest Rust 1.85 compatible versions
+```
+
+El resolutor de cargo respeta `rust-version = "1.85"` de `[workspace.package]`.
+Medido contra el registro:
+
+| Versiones de `ctutils` | `rust-version` exigida |
+|---|---|
+| 0.4.8 … 0.4.3 | **1.87** |
+| 0.4.2 y anteriores | 1.85 |
+
+El corte cae exactamente entre 0.4.3 y 0.4.2. Y el aviso se corrige en **0.4.4**.
+
+> **No existe una versión corregida compatible con 1.85. El pin del toolchain
+> impedía remediar una fuga de canal lateral temporal en el motor poscuántico.**
+
+Lo que RPT-109 §4 describió como «la compuerta no mide lo que declara», y §11.2
+como «no se puede compilar la propia compuerta», era el mismo defecto visto desde
+dos ángulos benignos. Éste es el tercero y no es benigno: **el pin estaba
+bloqueando un arreglo de seguridad, en silencio, con un mensaje que nadie leyó
+como un bloqueo.**
+
+### 11.1 Por qué 1.88 y no 1.87
+
+| Exigencia | Versión mínima |
+|---|---|
+| `ctutils` >= 0.4.4 (remediar RUSTSEC-2026-0385) | 1.87 |
+| `cargo-deny` 0.20.2 — la que CI corre vía `@v2` | 1.88 |
+
+**1.88 es el número más bajo que permite a la vez remediar la vulnerabilidad y
+correr la compuerta en local con la misma versión que CI**, que es la disciplina de
+pre-commit que RPT-003 §9.4 exige y que con 1.85 era imposible de cumplir.
+
+Son **tres releases**, no las doce del `1.97.0` que circulaba sin respaldo
+documental. El número sale de dos mediciones, no de una preferencia.
+
+Nota de crédito: la propuesta de mover el toolchain venía de RUA, y este reporte
+criticó el `1.97.0` por no aparecer en ningún fichero del repositorio. Esa crítica
+era correcta sobre el número y equivocada sobre el fondo: **el pin sí tenía que
+moverse, y por una razón más urgente que el housekeeping.**
+
+### 11.2 El riesgo del bump, y cómo se acota
+
+`RUSTFLAGS: "-D warnings"` y `cargo clippy -- -D warnings` significan que cada
+release de Rust puede añadir lints que tiñan `Analisis estatico`. Tres releases es
+una superficie pequeña, pero no nula.
+
+Se acota corriendo la compuerta completa en local **antes** de empujar: `fmt`,
+`clippy -D warnings`, la suite entera y `cargo deny check`. Si clippy encuentra algo,
+es trabajo real y va en su propio commit, separado del bump.
+
+### 11.3 Dos sitios, a propósito
+
+`rust-version` en `[workspace.package]` y `channel` en `rust-toolchain.toml` dicen
+ahora lo mismo, y §8.1 señalaba que dos sitios para una decisión es un problema. Se
+mantienen los dos porque **sirven a herramientas distintas**: el primero gobierna el
+resolutor de cargo —que es quien bloqueó el `update`— y el segundo gobierna rustup.
+No se pueden unificar: `dtolnay/rust-toolchain` **no lee** el segundo, porque su
+campo `toolchain` es obligatorio y aborta si llega vacío (RPT-109 §11.2).
+
+Quedan documentados en ambos ficheros con la obligación de coincidir. Es la clase de
+invariante que merece una prueba en `cargo xtask verificar`, y se deja anotado como
+tal sin abrir punto todavía.
