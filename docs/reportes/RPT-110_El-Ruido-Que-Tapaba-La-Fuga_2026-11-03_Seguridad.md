@@ -1,0 +1,211 @@
+# RPT-110 — El ruido que tapaba la fuga
+
+| | |
+|---|---|
+| **Tema** | El ruido que tapaba la fuga |
+| **Número** | 110 |
+| **Fecha** | 2026-11-03 |
+| **Área designada** | Seguridad |
+| **Abre** | — |
+| **Cierra** | — (PA-165 cierra con la corrida entera en verde; falta el bump de `ctutils`) |
+| **Precedentes** | RPT-109 (la barrera que prohibía lo correcto), RPT-106, RPT-086 §3, RPT-003 §2.7 y §9.4, RPT-005 §7.4 |
+
+---
+
+## 1. El hallazgo, en una frase
+
+**`cargo deny` llevaba días reportando una vulnerabilidad de canal lateral temporal
+bajo el motor poscuántico, y nadie podía leerla porque dos reglas mal
+especificadas del mismo trabajo la ahogaban en ruido.**
+
+```
+advisories FAILED, bans FAILED, licenses ok, sources ok
+```
+
+## 2. La fuga: RUSTSEC-2026-0385
+
+`ctutils 0.4.2` — *«Non-constant-time mask generation and `u128` comparisons»*.
+
+`ctutils::Choice` genera máscaras con funciones `const fn`, que por serlo **no
+pueden reusar la generación de máscara respaldada por `asm!` del crate `cmov`**,
+que es la que garantiza el tiempo constante. En versiones anteriores a 0.4.4 el
+código generado **podía incluir un salto en plataformas de uso común**. Además las
+comparaciones de `u128` vía `ctutils::Choice`, pensadas para tiempo constante,
+generaban saltos en objetivos de 32 bits.
+
+Impacto, del propio aviso: *«Branch instructions on secret values can potentially
+leak such values via covert channels.»*
+
+### Dónde está
+
+```
+ctutils 0.4.2
+└── hybrid-array 0.4.14
+    ├── block-buffer 0.12.1 → digest 0.11.3 → sha3 0.11.0 → ml-kem 0.3.2 ─┐
+    │                                         shake 0.1.0 → ml-dsa 0.1.1 ─┤
+    │                                         signature 3.0.0 → ml-dsa ───┤
+    ├── crypto-common 0.2.2 → kem 0.3.0 → ml-kem ────────────────────────┼─> motor-pqc
+    └── module-lattice 0.2.3 → ml-kem, ml-dsa ───────────────────────────┘
+                                                    └─> eje-agente
+                                                    └─> guardian-cc
+                                                    └─> eje-red
+                                                    └─> eje-manifiesto
+```
+
+**Las primitivas de tiempo constante que sostienen ML-KEM y ML-DSA.** Para un
+producto cuya propuesta es resiliencia post-cuántica práctica, esto no es una
+advertencia de la compuerta: es la clase de defecto para la que la compuerta
+existe.
+
+**Resolución:** `cargo update -p ctutils` a >=0.4.4, y la suite entera detrás.
+Verificado upstream con BINSEC, que ahora corre en su CI con `cargo checkct`.
+
+> **Pendiente.** En el momento de escribir esto el lock sigue en `ctutils 0.4.2`.
+> El reporte no lo declara resuelto.
+
+## 3. El ruido, parte uno: `wildcards = "deny"`
+
+`error[wildcard]`, diecisiete veces:
+
+```
+eje-agente      7   guardian-cc, motor-pqc, eje-almacen, eje-ipc, boveda, eje-red, eje-captura
+xtask           4
+eje-manifiesto  2   guardian-cc, motor-pqc
+eje-red         2
+guardian-cc     2   eje-almacen, motor-pqc
+```
+
+**Ninguna es una versión flotante.** Son los crates internos del propio workspace.
+Una dependencia `path` no declara requisito de versión, y `cargo-deny` lo cuenta
+como comodín. La regla existe para impedir que `foo = "*"` entre en el árbol; lo
+que atrapaba era la arquitectura del proyecto.
+
+## 4. El ruido, parte dos: la prohibición de `rand_core`
+
+Documentada en RPT-109: prohibía el crate de rasgos en lugar de los generadores
+peligrosos, y bloqueaba trece dependencias criptográficas correctas —dos propias—
+sin atrapar ni un peligro real.
+
+## 5. La conclusión que une las dos
+
+> **Las dos comprobaciones que fallaban lo hacían por el mismo motivo: reglas
+> escritas contra un riesgo real que, al no haberse ejecutado nunca, nunca se
+> calibraron contra el árbol.**
+
+Trece crates legítimos en un caso, diecisiete dependencias internas en el otro,
+cero peligros atrapados entre ambas. El `deny.toml` era aspiracional: describía la
+política que se quería, no la que el árbol podía satisfacer.
+
+Y el precio no fue el falso positivo. Fue que **`advisories`, la única de las
+cuatro que estaba haciendo su trabajo, quedó enterrada**. Las cuatro
+comprobaciones comparten un trabajo y un estado de salida: dos reglas descalibradas
+compran el silencio de las otras dos.
+
+**Esto es lo que RPT-106 describía con otra forma.** Allí una barrera no corría.
+Aquí corría, fallaba, y su fallo no era legible. Una barrera cuyo rojo nadie puede
+atribuir no protege: sólo consume atención hasta que alguien aprende a ignorarla.
+
+## 6. Lo decidido
+
+### 6.1 `publish = false` en los diez crates de biblioteca
+
+Los crates llevan dependencias `path` entre sí, y **crates.io rechaza paquetes con
+dependencias `path`** salvo en `dev-dependencies`. De modo que hoy son
+impublicables tal como están: declararlo **enuncia un hecho, no impone una
+política.**
+
+Y es la condición que `allow-wildcard-paths` necesita, porque sólo exime los
+caminos `path` de crates privados.
+
+`publish = false` va en `[workspace.package]`, y los diez crates lo heredan con
+`publish.workspace = true`, igual que ya hacían con `version`, `license` y el
+resto. `xtask` y `fuzz` ya lo declaraban.
+
+**No toca la frontera open-core de RPT-003 §2.7.** Abierto bajo Apache-2.0 y
+publicado en crates.io son cosas distintas: el cliente institucional audita el
+repositorio, no el registro.
+
+### 6.2 `allow-wildcard-paths = true` en `[bans]`
+
+Exime los caminos `path` de los crates privados. **Las versiones flotantes de
+crates.io siguen prohibidas**, que es lo que la regla quería decir.
+
+Se descartó poner `version = "0.1.0"` junto a cada `path`: elimina el comodín de
+raíz y deja la puerta abierta a publicar, pero obliga a mantener cada subida de
+versión sincronizada en dos sitios — y «dos sitios donde decidir lo mismo» es
+precisamente lo que la plantilla de configuración de este proyecto llama un sitio
+donde ganarle a la firma.
+
+## 7. Lo que los duplicados sí dicen
+
+`multiple-versions = "warn"` reporta quince crates duplicados. **No son quince
+problemas: son uno.**
+
+```
+block-buffer 0.10.4 → digest 0.10.7 → blake2, curve25519-dalek, hmac, sha2
+block-buffer 0.12.1 → digest 0.11.3 → sha3, shake, signature 3.0 → ml-kem, ml-dsa
+```
+
+Es la **transición de generación de RustCrypto, 0.10 → 0.11, a caballo**.
+`motor-pqc` vive en la nueva porque ML-KEM y ML-DSA sólo existen allí;
+`ed25519-dalek`, `hkdf` y `sha2` siguen en la vieja. De ahí salen `block-buffer`,
+`crypto-common`, `digest`, `const-oid`, `der`, `pkcs8`, `spki` y `signature`:
+**ocho de los quince son un único fenómeno.**
+
+Y los tres `rand_core` que RPT-086 §3 documentó como «ya nos costaron una sesión»
+son el mismo fenómeno desde otro ángulo: `0.6.4` cuelga de la generación vieja y
+`0.10.1` de la nueva.
+
+Eso cambia la lectura. No hay quince deudas: hay **una transición de ecosistema a
+medias**, que se cierra sola cuando `ed25519-dalek`, `hkdf` y `sha2` publiquen
+sobre `digest 0.11`. Hasta entonces `warn` es la postura correcta, y endurecerla
+sería pelear contra el calendario de RustCrypto.
+
+Esto **no cierra PA-18** (fuente de aleatoriedad, RPT-005 §7.4), ni el endurecimiento
+que RPT-109 §5 dejó anotado como pendiente.
+
+## 8. Dos cosas medidas de paso
+
+1. **`rust-version` está en dos sitios.** `[workspace.package]` dice
+   `rust-version = "1.85"` y `rust-toolchain.toml` dice `channel = "1.85"`. Hoy
+   coinciden. El día que no coincidan, uno de los dos mandará y el otro mentirá —
+   y RPT-109 §11.2 documenta lo que pasa cuando un fichero de configuración afirma
+   una cobertura que no tiene.
+2. **El toolchain fijado impide compilar la propia compuerta.** `cargo-deny 0.20.2`
+   exige rustc >=1.88; el rustc activo en el repositorio es 1.85.1. Hubo que
+   instalarla con `cargo +stable install`. La disciplina de pre-commit que
+   RPT-003 §9.4 pide es, con el pin actual, imposible de cumplir con la misma
+   versión que corre CI.
+
+## 9. Lo que falta para PA-165
+
+| | Estado |
+|---|---|
+| `bans` — comodines | Arreglado en este commit; sin verificar contra la herramienta |
+| `bans` — `rand_core` | Arreglado en RPT-109 |
+| `advisories` — `ctutils` | **Pendiente**: `cargo update -p ctutils` + suite |
+| `licenses`, `sources` | Ya en verde |
+
+**PA-165 no se cierra con este reporte.** Su criterio sigue siendo una corrida
+entera en verde, y falta la vulnerabilidad de §2.
+
+## 10. Apéndice de método — tres errores propios
+
+1. **Busqué el comodín equivocado.** Comprobé `version = "*"` en los manifiestos,
+   no encontré ninguno, y descarté `wildcards` como causa. Era cierto e
+   irrelevante: el comodín que cuenta `cargo-deny` es la *ausencia* de requisito de
+   versión, que es lo que toda dependencia `path` tiene.
+2. **Crucé la base RustSec sólo en su ventana reciente.** Mi marco era «algo cambió
+   fuera en la última hora», así que miré los doce avisos más nuevos y concluí que
+   ninguno afectaba al árbol. El de `ctutils` es anterior a esa ventana. La premisa
+   inventada de RPT-109 §10 no sólo me hizo buscar la causa equivocada: me hizo
+   buscar en el sitio equivocado.
+3. **Reporté con una herramienta que acababa de ver fallar.** Escribí un analizador
+   de manifiestos para comprobar dos valores por defecto; dijo «ningún duplicado»
+   cuando `sha2 = "0.10"` estaba a la vista en tres ficheros. No capturaba la forma
+   `nombre.workspace = true`. Se rehízo con grep plano.
+
+Los tres comparten forma: **una medición que no mide lo que uno cree, aceptada
+porque su resultado encajaba con la hipótesis de turno.** Es el mismo defecto que
+§5 describe en el `deny.toml`, cometido sobre el diagnóstico en lugar de sobre la
+configuración.

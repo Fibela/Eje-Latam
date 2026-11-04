@@ -69,6 +69,12 @@ license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Una dependencia `path` no declara version, y cargo-deny la cuenta como
+# comodin: los 17 comodines del arbol eran los crates internos del propio
+# workspace, no versiones flotantes. Esto exime los caminos `path` de
+# crates privados, que es lo que los diez crates declaran ya con
+# `publish = false`. Las versiones flotantes de crates.io siguen prohibidas.
+allow-wildcard-paths = true
 highlight = "all"
 
 # Crates prohibidos en la ruta de produccion.

@@ -27,6 +27,13 @@ rust-version = "1.85"
 license = "Apache-2.0"
 repository = "https://github.com/Fibela/Eje-Latam"
 authors = ["PremosCorp"]
+# Estos crates llevan dependencias `path` entre si, y crates.io rechaza
+# paquetes con dependencias `path` salvo en dev-dependencies: hoy son
+# impublicables tal como estan. Declararlo es lo que permite a cargo-deny
+# eximir esos caminos con `allow-wildcard-paths` (RUSTSEC/bans, RPT-110).
+# No toca la frontera Apache-2.0 de RPT-003 2.7: abierto y publicado en
+# crates.io son cosas distintas.
+publish = false
 
 [workspace.dependencies]
 eje-almacen = { path = "crates/eje-almacen" }
