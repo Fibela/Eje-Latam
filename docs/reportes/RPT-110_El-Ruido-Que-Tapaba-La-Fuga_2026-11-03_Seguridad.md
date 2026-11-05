@@ -7,7 +7,7 @@
 | **Fecha** | 2026-11-03 |
 | **Área designada** | Seguridad |
 | **Abre** | — |
-| **Cierra** | — (PA-165 cierra con la corrida entera en verde; falta el bump de `ctutils`) |
+| **Cierra** | **PA-165** — primera corrida entera en verde, leída en CI #8 (§12). Y confirma **PA-166** en CI |
 | **Precedentes** | RPT-109 (la barrera que prohibía lo correcto), RPT-106, RPT-086 §3, RPT-003 §2.7 y §9.4, RPT-005 §7.4 |
 
 ---
@@ -280,3 +280,97 @@ campo `toolchain` es obligatorio y aborta si llega vacío (RPT-109 §11.2).
 Quedan documentados en ambos ficheros con la obligación de coincidir. Es la clase de
 invariante que merece una prueba en `cargo xtask verificar`, y se deja anotado como
 tal sin abrir punto todavía.
+
+---
+
+## 12. PA-165 cerrado — la primera corrida entera en verde
+
+**CI #8, commit `a5d626a`, estado `Success` en 4m 5s.** Los nueve trabajos, leídos
+uno a uno:
+
+| Trabajo | |
+|---|---|
+| Formato | ✅ |
+| Analisis estatico | ✅ |
+| Implementaciones inconclusas | ✅ |
+| Indices derivados, no escritos a mano | ✅ |
+| Secretos expuestos | ✅ |
+| Licencias y vulnerabilidades | ✅ |
+| SBOM | ✅ |
+| Pruebas (ubuntu-latest) | ✅ |
+| Pruebas (windows-latest) | ✅ |
+
+El criterio de PA-165 estaba escrito en su propia fila del tablero —*«el punto se
+deja abierto hasta que la primera ejecución real se observe en verde»*— y **se
+cumplió sin reinterpretarlo**, que fue la tentación recurrente de toda la
+investigación. Se intentó cerrarlo por aproximación tres veces: con ocho de nueve
+en CI #3, con ocho de nueve en CI #4, y con siete de nueve leídos en CI #7 —esa
+última a punto de cantarse como verde completo hasta que se fue a buscar los dos
+trabajos de la matriz que faltaban, y resultaron estar en rojo—.
+
+### 12.1 Y PA-166 confirmado en CI, con dos días de retraso deliberado
+
+El trabajo `Pruebas (windows-latest)` viene pasando **desde CI #3**, luego la
+confirmación a máquina e independiente del arreglo de PA-166 existía desde el
+2-nov. No se anotó hasta ahora por decisión explícita de RUA: **tener un trabajo
+verde dentro de una corrida roja no es haber leído la corrida.** Esa espera de dos
+días es la razón por la que la línea del tablero se puede escribir hoy sin ningún
+matiz.
+
+### 12.2 Lo que el camino hasta aquí dejó medido
+
+| | |
+|---|---|
+| Corridas rojas antes del verde | **cinco** (#3 a #7) |
+| Reglas de `deny.toml` mal especificadas | 2 — `rand_core` (RPT-109) y `wildcards` (§3) |
+| Dependencias legítimas bloqueadas por ellas | 13 + 17 |
+| Peligros reales que atrapaban | **cero** |
+| Vulnerabilidades reales que la compuerta sí encontró | 1 — RUSTSEC-2026-0385 (§2) |
+| Días que ese aviso estuvo reportándose sin poder leerse | ≥ 4 |
+| Errores de método propios, registrados | 3 en §10, 1 en §11, 3 más abajo |
+
+### 12.3 Tres errores más, del tramo final
+
+Van aquí y no en §10 porque ocurrieron después de publicarlo, y porque los tres
+tienen la misma forma que el defecto que este reporte describe en el `deny.toml`:
+**un instrumento que no mide lo que se cree que mide.**
+
+1. **Se empujó `34eeb1e` sin correr la compuerta.** El bump a 1.88 salió porque la
+   verificación y el commit se entregaron en el mismo paso, y cuando `rustup` abortó
+   la cadena con un fallo de su propio self-update, el commit seguía disponible para
+   ejecutarse. **Lo cazó `el_atestado_en_disco_describe_este_arbol`**, que puso los
+   dos `Pruebas` en rojo y nombró el delta exacto: «canal del toolchain -> 1.88». La
+   instrumentación del proyecto funcionó mejor que el proceso que la rodeaba.
+2. **Un filtro diseñado para no dar evidencia del éxito.** `Select-String` sobre
+   `FAILED` imprime nada cuando todo pasa, con lo que «pasó» y «no se ejecutó» se
+   vuelven indistinguibles — y la vez anterior el caso real había sido el segundo.
+3. **`Select-String` es insensible a mayúsculas por defecto**, así que el patrón
+   `FAILED` casaba con el `0 failed` de cada línea `test result: ok`: se contaron 29
+   éxitos como 29 fracasos. Resuelto con `-CaseSensitive`.
+
+La lección es la de §10 con una vuelta más: no basta con exigir una medición antes
+de afirmar. **El instrumento de medida también es código sin probar**, y en una
+sesión larga falla tanto como lo que mide.
+
+### 12.4 Lo que sigue abierto
+
+- **PA-14c** — *«Atestación de conformidad PQC (`CONFORMIDAD.lock`)»*, 🟡 abierto.
+  El atestado ata *qué* se probó, no *que* se probara: componer la huella sin
+  ejecutar nada es posible, y lo declara la propia salida de
+  `cargo xtask conformidad`. Misma forma que los tres errores de §12.3.
+
+  **Dos referencias obsoletas, de paso.** El mensaje de `xtask` dice «Cerrarlo es
+  PA-14» y la fila de PA-121 dice «eso sigue siendo PA-14», pero **`PA-14` está
+  «✅ Partido»** desde el 5-ago-2026 (RPT-021 §1) en `PA-14a`, `PA-14b` —cerrado— y
+  `PA-14c`. El punto vivo es el tercero. Es la familia de PA-160: un identificador
+  citado desde el código apuntando a un padre que ya no existe como punto, y
+  ninguna barrera lo nota porque la de PA-108 sólo comprueba que el identificador
+  **tenga fila**, no que siga siendo el vigente. No se toca aquí.
+- **PA-18** — fuente de aleatoriedad, DRBG conforme al NIST (RPT-005 §7.4). La
+  proliferación de versiones de `rand_core` de §7 le pertenece.
+- **PA-169** — bloqueante, con la rev-2 de RUA en discusión y el Paso 0 pendiente.
+- **Los tres nombres de rama** — `principal`, `Principal` (raíz huérfana) y `Origen`
+  (por defecto en GitHub, retirada por RPT-002 §2.1). Sin consolidar.
+- **El `@v2` de `cargo-deny-action` y el `@master` que el arreglo del toolchain
+  necesitaría** — referencias flotantes en la capa que vigila a todas las demás.
+  Conviene fijarlas a un SHA.
